@@ -1,0 +1,496 @@
+// ═══════════════════════════════════════════════════════════════════════════
+//  TRUE SMC — Smart Money Concepts
+// ═══════════════════════════════════════════════════════════════════════════
+//  Pine Script v6 — paste into the TradingView Pine Editor and click
+//  "Add to chart". No external libraries required.
+//
+//  Detects and draws the four core Smart Money Concepts:
+//
+//   ① MARKET STRUCTURE — swing highs/lows, BOS (Break of Structure) and
+//      CHoCH (Change of Character) lines + labels, light trend background.
+//      BOS  = a break of a swing in the direction of the current trend.
+//      CHoCH = a break AGAINST the current trend (first reversal sign).
+//
+//   ② ORDER BLOCKS — the last opposite-coloured candle before a strong
+//      displacement move that breaks structure and/or leaves an imbalance
+//      (FVG). Boxes extend right, fade when mitigated (first touch) and are
+//      removed when price closes through them (OB failed) or they expire.
+//
+//   ③ FAIR VALUE GAPS — 3-candle imbalances where candle 3's low trades
+//      above candle 1's high (bullish) or candle 3's high trades below
+//      candle 1's low (bearish). Shaded until fully filled, with a colour
+//      shift at the 50% retracement (consequent encroachment).
+//
+//   ④ LIQUIDITY — dashed lines mark resting liquidity above swing highs /
+//      below swing lows. Equal Highs/Lows (EQH/EQL) are highlighted.
+//      A Liquidity Grab (stop hunt) = price wicks through a pool but closes
+//      back inside; swept pools turn purple.
+//
+//  Anti-repaint / performance design:
+//   • All detection runs once per CONFIRMED bar (barstate.isconfirmed), so
+//     signals never flicker or repaint intrabar and the script stays light
+//     on real-time updates.
+//   • Zones live in typed arrays with hard user-defined caps; filled,
+//     failed and expired zones are deleted to free drawing slots.
+//
+//  Alerts: use the dedicated alert conditions in section 8, or choose
+//  "Any alert() function call" for the dynamic per-event messages.
+// ═══════════════════════════════════════════════════════════════════════════
+
+//@version=6
+indicator("True SMC — Smart Money Concepts [OB • FVG • BOS • Liquidity]",
+     shorttitle = "True SMC", overlay = true,
+     max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. USER INPUTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Market Structure ──
+GRP_MS       = "① Market Structure"
+i_swingLen   = input.int(5, "Swing Lookback (bars each side)", minval = 2, maxval = 20, group = GRP_MS,
+     tooltip = "Bars required on each side of a pivot to confirm a swing high/low. Higher = fewer but stronger signals.")
+i_breakMode  = input.string("Close", "Structure Break Confirmed By", options = ["Close", "Wick"], group = GRP_MS,
+     tooltip = "Close: a break only counts when the candle closes beyond the swing (recommended). Wick: any touch counts — note wick-only breaks overlap with liquidity grabs.")
+i_showStruct = input.bool(true, "Show BOS / CHoCH", group = GRP_MS)
+i_showSwings = input.bool(true, "Show Swing Markers", group = GRP_MS)
+i_showTrend  = input.bool(true, "Trend Background", group = GRP_MS)
+
+// ── Order Blocks ──
+GRP_OB       = "② Order Blocks"
+i_showOB     = input.bool(true, "Show Order Blocks", group = GRP_OB)
+i_obMode     = input.string("Structure + FVG", "OB Qualification", options = ["Structure + FVG", "FVG Only", "Structure Only"], group = GRP_OB,
+     tooltip = "What the displacement move must achieve for its origin candle to qualify as a TRUE order block: break structure, leave a Fair Value Gap, or either.")
+i_obMult     = input.float(1.5, "Displacement Strength (x avg body)", minval = 0.5, step = 0.1, group = GRP_OB,
+     tooltip = "The displacement candle body must be at least this multiple of the average body — filters out weak, non-institutional moves.")
+i_obAvgLen   = input.int(20, "Average Body Lookback", minval = 5, group = GRP_OB)
+i_obLookback = input.int(8, "Origin Search Lookback", minval = 1, maxval = 30, group = GRP_OB,
+     tooltip = "How many bars back to search for the last opposite-coloured candle, which becomes the order block zone.")
+i_obMaxAtr   = input.float(4.0, "Max OB Size (x ATR, 0 = off)", minval = 0.0, step = 0.5, group = GRP_OB,
+     tooltip = "Ignores oversized zones unlikely to act as precise points of interest. 0 disables the filter.")
+i_obMaxBars  = input.int(250, "Max OB Lifetime (bars)", minval = 20, group = GRP_OB)
+i_maxOB      = input.int(10, "Max Active OBs", minval = 1, maxval = 40, group = GRP_OB)
+
+// ── Fair Value Gaps ──
+GRP_FVG      = "③ Fair Value Gaps"
+i_showFVG    = input.bool(true, "Show Fair Value Gaps", group = GRP_FVG)
+i_fvgMinAtr  = input.float(0.0, "Min Gap Size (x ATR)", minval = 0.0, step = 0.05, group = GRP_FVG,
+     tooltip = "Filters out tiny gaps. 0 = show every gap.")
+i_fvgMaxBars = input.int(150, "Max FVG Lifetime (bars)", minval = 10, group = GRP_FVG)
+i_maxFVG     = input.int(12, "Max Active FVGs", minval = 1, maxval = 40, group = GRP_FVG)
+
+// ── Liquidity ──
+GRP_LIQ      = "④ Liquidity"
+i_showLiq    = input.bool(true, "Show Liquidity Pools / Sweeps", group = GRP_LIQ)
+i_eqTol      = input.float(0.10, "Equal H/L Tolerance (x ATR)", minval = 0.0, step = 0.05, group = GRP_LIQ,
+     tooltip = "Two swings within this distance are treated as Equal Highs/Lows — a high-probability liquidity pool.")
+i_maxPools   = input.int(12, "Max Pools per Side", minval = 1, maxval = 40, group = GRP_LIQ)
+
+// ── Alerts & Display ──
+GRP_UI       = "⑤ Alerts & Display"
+i_alerts     = input.bool(true, "Enable alert() Messages", group = GRP_UI,
+     tooltip = "Fires dynamic alerts (use the 'Any alert() function call' condition). The dedicated alert conditions in section 8 work regardless of this toggle.")
+i_showTable  = input.bool(true, "Show Status Table", group = GRP_UI)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2. COLORS — edit here to restyle the indicator
+// ─────────────────────────────────────────────────────────────────────────────
+C_BULL  = #089981   // bullish zones & trend
+C_BEAR  = #f23645   // bearish zones & trend
+C_BOS   = #2962ff   // Break of Structure
+C_CHOCH = #ff6d00   // Change of Character
+C_LIQ   = #b41ec8   // swept liquidity
+C_EQ    = #f7a600   // Equal Highs / Equal Lows
+C_SWING = #787b86   // swings & resting liquidity lines
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. DATA TYPES & PERSISTENT STATE
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A priced zone drawn as a box — shared by Order Blocks and FVGs
+type Zone
+    box   id        // the box drawn on the chart
+    float top       // upper price bound
+    float bottom    // lower price bound
+    int   dir       // +1 bullish zone, -1 bearish zone
+    bool  touched   // tapped / mitigated / 50% retraced
+    int   created   // bar_index at creation (age control)
+
+// A liquidity level resting above swing highs or below swing lows
+type LiqPool
+    float price     // the liquidity level
+    int   leftBar   // bar of the swing that created the pool
+    line  id        // dashed line marking the pool
+    int   dir       // +1 high-side pool (buy-side liquidity), -1 low-side
+    bool  equal     // part of Equal Highs / Equal Lows
+
+// ── Market structure state (persisted across bars)
+var float swH    = na    // last unbroken confirmed swing high
+var int   swHBar = na
+var float swL    = na    // last unbroken confirmed swing low
+var int   swLBar = na
+var int   trend  = 0     // +1 bullish, -1 bearish, 0 undetermined
+
+// ── Object collections (hard-capped for performance)
+var array<Zone>    obZones  = array.new<Zone>()     // active order blocks
+var array<Zone>    fvgZones = array.new<Zone>()     // active fair value gaps
+var array<LiqPool> hiPools  = array.new<LiqPool>()  // liquidity above highs
+var array<LiqPool> loPools  = array.new<LiqPool>()  // liquidity below lows
+
+// ── De-duplication: one origin candle must not spawn repeated OBs
+var int lastBullOB = na
+var int lastBearOB = na
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. CORE SERIES — computed on every bar so ta.* state stays consistent
+// ─────────────────────────────────────────────────────────────────────────────
+float atrNow  = ta.atr(14)                       // volatility yardstick
+float body    = math.abs(close - open)           // current candle body size
+float avgBody = ta.sma(body, i_obAvgLen)         // average body size
+
+// Swing pivots — reported i_swingLen bars AFTER they form (never repaint)
+float ph = ta.pivothigh(high, i_swingLen, i_swingLen)
+float pl = ta.pivotlow(low,  i_swingLen, i_swingLen)
+
+// One-bar event flags — drive alertcondition() and dynamic alert() calls
+bool evBosUp   = false
+bool evBosDn   = false
+bool evChochUp = false
+bool evChochDn = false
+bool evFvgBull = false
+bool evFvgBear = false
+bool evObBull  = false
+bool evObBear  = false
+bool evObMit   = false
+bool evSweepHi = false
+bool evSweepLo = false
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. HELPER FUNCTIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Fires a dynamic alert (only when the user has alerts enabled)
+f_alert(string msg) =>
+    if i_alerts
+        alert(msg, alert.freq_once_per_bar_close)
+
+// Keeps a zone array under its cap by deleting the oldest box
+f_capZones(array<Zone> arr, int maxCount) =>
+    if array.size(arr) > maxCount
+        Zone old = array.shift(arr)
+        box.delete(old.id)
+
+// Keeps a pool array under its cap by deleting the oldest line
+f_capPools(array<LiqPool> arr, int maxCount) =>
+    if array.size(arr) > maxCount
+        LiqPool old = array.shift(arr)
+        line.delete(old.id)
+
+// Finds the most recent opposite-coloured candle within the lookback window.
+// dir > 0 → look for the last BEARISH candle (origin of a bullish OB)
+// dir < 0 → look for the last BULLISH candle (origin of a bearish OB)
+// Returns the offset in bars back, or na when none is found.
+f_findOrigin(int dir) =>
+    int res = na
+    for j = 1 to i_obLookback
+        if na(res)
+            bool valid  = not na(close[j])
+            bool isBear = valid and close[j] < open[j]
+            bool isBull = valid and close[j] > open[j]
+            if (dir > 0 and isBear) or (dir < 0 and isBull)
+                res := j
+    res
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. DETECTION ENGINE — runs once per confirmed bar (anti-repaint)
+// ─────────────────────────────────────────────────────────────────────────────
+if barstate.isconfirmed
+
+    // ════ 6.1 SWING CONFIRMATION + LIQUIDITY POOLS ════
+    // ta.pivothigh/low report a pivot i_swingLen bars after it formed.
+    int pivBar = bar_index - i_swingLen
+
+    if not na(ph)
+        swH    := ph
+        swHBar := pivBar
+        if i_showLiq
+            // Register a buy-side liquidity pool above this swing high.
+            // If it lines up with an existing pool we have Equal Highs.
+            bool isEqual = false
+            if array.size(hiPools) > 0
+                for i = 0 to array.size(hiPools) - 1
+                    LiqPool p = array.get(hiPools, i)
+                    if math.abs(p.price - ph) <= i_eqTol * nz(atrNow)
+                        isEqual := true
+                        p.equal := true
+                        line.set_x2(p.id, pivBar)      // extend pool to new pivot
+                        label.new(pivBar, ph, "EQH", color = C_EQ, textcolor = color.white, style = label.style_label_down, size = size.tiny)
+                        break
+            if not isEqual
+                line l = line.new(pivBar, ph, pivBar + 1, ph, xloc = xloc.bar_index, extend = extend.right, color = color.new(C_SWING, 30), style = line.style_dashed, width = 1)
+                array.push(hiPools, LiqPool.new(ph, pivBar, l, 1, false))
+                f_capPools(hiPools, i_maxPools)
+
+    if not na(pl)
+        swL    := pl
+        swLBar := pivBar
+        if i_showLiq
+            // Sell-side liquidity pool below the swing low / Equal Lows.
+            bool isEqual = false
+            if array.size(loPools) > 0
+                for i = 0 to array.size(loPools) - 1
+                    LiqPool p = array.get(loPools, i)
+                    if math.abs(p.price - pl) <= i_eqTol * nz(atrNow)
+                        isEqual := true
+                        p.equal := true
+                        line.set_x2(p.id, pivBar)
+                        label.new(pivBar, pl, "EQL", color = C_EQ, textcolor = color.white, style = label.style_label_up, size = size.tiny)
+                        break
+            if not isEqual
+                line l = line.new(pivBar, pl, pivBar + 1, pl, xloc = xloc.bar_index, extend = extend.right, color = color.new(C_SWING, 30), style = line.style_dashed, width = 1)
+                array.push(loPools, LiqPool.new(pl, pivBar, l, -1, false))
+                f_capPools(loPools, i_maxPools)
+
+    // ════ 6.2 MARKET STRUCTURE BREAKS ════
+    // BOS   = break WITH the current trend (continuation)
+    // CHoCH = break AGAINST the current trend (first reversal sign)
+    bool brokeUp = not na(swH) and (i_breakMode == "Close" ? close > swH : high > swH)
+    bool brokeDn = not na(swL) and (i_breakMode == "Close" ? close < swL : low < swL)
+
+    if brokeUp
+        bool  isChoch = trend == -1
+        float lvl     = swH
+        int   fromBar = swHBar
+        trend := 1
+        swH   := na                                    // swing consumed
+        if i_showStruct
+            color c = isChoch ? C_CHOCH : C_BOS
+            line.new(fromBar, lvl, bar_index, lvl, xloc = xloc.bar_index, color = c, style = line.style_solid, width = 1)
+            label.new(math.round(math.avg(fromBar, bar_index)), lvl, isChoch ? "CHoCH ↑" : "BOS ↑", color = c, textcolor = color.white, style = label.style_label_down, size = size.small)
+        if isChoch
+            evChochUp := true
+            f_alert("True SMC · CHoCH ↑ (bullish change of character) on " + syminfo.tickerid)
+        else
+            evBosUp := true
+            f_alert("True SMC · BOS ↑ (bullish break of structure) on " + syminfo.tickerid)
+
+    if brokeDn
+        bool  isChoch = trend == 1
+        float lvl     = swL
+        int   fromBar = swLBar
+        trend := -1
+        swL   := na
+        if i_showStruct
+            color c = isChoch ? C_CHOCH : C_BOS
+            line.new(fromBar, lvl, bar_index, lvl, xloc = xloc.bar_index, color = c, style = line.style_solid, width = 1)
+            label.new(math.round(math.avg(fromBar, bar_index)), lvl, isChoch ? "CHoCH ↓" : "BOS ↓", color = c, textcolor = color.white, style = label.style_label_up, size = size.small)
+        if isChoch
+            evChochDn := true
+            f_alert("True SMC · CHoCH ↓ (bearish change of character) on " + syminfo.tickerid)
+        else
+            evBosDn := true
+            f_alert("True SMC · BOS ↓ (bearish break of structure) on " + syminfo.tickerid)
+
+    // ════ 6.3 FAIR VALUE GAPS ════
+    // Bullish FVG: candle-3 low trades ABOVE candle-1 high → gap in between.
+    // Bearish FVG: candle-3 high trades BELOW candle-1 low.
+    // Detected on the third candle; the box starts at the displacement bar.
+    bool gapBull = false
+    bool gapBear = false
+    if bar_index >= 2
+        float gapUpSz = low - high[2]
+        float gapDnSz = low[2] - high
+        gapBull := gapUpSz > 0 and gapUpSz >= i_fvgMinAtr * nz(atrNow)
+        gapBear := gapDnSz > 0 and gapDnSz >= i_fvgMinAtr * nz(atrNow)
+
+    if i_showFVG and gapBull
+        box b = box.new(bar_index - 1, low, bar_index, high[2], border_color = color.new(C_BULL, 55), bgcolor = color.new(C_BULL, 82), extend = extend.right, xloc = xloc.bar_index)
+        array.push(fvgZones, Zone.new(b, low, high[2], 1, false, bar_index))
+        f_capZones(fvgZones, i_maxFVG)
+        evFvgBull := true
+        f_alert("True SMC · Bullish FVG formed on " + syminfo.tickerid)
+
+    if i_showFVG and gapBear
+        box b = box.new(bar_index - 1, low[2], bar_index, high, border_color = color.new(C_BEAR, 55), bgcolor = color.new(C_BEAR, 82), extend = extend.right, xloc = xloc.bar_index)
+        array.push(fvgZones, Zone.new(b, low[2], high, -1, false, bar_index))
+        f_capZones(fvgZones, i_maxFVG)
+        evFvgBear := true
+        f_alert("True SMC · Bearish FVG formed on " + syminfo.tickerid)
+
+    // ════ 6.4 ORDER BLOCKS ════
+    // A TRUE OB = last opposite-coloured candle before a strong displacement
+    // move that breaks structure and/or leaves an imbalance (FVG).
+    bool strongUp = close > open and body >= i_obMult * nz(avgBody, body)
+    bool strongDn = close < open and body >= i_obMult * nz(avgBody, body)
+
+    bool qualUp = i_obMode == "FVG Only" ? gapBull : i_obMode == "Structure Only" ? brokeUp : (gapBull or brokeUp)
+    bool qualDn = i_obMode == "FVG Only" ? gapBear : i_obMode == "Structure Only" ? brokeDn : (gapBear or brokeDn)
+
+    if i_showOB and strongUp and qualUp
+        int j = f_findOrigin(1)
+        if not na(j)
+            int   originBar = bar_index - j
+            float obTop     = high[j]
+            float obBot     = low[j]
+            bool  sizeOk    = i_obMaxAtr <= 0 or obTop - obBot <= i_obMaxAtr * nz(atrNow, obTop - obBot)
+            if sizeOk and (na(lastBullOB) or originBar != lastBullOB)
+                box b = box.new(originBar, obTop, bar_index, obBot, border_color = color.new(C_BULL, 35), bgcolor = color.new(C_BULL, 76), border_width = 1, extend = extend.right, xloc = xloc.bar_index)
+                array.push(obZones, Zone.new(b, obTop, obBot, 1, false, bar_index))
+                f_capZones(obZones, i_maxOB)
+                lastBullOB := originBar
+                evObBull := true
+                f_alert("True SMC · Bullish Order Block " + str.tostring(obBot, format.mintick) + " – " + str.tostring(obTop, format.mintick) + " on " + syminfo.tickerid)
+
+    if i_showOB and strongDn and qualDn
+        int j = f_findOrigin(-1)
+        if not na(j)
+            int   originBar = bar_index - j
+            float obTop     = high[j]
+            float obBot     = low[j]
+            bool  sizeOk    = i_obMaxAtr <= 0 or obTop - obBot <= i_obMaxAtr * nz(atrNow, obTop - obBot)
+            if sizeOk and (na(lastBearOB) or originBar != lastBearOB)
+                box b = box.new(originBar, obTop, bar_index, obBot, border_color = color.new(C_BEAR, 35), bgcolor = color.new(C_BEAR, 76), border_width = 1, extend = extend.right, xloc = xloc.bar_index)
+                array.push(obZones, Zone.new(b, obTop, obBot, -1, false, bar_index))
+                f_capZones(obZones, i_maxOB)
+                lastBearOB := originBar
+                evObBear := true
+                f_alert("True SMC · Bearish Order Block " + str.tostring(obBot, format.mintick) + " – " + str.tostring(obTop, format.mintick) + " on " + syminfo.tickerid)
+
+    // ════ 6.5 LIQUIDITY GRABS (STOP HUNTS) ════
+    // A sweep = price wicks through a liquidity pool but closes back inside.
+    // Sweep ABOVE highs grabs buy-side liquidity → typically bearish next.
+    // Sweep BELOW lows  grabs sell-side liquidity → typically bullish next.
+    if i_showLiq
+        if array.size(hiPools) > 0
+            for i = array.size(hiPools) - 1 to 0
+                LiqPool p = array.get(hiPools, i)
+                if high >= p.price and close < p.price
+                    // Stop hunt above the highs — pool swept, keep as evidence
+                    line.set_color(p.id, C_LIQ)
+                    line.set_extend(p.id, extend.none)
+                    line.set_x2(p.id, bar_index)
+                    label.new(bar_index, high, "Liquidity Grab", color = C_LIQ, textcolor = color.white, style = label.style_label_down, size = size.small)
+                    evSweepHi := true
+                    f_alert("True SMC · Buy-side liquidity swept above " + str.tostring(p.price, format.mintick) + " on " + syminfo.tickerid)
+                    array.remove(hiPools, i)
+                else if close > p.price
+                    // Clean breakout through the pool (real BOS) — retire it
+                    line.delete(p.id)
+                    array.remove(hiPools, i)
+
+        if array.size(loPools) > 0
+            for i = array.size(loPools) - 1 to 0
+                LiqPool p = array.get(loPools, i)
+                if low <= p.price and close > p.price
+                    line.set_color(p.id, C_LIQ)
+                    line.set_extend(p.id, extend.none)
+                    line.set_x2(p.id, bar_index)
+                    label.new(bar_index, low, "Liquidity Grab", color = C_LIQ, textcolor = color.white, style = label.style_label_up, size = size.small)
+                    evSweepLo := true
+                    f_alert("True SMC · Sell-side liquidity swept below " + str.tostring(p.price, format.mintick) + " on " + syminfo.tickerid)
+                    array.remove(loPools, i)
+                else if close < p.price
+                    line.delete(p.id)
+                    array.remove(loPools, i)
+
+    // ════ 6.6 ZONE MANAGEMENT (mitigation / fill / expiry) ════
+
+    // ── Order Blocks: fade on first touch (mitigation), delete when a
+    //    candle closes through the zone (OB failed) or when expired.
+    if array.size(obZones) > 0
+        for i = array.size(obZones) - 1 to 0
+            Zone z    = array.get(obZones, i)
+            bool drop = false
+            if z.dir > 0
+                if not z.touched and low <= z.top
+                    z.touched := true
+                    box.set_bgcolor(z.id, color.new(C_BULL, 90))
+                    box.set_border_color(z.id, color.new(C_BULL, 65))
+                    evObMit := true
+                    f_alert("True SMC · Bullish Order Block mitigated on " + syminfo.tickerid)
+                if z.touched and close < z.bottom
+                    box.delete(z.id)
+                    drop := true
+            else
+                if not z.touched and high >= z.bottom
+                    z.touched := true
+                    box.set_bgcolor(z.id, color.new(C_BEAR, 90))
+                    box.set_border_color(z.id, color.new(C_BEAR, 65))
+                    evObMit := true
+                    f_alert("True SMC · Bearish Order Block mitigated on " + syminfo.tickerid)
+                if z.touched and close > z.top
+                    box.delete(z.id)
+                    drop := true
+            if not drop and bar_index - z.created > i_obMaxBars
+                box.delete(z.id)
+                drop := true
+            if drop
+                array.remove(obZones, i)
+
+    // ── Fair Value Gaps: shade at 50% retracement (consequent encroachment),
+    //    delete once fully filled or expired.
+    if array.size(fvgZones) > 0
+        for i = array.size(fvgZones) - 1 to 0
+            Zone  z    = array.get(fvgZones, i)
+            bool  drop = false
+            float mid  = math.avg(z.top, z.bottom)
+            if z.dir > 0
+                if not z.touched and low <= mid
+                    z.touched := true
+                    box.set_bgcolor(z.id, color.new(C_BULL, 90))
+                if low <= z.bottom
+                    box.delete(z.id)
+                    drop := true
+            else
+                if not z.touched and high >= mid
+                    z.touched := true
+                    box.set_bgcolor(z.id, color.new(C_BEAR, 90))
+                if high >= z.top
+                    box.delete(z.id)
+                    drop := true
+            if not drop and bar_index - z.created > i_fvgMaxBars
+                box.delete(z.id)
+                drop := true
+            if drop
+                array.remove(fvgZones, i)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. VISUALS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Swing markers — offset puts them on the actual pivot bar, not the
+// confirmation bar.
+plotshape(i_showSwings and not na(ph), "Swing High", style = shape.triangledown, location = location.abovebar, color = C_SWING, size = size.tiny, offset = -i_swingLen)
+plotshape(i_showSwings and not na(pl), "Swing Low",  style = shape.triangleup,   location = location.belowbar, color = C_SWING, size = size.tiny, offset = -i_swingLen)
+
+// Light background tint following the current market-structure trend
+bgcolor(i_showTrend ? (trend > 0 ? color.new(C_BULL, 94) : trend < 0 ? color.new(C_BEAR, 94) : na) : na, title = "Trend Background")
+
+// Status table (top-right)
+var table smcTable = table.new(position.top_right, 2, 4, bgcolor = color.new(#131722, 20), frame_width = 1, frame_color = color.new(color.gray, 60))
+if barstate.islast and i_showTable
+    string tTxt = trend > 0 ? "BULLISH" : trend < 0 ? "BEARISH" : "NEUTRAL"
+    color  tCol = trend > 0 ? C_BULL : trend < 0 ? C_BEAR : color.gray
+    table.cell(smcTable, 0, 0, "TRUE SMC",        text_color = color.white,  text_size = size.small)
+    table.cell(smcTable, 1, 0, tTxt,              text_color = tCol,         text_size = size.small)
+    table.cell(smcTable, 0, 1, "Order Blocks",    text_color = color.silver, text_size = size.small)
+    table.cell(smcTable, 1, 1, str.tostring(array.size(obZones)), text_color = color.white, text_size = size.small)
+    table.cell(smcTable, 0, 2, "Fair Value Gaps", text_color = color.silver, text_size = size.small)
+    table.cell(smcTable, 1, 2, str.tostring(array.size(fvgZones)), text_color = color.white, text_size = size.small)
+    table.cell(smcTable, 0, 3, "Liquidity Pools", text_color = color.silver, text_size = size.small)
+    table.cell(smcTable, 1, 3, str.tostring(array.size(hiPools) + array.size(loPools)), text_color = color.white, text_size = size.small)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8. ALERT CONDITIONS — select these in TradingView's alert dialog
+// ─────────────────────────────────────────────────────────────────────────────
+alertcondition(evBosUp,   title = "BOS ↑ — Bullish Break of Structure",    message = "True SMC: Bullish BOS on {{ticker}} ({{interval}})")
+alertcondition(evBosDn,   title = "BOS ↓ — Bearish Break of Structure",    message = "True SMC: Bearish BOS on {{ticker}} ({{interval}})")
+alertcondition(evChochUp, title = "CHoCH ↑ — Bullish Change of Character", message = "True SMC: Bullish CHoCH on {{ticker}} ({{interval}})")
+alertcondition(evChochDn, title = "CHoCH ↓ — Bearish Change of Character", message = "True SMC: Bearish CHoCH on {{ticker}} ({{interval}})")
+alertcondition(evObBull,  title = "Bullish Order Block formed",            message = "True SMC: Bullish Order Block formed on {{ticker}} ({{interval}})")
+alertcondition(evObBear,  title = "Bearish Order Block formed",            message = "True SMC: Bearish Order Block formed on {{ticker}} ({{interval}})")
+alertcondition(evObMit,   title = "Order Block mitigated",                 message = "True SMC: Order Block mitigated on {{ticker}} ({{interval}})")
+alertcondition(evFvgBull, title = "Bullish FVG formed",                    message = "True SMC: Bullish Fair Value Gap on {{ticker}} ({{interval}})")
+alertcondition(evFvgBear, title = "Bearish FVG formed",                    message = "True SMC: Bearish Fair Value Gap on {{ticker}} ({{interval}})")
+alertcondition(evSweepHi, title = "Liquidity Grab above highs (bearish)",  message = "True SMC: Buy-side liquidity swept on {{ticker}} ({{interval}})")
+alertcondition(evSweepLo, title = "Liquidity Grab below lows (bullish)",   message = "True SMC: Sell-side liquidity swept on {{ticker}} ({{interval}})")
