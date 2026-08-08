@@ -1,14 +1,14 @@
 // ═══════════════════════════════════════════════════════════════════════════
-//  TRUE SMC — Smart Money Concepts
+//  TRUE SMC — Smart Money Concepts + A+ Confluence Engine
 // ═══════════════════════════════════════════════════════════════════════════
 //  Pine Script v6 — paste into the TradingView Pine Editor and click
 //  "Add to chart". No external libraries required.
 //
-//  Detects and draws the four core Smart Money Concepts:
+//  Detects and draws the core Smart Money Concepts:
 //
 //   ① MARKET STRUCTURE — swing highs/lows, BOS (Break of Structure) and
 //      CHoCH (Change of Character) lines + labels, light trend background.
-//      BOS  = a break of a swing in the direction of the current trend.
+//      BOS   = a break of a swing in the direction of the current trend.
 //      CHoCH = a break AGAINST the current trend (first reversal sign).
 //
 //   ② ORDER BLOCKS — the last opposite-coloured candle before a strong
@@ -26,6 +26,17 @@
 //      A Liquidity Grab (stop hunt) = price wicks through a pool but closes
 //      back inside; swept pools turn purple.
 //
+//   ⑤ A+ CONFLUENCE ENGINE — every order block is scored out of 6:
+//        1. the displacement left an FVG
+//        2. the displacement broke structure (BOS/CHoCH)
+//        3. a liquidity sweep happened shortly before the OB formed
+//        4. the zone sits in discount (bullish) / premium (bearish)
+//        5. the zone overlaps an active FVG ("unicorn" setup)
+//        6. the zone aligns with the higher-timeframe trend (EMA 21/50)
+//      Zones scoring >= the A+ threshold get a GOLD "A+ OB" badge with
+//      stars plus optional Entry / SL / TP1 guide lines. A Premium/Discount
+//      dealing-range overlay and London/NY killzone tint complete the map.
+//
 //  Anti-repaint / performance design:
 //   • All detection runs once per CONFIRMED bar (barstate.isconfirmed), so
 //     signals never flicker or repaint intrabar and the script stays light
@@ -38,7 +49,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 //@version=6
-indicator("True SMC — Smart Money Concepts [OB • FVG • BOS • Liquidity]",
+indicator("True SMC — Smart Money Concepts [A+ Confluence]",
      shorttitle = "True SMC", overlay = true,
      max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
 
@@ -86,8 +97,29 @@ i_eqTol      = input.float(0.10, "Equal H/L Tolerance (x ATR)", minval = 0.0, st
      tooltip = "Two swings within this distance are treated as Equal Highs/Lows — a high-probability liquidity pool.")
 i_maxPools   = input.int(12, "Max Pools per Side", minval = 1, maxval = 40, group = GRP_LIQ)
 
+// ── A+ Confluence Engine ──
+GRP_CON      = "⑤ A+ Confluence"
+i_aplusMin   = input.int(5, "A+ Min Confluence Score (of 6)", minval = 2, maxval = 6, group = GRP_CON,
+     tooltip = "An order block needs at least this many confluence points to earn the gold A+ badge: 1) FVG displacement, 2) structure break, 3) prior liquidity sweep, 4) discount/premium location, 5) FVG overlap (unicorn), 6) HTF trend alignment.")
+i_sweepWindow = input.int(15, "Sweep Lookback (bars)", minval = 3, maxval = 100, group = GRP_CON,
+     tooltip = "How recent a liquidity grab must be (in bars) to count toward the confluence score.")
+i_useHTF     = input.bool(true, "Use HTF Trend Filter", group = GRP_CON)
+i_htfTF      = input.timeframe("240", "HTF Timeframe", group = GRP_CON,
+     tooltip = "Pick a timeframe ABOVE the chart TF. EMA 21 vs EMA 50 on that TF defines the higher-timeframe trend.")
+i_showPD     = input.bool(true, "Show Premium/Discount Zones", group = GRP_CON,
+     tooltip = "Shades the current dealing range: upper half = premium (look for sells), lower half = discount (look for buys). The dotted line is equilibrium (50%).")
+i_showGuide  = input.bool(true, "Show Entry / SL / TP Guides on A+ Zones", group = GRP_CON,
+     tooltip = "Draws suggested Entry (zone edge), Stop Loss (beyond the swept liquidity) and TP1 (nearest opposing liquidity, or 1:2) lines on gold A+ zones.")
+
+// ── Killzones ──
+GRP_SES      = "⑥ Killzones"
+i_showKZ     = input.bool(true, "Show Killzone Sessions", group = GRP_SES,
+     tooltip = "Light background tint during high-volume sessions where stop hunts and displacement usually happen. Sessions use the chart symbol's exchange timezone.")
+i_kzLDN      = input.session("0800-1100", "London Killzone", group = GRP_SES)
+i_kzNY       = input.session("1330-1630", "New York Killzone", group = GRP_SES)
+
 // ── Alerts & Display ──
-GRP_UI       = "⑤ Alerts & Display"
+GRP_UI       = "⑦ Alerts & Display"
 i_alerts     = input.bool(true, "Enable alert() Messages", group = GRP_UI,
      tooltip = "Fires dynamic alerts (use the 'Any alert() function call' condition). The dedicated alert conditions in section 8 work regardless of this toggle.")
 i_showTable  = input.bool(true, "Show Status Table", group = GRP_UI)
@@ -102,6 +134,7 @@ C_CHOCH = #ff6d00   // Change of Character
 C_LIQ   = #b41ec8   // swept liquidity
 C_EQ    = #f7a600   // Equal Highs / Equal Lows
 C_SWING = #787b86   // swings & resting liquidity lines
+C_GOLD  = #ffd700   // A+ confluence badge
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. DATA TYPES & PERSISTENT STATE
@@ -115,6 +148,9 @@ type Zone
     int   dir       // +1 bullish zone, -1 bearish zone
     bool  touched   // tapped / mitigated / 50% retraced
     int   created   // bar_index at creation (age control)
+    line  entryL    // A+ guide: entry line   (na when absent)
+    line  slL       // A+ guide: stop line    (na when absent)
+    line  tpL       // A+ guide: target line  (na when absent)
 
 // A liquidity level resting above swing highs or below swing lows
 type LiqPool
@@ -131,6 +167,21 @@ var float swL    = na    // last unbroken confirmed swing low
 var int   swLBar = na
 var int   trend  = 0     // +1 bullish, -1 bearish, 0 undetermined
 
+// ── Premium/Discount dealing-range state
+var float rangeHigh    = na
+var int   rangeHighBar = na
+var float rangeLow     = na
+var int   rangeLowBar  = na
+var box   pdUpBox      = na   // premium half shading
+var box   pdDnBox      = na   // discount half shading
+var line  eqLine       = na   // equilibrium (50%) line
+
+// ── Last liquidity sweeps (feed the A+ confluence score and SL placement)
+var float lastSweepLoPrice = na   // sell-side level swept below the lows
+var int   lastSweepLoBar   = na
+var float lastSweepHiPrice = na   // buy-side level swept above the highs
+var int   lastSweepHiBar   = na
+
 // ── Object collections (hard-capped for performance)
 var array<Zone>    obZones  = array.new<Zone>()     // active order blocks
 var array<Zone>    fvgZones = array.new<Zone>()     // active fair value gaps
@@ -142,7 +193,7 @@ var int lastBullOB = na
 var int lastBearOB = na
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. CORE SERIES — computed on every bar so ta.* state stays consistent
+// 4. CORE SERIES — computed on every bar so ta.* / request.* stay consistent
 // ─────────────────────────────────────────────────────────────────────────────
 float atrNow  = ta.atr(14)                       // volatility yardstick
 float body    = math.abs(close - open)           // current candle body size
@@ -151,6 +202,11 @@ float avgBody = ta.sma(body, i_obAvgLen)         // average body size
 // Swing pivots — reported i_swingLen bars AFTER they form (never repaint)
 float ph = ta.pivothigh(high, i_swingLen, i_swingLen)
 float pl = ta.pivotlow(low,  i_swingLen, i_swingLen)
+
+// Higher-timeframe trend: EMA 21 vs EMA 50 on the selected HTF
+[htfFast, htfSlow] = request.security(syminfo.tickerid, i_htfTF, [ta.ema(close, 21), ta.ema(close, 50)])
+bool htfBull = htfFast > htfSlow
+bool htfBear = htfFast < htfSlow
 
 // One-bar event flags — drive alertcondition() and dynamic alert() calls
 bool evBosUp   = false
@@ -164,6 +220,7 @@ bool evObBear  = false
 bool evObMit   = false
 bool evSweepHi = false
 bool evSweepLo = false
+bool evAplus   = false
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. HELPER FUNCTIONS
@@ -174,11 +231,19 @@ f_alert(string msg) =>
     if i_alerts
         alert(msg, alert.freq_once_per_bar_close)
 
-// Keeps a zone array under its cap by deleting the oldest box
+// Deletes the A+ guide lines attached to a zone (if any)
+f_delGuide(Zone z) =>
+    if not na(z.entryL)
+        line.delete(z.entryL)
+        line.delete(z.slL)
+        line.delete(z.tpL)
+
+// Keeps a zone array under its cap by deleting the oldest box (+ guides)
 f_capZones(array<Zone> arr, int maxCount) =>
     if array.size(arr) > maxCount
         Zone old = array.shift(arr)
         box.delete(old.id)
+        f_delGuide(old)
 
 // Keeps a pool array under its cap by deleting the oldest line
 f_capPools(array<LiqPool> arr, int maxCount) =>
@@ -201,18 +266,50 @@ f_findOrigin(int dir) =>
                 res := j
     res
 
+// A+ confluence score: each true condition adds 1 point (max 6)
+f_score(bool hasFVG, bool hasBOS, bool hasSweep, bool goodPD, bool unicorn, bool htfOk) =>
+    int s = 0
+    s += hasFVG   ? 1 : 0
+    s += hasBOS   ? 1 : 0
+    s += hasSweep ? 1 : 0
+    s += goodPD   ? 1 : 0
+    s += unicorn  ? 1 : 0
+    s += htfOk    ? 1 : 0
+    s
+
+// Star rating string for the A+ badge label
+f_stars(int s) =>
+    string r = ""
+    for k = 1 to 6
+        r := r + (k <= s ? "★" : "☆")
+    r
+
+// True when the zone intersects an ACTIVE fair value gap in the same direction
+// (the coveted OB + FVG "unicorn" overlap)
+f_overlapsFVG(float top, float bottom, int dir) =>
+    bool found = false
+    if array.size(fvgZones) > 0
+        for i = 0 to array.size(fvgZones) - 1
+            Zone z = array.get(fvgZones, i)
+            if z.dir == dir and top >= z.bottom and bottom <= z.top
+                found := true
+                break
+    found
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 6. DETECTION ENGINE — runs once per confirmed bar (anti-repaint)
 // ─────────────────────────────────────────────────────────────────────────────
 if barstate.isconfirmed
 
-    // ════ 6.1 SWING CONFIRMATION + LIQUIDITY POOLS ════
+    // ════ 6.1 SWING CONFIRMATION + LIQUIDITY POOLS + DEALING RANGE ════
     // ta.pivothigh/low report a pivot i_swingLen bars after it formed.
     int pivBar = bar_index - i_swingLen
 
     if not na(ph)
         swH    := ph
         swHBar := pivBar
+        rangeHigh    := ph          // dealing range updates with each swing
+        rangeHighBar := pivBar
         if i_showLiq
             // Register a buy-side liquidity pool above this swing high.
             // If it lines up with an existing pool we have Equal Highs.
@@ -234,6 +331,8 @@ if barstate.isconfirmed
     if not na(pl)
         swL    := pl
         swLBar := pivBar
+        rangeLow    := pl
+        rangeLowBar := pivBar
         if i_showLiq
             // Sell-side liquidity pool below the swing low / Equal Lows.
             bool isEqual = false
@@ -250,6 +349,21 @@ if barstate.isconfirmed
                 line l = line.new(pivBar, pl, pivBar + 1, pl, xloc = xloc.bar_index, extend = extend.right, color = color.new(C_SWING, 30), style = line.style_dashed, width = 1)
                 array.push(loPools, LiqPool.new(pl, pivBar, l, -1, false))
                 f_capPools(loPools, i_maxPools)
+
+    // ── Premium/Discount overlay: rebuild when a new swing arms.
+    //    Upper half (premium) = look for shorts; lower half (discount) = longs.
+    if i_showPD and (not na(ph) or not na(pl)) and not na(rangeHigh) and not na(rangeLow) and rangeHigh > rangeLow
+        float eqLvl   = math.avg(rangeHigh, rangeLow)
+        int   leftBar = math.min(rangeHighBar, rangeLowBar)
+        if not na(pdUpBox)
+            box.delete(pdUpBox)
+        if not na(pdDnBox)
+            box.delete(pdDnBox)
+        if not na(eqLine)
+            line.delete(eqLine)
+        pdUpBox := box.new(leftBar, rangeHigh, bar_index, eqLvl, bgcolor = color.new(C_BEAR, 93), border_width = 0, extend = extend.right, xloc = xloc.bar_index)
+        pdDnBox := box.new(leftBar, eqLvl, bar_index, rangeLow, bgcolor = color.new(C_BULL, 93), border_width = 0, extend = extend.right, xloc = xloc.bar_index)
+        eqLine  := line.new(leftBar, eqLvl, bar_index, eqLvl, xloc = xloc.bar_index, extend = extend.right, color = color.new(color.gray, 30), style = line.style_dotted, width = 1)
 
     // ════ 6.2 MARKET STRUCTURE BREAKS ════
     // BOS   = break WITH the current trend (continuation)
@@ -305,19 +419,19 @@ if barstate.isconfirmed
 
     if i_showFVG and gapBull
         box b = box.new(bar_index - 1, low, bar_index, high[2], border_color = color.new(C_BULL, 55), bgcolor = color.new(C_BULL, 82), extend = extend.right, xloc = xloc.bar_index)
-        array.push(fvgZones, Zone.new(b, low, high[2], 1, false, bar_index))
+        array.push(fvgZones, Zone.new(b, low, high[2], 1, false, bar_index, na, na, na))
         f_capZones(fvgZones, i_maxFVG)
         evFvgBull := true
         f_alert("True SMC · Bullish FVG formed on " + syminfo.tickerid)
 
     if i_showFVG and gapBear
         box b = box.new(bar_index - 1, low[2], bar_index, high, border_color = color.new(C_BEAR, 55), bgcolor = color.new(C_BEAR, 82), extend = extend.right, xloc = xloc.bar_index)
-        array.push(fvgZones, Zone.new(b, low[2], high, -1, false, bar_index))
+        array.push(fvgZones, Zone.new(b, low[2], high, -1, false, bar_index, na, na, na))
         f_capZones(fvgZones, i_maxFVG)
         evFvgBear := true
         f_alert("True SMC · Bearish FVG formed on " + syminfo.tickerid)
 
-    // ════ 6.4 ORDER BLOCKS ════
+    // ════ 6.4 ORDER BLOCKS + A+ CONFLUENCE SCORING ════
     // A TRUE OB = last opposite-coloured candle before a strong displacement
     // move that breaks structure and/or leaves an imbalance (FVG).
     bool strongUp = close > open and body >= i_obMult * nz(avgBody, body)
@@ -334,8 +448,44 @@ if barstate.isconfirmed
             float obBot     = low[j]
             bool  sizeOk    = i_obMaxAtr <= 0 or obTop - obBot <= i_obMaxAtr * nz(atrNow, obTop - obBot)
             if sizeOk and (na(lastBullOB) or originBar != lastBullOB)
-                box b = box.new(originBar, obTop, bar_index, obBot, border_color = color.new(C_BULL, 35), bgcolor = color.new(C_BULL, 76), border_width = 1, extend = extend.right, xloc = xloc.bar_index)
-                array.push(obZones, Zone.new(b, obTop, obBot, 1, false, bar_index))
+                // ── A+ confluence score (max 6 points) ──
+                bool hasSweep = not na(lastSweepLoBar) and bar_index - lastSweepLoBar <= i_sweepWindow   // sell-side swept recently
+                bool goodPD   = not na(rangeHigh) and not na(rangeLow) and math.avg(obTop, obBot) < math.avg(rangeHigh, rangeLow)  // zone in DISCOUNT
+                bool unicorn  = f_overlapsFVG(obTop, obBot, 1)                                           // OB overlaps an active bullish FVG
+                bool htfOk    = not i_useHTF or htfBull                                                  // aligned with HTF trend
+                int  score    = f_score(gapBull, brokeUp, hasSweep, goodPD, unicorn, htfOk)
+                bool isAplus  = score >= i_aplusMin
+
+                box b = box.new(originBar, obTop, bar_index, obBot, border_color = isAplus ? C_GOLD : color.new(C_BULL, 35), bgcolor = color.new(C_BULL, isAplus ? 64 : 76), border_width = isAplus ? 2 : 1, extend = extend.right, xloc = xloc.bar_index)
+                Zone z = Zone.new(b, obTop, obBot, 1, false, bar_index, na, na, na)
+
+                if isAplus
+                    label.new(bar_index, obBot, "A+ OB " + f_stars(score), color = C_GOLD, textcolor = color.black, style = label.style_label_up, size = size.small)
+                    evAplus := true
+                    f_alert("True SMC · A+ BULLISH setup (score " + str.tostring(score) + "/6) at " + str.tostring(obBot, format.mintick) + " – " + str.tostring(obTop, format.mintick) + " on " + syminfo.tickerid)
+                    // ── Entry / SL / TP1 guide lines ──
+                    if i_showGuide
+                        float entryP = obTop
+                        float slP    = (hasSweep and lastSweepLoPrice < obBot ? lastSweepLoPrice : obBot) - 0.1 * nz(atrNow)
+                        float tpP    = na
+                        if array.size(hiPools) > 0
+                            for i = 0 to array.size(hiPools) - 1
+                                LiqPool p = array.get(hiPools, i)
+                                if p.price > entryP and (na(tpP) or p.price < tpP)
+                                    tpP := p.price
+                        if na(tpP)
+                            tpP := entryP + 2 * (entryP - slP)      // fallback: fixed 1:2
+                        line eL = line.new(bar_index, entryP, bar_index + 1, entryP, xloc = xloc.bar_index, extend = extend.right, color = C_BOS, style = line.style_solid, width = 1)
+                        line sL = line.new(bar_index, slP, bar_index + 1, slP, xloc = xloc.bar_index, extend = extend.right, color = C_BEAR, style = line.style_dashed, width = 1)
+                        line tL = line.new(bar_index, tpP, bar_index + 1, tpP, xloc = xloc.bar_index, extend = extend.right, color = C_BULL, style = line.style_dashed, width = 1)
+                        label.new(bar_index, entryP, "Entry " + str.tostring(entryP, format.mintick), style = label.style_text_outline, textcolor = C_BOS, size = size.tiny)
+                        label.new(bar_index, slP, "SL " + str.tostring(slP, format.mintick), style = label.style_text_outline, textcolor = C_BEAR, size = size.tiny)
+                        label.new(bar_index, tpP, "TP1 " + str.tostring(tpP, format.mintick), style = label.style_text_outline, textcolor = C_BULL, size = size.tiny)
+                        z.entryL := eL
+                        z.slL := sL
+                        z.tpL := tL
+
+                array.push(obZones, z)
                 f_capZones(obZones, i_maxOB)
                 lastBullOB := originBar
                 evObBull := true
@@ -349,8 +499,44 @@ if barstate.isconfirmed
             float obBot     = low[j]
             bool  sizeOk    = i_obMaxAtr <= 0 or obTop - obBot <= i_obMaxAtr * nz(atrNow, obTop - obBot)
             if sizeOk and (na(lastBearOB) or originBar != lastBearOB)
-                box b = box.new(originBar, obTop, bar_index, obBot, border_color = color.new(C_BEAR, 35), bgcolor = color.new(C_BEAR, 76), border_width = 1, extend = extend.right, xloc = xloc.bar_index)
-                array.push(obZones, Zone.new(b, obTop, obBot, -1, false, bar_index))
+                // ── A+ confluence score (max 6 points) ──
+                bool hasSweep = not na(lastSweepHiBar) and bar_index - lastSweepHiBar <= i_sweepWindow   // buy-side swept recently
+                bool goodPD   = not na(rangeHigh) and not na(rangeLow) and math.avg(obTop, obBot) > math.avg(rangeHigh, rangeLow)  // zone in PREMIUM
+                bool unicorn  = f_overlapsFVG(obTop, obBot, -1)                                          // OB overlaps an active bearish FVG
+                bool htfOk    = not i_useHTF or htfBear                                                  // aligned with HTF trend
+                int  score    = f_score(gapBear, brokeDn, hasSweep, goodPD, unicorn, htfOk)
+                bool isAplus  = score >= i_aplusMin
+
+                box b = box.new(originBar, obTop, bar_index, obBot, border_color = isAplus ? C_GOLD : color.new(C_BEAR, 35), bgcolor = color.new(C_BEAR, isAplus ? 64 : 76), border_width = isAplus ? 2 : 1, extend = extend.right, xloc = xloc.bar_index)
+                Zone z = Zone.new(b, obTop, obBot, -1, false, bar_index, na, na, na)
+
+                if isAplus
+                    label.new(bar_index, obTop, "A+ OB " + f_stars(score), color = C_GOLD, textcolor = color.black, style = label.style_label_down, size = size.small)
+                    evAplus := true
+                    f_alert("True SMC · A+ BEARISH setup (score " + str.tostring(score) + "/6) at " + str.tostring(obBot, format.mintick) + " – " + str.tostring(obTop, format.mintick) + " on " + syminfo.tickerid)
+                    // ── Entry / SL / TP1 guide lines ──
+                    if i_showGuide
+                        float entryP = obBot
+                        float slP    = (hasSweep and lastSweepHiPrice > obTop ? lastSweepHiPrice : obTop) + 0.1 * nz(atrNow)
+                        float tpP    = na
+                        if array.size(loPools) > 0
+                            for i = 0 to array.size(loPools) - 1
+                                LiqPool p = array.get(loPools, i)
+                                if p.price < entryP and (na(tpP) or p.price > tpP)
+                                    tpP := p.price
+                        if na(tpP)
+                            tpP := entryP - 2 * (slP - entryP)      // fallback: fixed 1:2
+                        line eL = line.new(bar_index, entryP, bar_index + 1, entryP, xloc = xloc.bar_index, extend = extend.right, color = C_BOS, style = line.style_solid, width = 1)
+                        line sL = line.new(bar_index, slP, bar_index + 1, slP, xloc = xloc.bar_index, extend = extend.right, color = C_BEAR, style = line.style_dashed, width = 1)
+                        line tL = line.new(bar_index, tpP, bar_index + 1, tpP, xloc = xloc.bar_index, extend = extend.right, color = C_BULL, style = line.style_dashed, width = 1)
+                        label.new(bar_index, entryP, "Entry " + str.tostring(entryP, format.mintick), style = label.style_text_outline, textcolor = C_BOS, size = size.tiny)
+                        label.new(bar_index, slP, "SL " + str.tostring(slP, format.mintick), style = label.style_text_outline, textcolor = C_BEAR, size = size.tiny)
+                        label.new(bar_index, tpP, "TP1 " + str.tostring(tpP, format.mintick), style = label.style_text_outline, textcolor = C_BULL, size = size.tiny)
+                        z.entryL := eL
+                        z.slL := sL
+                        z.tpL := tL
+
+                array.push(obZones, z)
                 f_capZones(obZones, i_maxOB)
                 lastBearOB := originBar
                 evObBear := true
@@ -370,6 +556,8 @@ if barstate.isconfirmed
                     line.set_extend(p.id, extend.none)
                     line.set_x2(p.id, bar_index)
                     label.new(bar_index, high, "Liquidity Grab", color = C_LIQ, textcolor = color.white, style = label.style_label_down, size = size.small)
+                    lastSweepHiPrice := p.price
+                    lastSweepHiBar   := bar_index
                     evSweepHi := true
                     f_alert("True SMC · Buy-side liquidity swept above " + str.tostring(p.price, format.mintick) + " on " + syminfo.tickerid)
                     array.remove(hiPools, i)
@@ -386,6 +574,8 @@ if barstate.isconfirmed
                     line.set_extend(p.id, extend.none)
                     line.set_x2(p.id, bar_index)
                     label.new(bar_index, low, "Liquidity Grab", color = C_LIQ, textcolor = color.white, style = label.style_label_up, size = size.small)
+                    lastSweepLoPrice := p.price
+                    lastSweepLoBar   := bar_index
                     evSweepLo := true
                     f_alert("True SMC · Sell-side liquidity swept below " + str.tostring(p.price, format.mintick) + " on " + syminfo.tickerid)
                     array.remove(loPools, i)
@@ -425,6 +615,7 @@ if barstate.isconfirmed
                 box.delete(z.id)
                 drop := true
             if drop
+                f_delGuide(z)
                 array.remove(obZones, i)
 
     // ── Fair Value Gaps: shade at 50% retracement (consequent encroachment),
@@ -466,31 +657,41 @@ plotshape(i_showSwings and not na(pl), "Swing Low",  style = shape.triangleup,  
 // Light background tint following the current market-structure trend
 bgcolor(i_showTrend ? (trend > 0 ? color.new(C_BULL, 94) : trend < 0 ? color.new(C_BEAR, 94) : na) : na, title = "Trend Background")
 
+// Killzone session tints (London = blue, New York = orange)
+bool inLDN = i_showKZ and not na(time(timeframe.period, i_kzLDN))
+bool inNY  = i_showKZ and not na(time(timeframe.period, i_kzNY))
+bgcolor(inLDN ? color.new(#2962ff, 93) : inNY ? color.new(#ff6d00, 93) : na, title = "Killzones")
+
 // Status table (top-right)
-var table smcTable = table.new(position.top_right, 2, 4, bgcolor = color.new(#131722, 20), frame_width = 1, frame_color = color.new(color.gray, 60))
+var table smcTable = table.new(position.top_right, 2, 5, bgcolor = color.new(#131722, 20), frame_width = 1, frame_color = color.new(color.gray, 60))
 if barstate.islast and i_showTable
     string tTxt = trend > 0 ? "BULLISH" : trend < 0 ? "BEARISH" : "NEUTRAL"
     color  tCol = trend > 0 ? C_BULL : trend < 0 ? C_BEAR : color.gray
+    string hTxt = htfBull ? "BULLISH" : htfBear ? "BEARISH" : "NEUTRAL"
+    color  hCol = htfBull ? C_BULL : htfBear ? C_BEAR : color.gray
     table.cell(smcTable, 0, 0, "TRUE SMC",        text_color = color.white,  text_size = size.small)
     table.cell(smcTable, 1, 0, tTxt,              text_color = tCol,         text_size = size.small)
-    table.cell(smcTable, 0, 1, "Order Blocks",    text_color = color.silver, text_size = size.small)
-    table.cell(smcTable, 1, 1, str.tostring(array.size(obZones)), text_color = color.white, text_size = size.small)
-    table.cell(smcTable, 0, 2, "Fair Value Gaps", text_color = color.silver, text_size = size.small)
-    table.cell(smcTable, 1, 2, str.tostring(array.size(fvgZones)), text_color = color.white, text_size = size.small)
-    table.cell(smcTable, 0, 3, "Liquidity Pools", text_color = color.silver, text_size = size.small)
-    table.cell(smcTable, 1, 3, str.tostring(array.size(hiPools) + array.size(loPools)), text_color = color.white, text_size = size.small)
+    table.cell(smcTable, 0, 1, "HTF Trend",       text_color = color.silver, text_size = size.small)
+    table.cell(smcTable, 1, 1, hTxt,              text_color = hCol,         text_size = size.small)
+    table.cell(smcTable, 0, 2, "Order Blocks",    text_color = color.silver, text_size = size.small)
+    table.cell(smcTable, 1, 2, str.tostring(array.size(obZones)), text_color = color.white, text_size = size.small)
+    table.cell(smcTable, 0, 3, "Fair Value Gaps", text_color = color.silver, text_size = size.small)
+    table.cell(smcTable, 1, 3, str.tostring(array.size(fvgZones)), text_color = color.white, text_size = size.small)
+    table.cell(smcTable, 0, 4, "Liquidity Pools", text_color = color.silver, text_size = size.small)
+    table.cell(smcTable, 1, 4, str.tostring(array.size(hiPools) + array.size(loPools)), text_color = color.white, text_size = size.small)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 8. ALERT CONDITIONS — select these in TradingView's alert dialog
 // ─────────────────────────────────────────────────────────────────────────────
-alertcondition(evBosUp,   title = "BOS ↑ — Bullish Break of Structure",    message = "True SMC: Bullish BOS on {{ticker}} ({{interval}})")
-alertcondition(evBosDn,   title = "BOS ↓ — Bearish Break of Structure",    message = "True SMC: Bearish BOS on {{ticker}} ({{interval}})")
-alertcondition(evChochUp, title = "CHoCH ↑ — Bullish Change of Character", message = "True SMC: Bullish CHoCH on {{ticker}} ({{interval}})")
-alertcondition(evChochDn, title = "CHoCH ↓ — Bearish Change of Character", message = "True SMC: Bearish CHoCH on {{ticker}} ({{interval}})")
-alertcondition(evObBull,  title = "Bullish Order Block formed",            message = "True SMC: Bullish Order Block formed on {{ticker}} ({{interval}})")
-alertcondition(evObBear,  title = "Bearish Order Block formed",            message = "True SMC: Bearish Order Block formed on {{ticker}} ({{interval}})")
-alertcondition(evObMit,   title = "Order Block mitigated",                 message = "True SMC: Order Block mitigated on {{ticker}} ({{interval}})")
-alertcondition(evFvgBull, title = "Bullish FVG formed",                    message = "True SMC: Bullish Fair Value Gap on {{ticker}} ({{interval}})")
-alertcondition(evFvgBear, title = "Bearish FVG formed",                    message = "True SMC: Bearish Fair Value Gap on {{ticker}} ({{interval}})")
-alertcondition(evSweepHi, title = "Liquidity Grab above highs (bearish)",  message = "True SMC: Buy-side liquidity swept on {{ticker}} ({{interval}})")
-alertcondition(evSweepLo, title = "Liquidity Grab below lows (bullish)",   message = "True SMC: Sell-side liquidity swept on {{ticker}} ({{interval}})")
+alertcondition(evAplus,   title = "A+ Setup detected (high-confluence OB)", message = "True SMC: A+ high-confluence setup on {{ticker}} ({{interval}})")
+alertcondition(evBosUp,   title = "BOS ↑ — Bullish Break of Structure",     message = "True SMC: Bullish BOS on {{ticker}} ({{interval}})")
+alertcondition(evBosDn,   title = "BOS ↓ — Bearish Break of Structure",     message = "True SMC: Bearish BOS on {{ticker}} ({{interval}})")
+alertcondition(evChochUp, title = "CHoCH ↑ — Bullish Change of Character",  message = "True SMC: Bullish CHoCH on {{ticker}} ({{interval}})")
+alertcondition(evChochDn, title = "CHoCH ↓ — Bearish Change of Character",  message = "True SMC: Bearish CHoCH on {{ticker}} ({{interval}})")
+alertcondition(evObBull,  title = "Bullish Order Block formed",             message = "True SMC: Bullish Order Block formed on {{ticker}} ({{interval}})")
+alertcondition(evObBear,  title = "Bearish Order Block formed",             message = "True SMC: Bearish Order Block formed on {{ticker}} ({{interval}})")
+alertcondition(evObMit,   title = "Order Block mitigated",                  message = "True SMC: Order Block mitigated on {{ticker}} ({{interval}})")
+alertcondition(evFvgBull, title = "Bullish FVG formed",                     message = "True SMC: Bullish Fair Value Gap on {{ticker}} ({{interval}})")
+alertcondition(evFvgBear, title = "Bearish FVG formed",                     message = "True SMC: Bearish Fair Value Gap on {{ticker}} ({{interval}})")
+alertcondition(evSweepHi, title = "Liquidity Grab above highs (bearish)",   message = "True SMC: Buy-side liquidity swept on {{ticker}} ({{interval}})")
+alertcondition(evSweepLo, title = "Liquidity Grab below lows (bullish)",    message = "True SMC: Sell-side liquidity swept on {{ticker}} ({{interval}})")
