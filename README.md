@@ -1,6 +1,6 @@
 # Adaptive SMC Dashboard for MetaTrader 4
 
-A source-available MT4 indicator modeled on the functionality demonstrated in the referenced video: Smart Money Concepts (SMC) structure signals, order blocks, entry/stop/target levels, a weighted multi-timeframe scanner, historical statistics, recovery simulations, alerts, and an on-chart optimizer.
+An MT4 indicator modeled on the functionality demonstrated in the referenced video: Smart Money Concepts (SMC) structure signals, order blocks, entry/stop/target levels, a weighted multi-timeframe scanner, historical statistics, recovery simulations, alerts, and an on-chart optimizer.
 
 > **Important:** this is an original functional reconstruction, not the video's proprietary source code. It does not contact an AI service. The **OPTIMIZE** button runs a bounded, deterministic search over historical parameters on the local MT4 terminal.
 

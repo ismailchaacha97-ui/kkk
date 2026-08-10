@@ -1,0 +1,7 @@
+# MetaEditor build and diagnostic output
+*.ex4
+*.log
+
+# Local Python checks
+__pycache__/
+*.py[cod]

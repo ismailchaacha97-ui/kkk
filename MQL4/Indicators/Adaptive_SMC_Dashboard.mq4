@@ -547,8 +547,7 @@ void HistoricalMTFStrength(const datetime signal_time,double &buy_strength,
    sell_strength=0.0;
    history_missing=false;
 
-   if(!EnableMTFScanner) return;
-
+   // Filtering can remain active even when the live scanner rows are hidden.
    double buy_weight=0.0,sell_weight=0.0,total_weight=0.0;
    bool available=false;
    int direction=0;
@@ -1202,7 +1201,10 @@ void CreateOrUpdateDashboard()
    SetPanelLine(8,"BUY "+DoubleToString(g_current_buy_strength,1)+"%   SELL "+
                   DoubleToString(g_current_sell_strength,1)+"%",
                   (g_current_buy_strength>=g_current_sell_strength ? BuyColor : SellColor),true);
-   string agreement=DirectionText(g_current_buy_strength>=g_current_sell_strength ? 1 : -1);
+   int agreement_direction=0;
+   if(g_current_buy_strength>g_current_sell_strength+0.0001) agreement_direction=1;
+   if(g_current_sell_strength>g_current_buy_strength+0.0001) agreement_direction=-1;
+   string agreement=DirectionText(agreement_direction);
    SetPanelLine(9,"Agreement: "+agreement+" | filter "+(UseMTFFilter ? "ON" : "OFF")+
                   " >= "+DoubleToString(g_active_mtf_threshold,0)+"%",clrSilver);
 
