@@ -62,6 +62,25 @@ input bool             InpAlertOnce    = true;
 input bool             InpClosedAlerts = true;        // Never alert on a forming bar
 input bool             InpShowHUD      = true;
 
+//--- Holy Grail confluence (quality over quantity) -----------------
+// These filters gate arrows/alerts only; the underlying SSL state stays visible.
+input bool             InpUseEMAFilter = true;
+input int              InpFastEMA      = 21;
+input int              InpSlowEMA      = 55;
+input bool             InpUseADXFilter = true;
+input int              InpADXPeriod    = 14;
+input double           InpMinADX       = 20.0;
+input bool             InpUseRSIFilter = true;
+input int              InpRSIPeriod    = 14;
+input double           InpRSIMidline   = 50.0;
+input bool             InpUseHTFFilter = true;
+input ENUM_TIMEFRAMES  InpHigherTF     = PERIOD_H1;
+input int              InpHTFEMA       = 50;
+input bool             InpUseVolumeFilter = false;
+input int              InpVolumeLookback = 20;
+input double           InpVolumeMultiplier = 1.0;
+input int              InpMinimumScore = 3;          // Required enabled filters
+
 //--- plotted buffers
 double BufUp[],BufDn[],BufBuy[],BufSell[],BufUp1[],BufDn1[],BufUp2[],BufDn2[];
 //--- cumulative weighted sums, calculated oldest to newest
@@ -128,6 +147,53 @@ void SetLineStyle()
    else { SetIndexStyle(4,DRAW_NONE); SetIndexStyle(5,DRAW_NONE); SetIndexStyle(6,DRAW_NONE); SetIndexStyle(7,DRAW_NONE); }
   }
 
+// Returns true only when the closed-bar flip has enough independent
+// confirmation. Every enabled filter contributes one point.
+bool ConfluencePass(const int bar,const int direction,const datetime &time[],const double &close[],const long &tick_volume[],const int total)
+  {
+   int enabled=0, score=0;
+   int fast=MathMax(1,InpFastEMA), slow=MathMax(fast+1,InpSlowEMA);
+   if(InpUseEMAFilter)
+     {
+      enabled++;
+      double ef=iMA(NULL,0,fast,0,MODE_EMA,PRICE_CLOSE,bar);
+      double es=iMA(NULL,0,slow,0,MODE_EMA,PRICE_CLOSE,bar);
+      if((direction==0 && close[bar]>ef && ef>es) || (direction==1 && close[bar]<ef && ef<es)) score++;
+     }
+   if(InpUseADXFilter)
+     {
+      enabled++; int n=MathMax(2,InpADXPeriod);
+      double adx=iADX(NULL,0,n,PRICE_CLOSE,MODE_MAIN,bar);
+      double plus=iADX(NULL,0,n,PRICE_CLOSE,MODE_PLUSDI,bar);
+      double minus=iADX(NULL,0,n,PRICE_CLOSE,MODE_MINUSDI,bar);
+      if(adx>=MathMax(0.0,InpMinADX) && ((direction==0 && plus>minus) || (direction==1 && minus>plus))) score++;
+     }
+   if(InpUseRSIFilter)
+     {
+      enabled++; double r=iRSI(NULL,0,MathMax(2,InpRSIPeriod),PRICE_CLOSE,bar);
+      if((direction==0 && r>=InpRSIMidline) || (direction==1 && r<=InpRSIMidline)) score++;
+     }
+   if(InpUseHTFFilter)
+     {
+      enabled++; int hs=iBarShift(NULL,InpHigherTF,time[bar],false);
+      if(hs>=0)
+        {
+         double hc=iClose(NULL,InpHigherTF,hs);
+         double hm=iMA(NULL,InpHigherTF,MathMax(2,InpHTFEMA),0,MODE_EMA,PRICE_CLOSE,hs);
+         if((direction==0 && hc>hm) || (direction==1 && hc<hm)) score++;
+        }
+     }
+   if(InpUseVolumeFilter)
+     {
+      enabled++; int look=MathMax(2,InpVolumeLookback);
+      double avg=0; int count=0;
+      for(int k=bar+1;k<MathMin(total,bar+1+look);k++) { avg+=(double)MathMax(0,(int)tick_volume[k]); count++; }
+      if(count>0 && (double)tick_volume[bar]>=avg/count*MathMax(0.0,InpVolumeMultiplier)) score++;
+     }
+   if(enabled==0) return true;
+   return score>=MathMax(1,MathMin(enabled,InpMinimumScore));
+  }
+
 int OnInit()
   {
    SetIndexBuffer(0,BufUp); SetIndexBuffer(1,BufDn); SetIndexBuffer(2,BufBuy); SetIndexBuffer(3,BufSell);
@@ -191,16 +257,17 @@ int OnCalculate(const int total,const int prev,const datetime &time[],const doub
       else if(prior==0 && close[p]<vl) cur=1;
       else if(prior==1 && close[p]>vh) cur=0;
       state[p]=cur;
-      bool flip=(prior>=0 && cur!=prior && barsInAnchor[p]>=MathMax(1,InpMinBars));
-      if(cur==0) { BufUp[p]=vl; if(flip) { BufDn[p]=vh; if(InpShowArrows) BufBuy[p]=low[p]-MathMax(Point,InpArrowATR*iATR(NULL,0,MathMax(1,InpATRPeriod),p)); if((InpClosedAlerts && p==1)||(!InpClosedAlerts && p==0)) AlertFlip(0,p,close[p],time); } }
-      else       { BufDn[p]=vh; if(flip) { BufUp[p]=vl; if(InpShowArrows) BufSell[p]=high[p]+MathMax(Point,InpArrowATR*iATR(NULL,0,MathMax(1,InpATRPeriod),p)); if((InpClosedAlerts && p==1)||(!InpClosedAlerts && p==0)) AlertFlip(1,p,close[p],time); } }
+      bool rawFlip=(prior>=0 && cur!=prior && barsInAnchor[p]>=MathMax(1,InpMinBars));
+      bool flip=(rawFlip && ConfluencePass(p,cur,time,close,tick_volume,total));
+      if(cur==0) { BufUp[p]=vl; if(rawFlip) { BufDn[p]=vh; if(flip && InpShowArrows) BufBuy[p]=low[p]-MathMax(Point,InpArrowATR*iATR(NULL,0,MathMax(1,InpATRPeriod),p)); if(flip && ((InpClosedAlerts && p==1)||(!InpClosedAlerts && p==0))) AlertFlip(0,p,close[p],time); } }
+      else       { BufDn[p]=vh; if(rawFlip) { BufUp[p]=vl; if(flip && InpShowArrows) BufSell[p]=high[p]+MathMax(Point,InpArrowATR*iATR(NULL,0,MathMax(1,InpATRPeriod),p)); if(flip && ((InpClosedAlerts && p==1)||(!InpClosedAlerts && p==0))) AlertFlip(1,p,close[p],time); } }
       if(InpShowBands) { BufUp1[p]=vt+sd; BufDn1[p]=vt-sd; BufUp2[p]=vt+2.0*sd; BufDn2[p]=vt-2.0*sd; }
      }
    if(InpShowHUD)
      {
       double vh=cHigh[0]/cVol[0],vl=cLow[0]/cVol[0],vt=cTypical[0]/cVol[0]; double sd=MathSqrt(MathMax(0.0,cTypical2[0]/cVol[0]-vt*vt));
       double mid=(vh+vl)*0.5; double dev=(mid!=0?100.0*(close[0]-mid)/mid:0);
-      Comment(StringFormat("VWAP SSL FLIP PRO\nAnchor: %s | Bars: %d\nTrend: %s\nHigh VWAP: %s\nLow VWAP:  %s\nTypical:   %s\nStd dev:   %s\nPrice dev: %+.2f%%",PeriodName(),barsInAnchor[0],state[0]==0?"UP":"DOWN",DoubleToString(vh,Digits),DoubleToString(vl,Digits),DoubleToString(vt,Digits),DoubleToString(sd,Digits),dev));
+      Comment(StringFormat("VWAP SSL FLIP PRO\nAnchor: %s | Bars: %d\nTrend: %s | Confluence: %s\nHigh VWAP: %s\nLow VWAP:  %s\nTypical:   %s\nStd dev:   %s\nPrice dev: %+.2f%%",PeriodName(),barsInAnchor[0],state[0]==0?"UP":"DOWN",InpMinimumScore>0?"ON":"OFF",DoubleToString(vh,Digits),DoubleToString(vl,Digits),DoubleToString(vt,Digits),DoubleToString(sd,Digits),dev));
      }
    return total;
   }
