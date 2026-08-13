@@ -16,7 +16,8 @@
 //
 //  Extras: volume-weighted standard-deviation bands (2 levels), trend tinting,
 //  a supply/demand cloud between the two auto anchors, anchor markers, an info
-//  table, and price-cross alerts.
+//  table, price-cross alerts, and an ENTRY SIGNAL engine (pullback reclaim,
+//  band reversal, or VWAP cross) with ATR-based stop-loss / take-profit guides.
 //
 //  Note on pivots: a swing only confirms after "Pivot Right Bars" bars have
 //  printed. When it confirms, the VWAP is rebuilt starting from the actual
@@ -66,6 +67,22 @@ colorTrend = input.bool(false, "Tint Lines By Trend (price above/below VWAP)", g
 showCloud  = input.bool(true,  "Shade Area Between A & B (Auto Mode)", group = grpStyle)
 showLabels = input.bool(true,  "Mark New Anchors", group = grpStyle)
 showInfo   = input.bool(true,  "Show Info Table", group = grpStyle)
+
+grpEntry = "🎯 Entry Signals"
+
+showEntries = input.bool(true, "Show Entry Signals", group = grpEntry)
+entryLogic  = input.string("Pullback Reclaim (Trend)", "Entry Logic",
+     options = ["Pullback Reclaim (Trend)", "Band Reversal (Mean Reversion)", "VWAP Cross"],
+     group = grpEntry,
+     tooltip = "Pullback Reclaim: price wicks into the support-side VWAP and closes back above it → LONG (mirror for SHORT at the resistance-side VWAP). One signal per touch.\n\n" +
+               "Band Reversal: same logic but against Band 1 — fades stretched moves back toward the VWAP. Requires Band 1 to be enabled.\n\n" +
+               "VWAP Cross: simple close cross above the support-side line (LONG) / below the resistance-side line (SHORT).")
+slopeFilter = input.bool(true, "Require VWAP Slope Alignment", group = grpEntry,
+     tooltip = "Longs only when the support-side VWAP is rising; shorts only when the resistance-side VWAP is falling.")
+showStops   = input.bool(true, "Draw Stop Loss / Take Profit", group = grpEntry)
+atrLen      = input.int(14, "ATR Length", minval = 1, group = grpEntry)
+slMult      = input.float(1.5, "Stop = ATR ×",   minval = 0.1,  step = 0.25, group = grpEntry)
+rrRatio     = input.float(2.0, "Target = Risk ×", minval = 0.25, step = 0.25, group = grpEntry)
 
 // ─────────────────────── Volume-weighted accumulators ────────────────────────
 float px  = priceInput
@@ -231,6 +248,75 @@ if showLabels and useMan and manNow
          textcolor = color.new(color.white, 0), size = size.small,
          tooltip = "New VWAP anchor: manual time")
 
+// ───────────────────────────── Entry signals ─────────────────────────────────
+// Reference lines: the "resistance side" (short entries) and "support side"
+// (long entries). In Auto mode these are the from-high / from-low VWAPs; in
+// single-anchor modes both sides are the same line.
+bool pullbackMode = entryLogic == "Pullback Reclaim (Trend)"
+bool bandMode     = entryLogic == "Band Reversal (Mean Reversion)"
+bool crossMode    = entryLogic == "VWAP Cross"
+
+float supLine = okB ? vwapB : vwapA
+float resLine = vwapA
+float supBand = okB ? bL1 : aL1
+float resBand = aU1
+
+float longRef  = bandMode ? supBand : supLine
+float shortRef = bandMode ? resBand : resLine
+
+// Slope filter
+bool supRising  = not slopeFilter or supLine > nz(supLine[1], supLine)
+bool resFalling = not slopeFilter or resLine < nz(resLine[1], resLine)
+
+// Touch-arming state: a signal fires once per touch, on the reclaim/reject
+// close — never repeatedly while price sits at the line.
+var bool armedLong  = false
+var bool armedShort = false
+
+bool touchL = not na(longRef)  and low  <= longRef
+bool touchS = not na(shortRef) and high >= shortRef
+
+bool longReclaim = (armedLong  or touchL) and close > longRef  and supRising
+bool shortReject = (armedShort or touchS) and close < shortRef and resFalling
+
+bool crossLong  = okA and ta.crossover(close,  nz(longRef,  close)) and supRising
+bool crossShort = okA and ta.crossunder(close, nz(shortRef, close)) and resFalling
+
+bool longEntry  = showEntries and (crossMode ? crossLong  : (pullbackMode or bandMode) and longReclaim)
+bool shortEntry = showEntries and (crossMode ? crossShort : (pullbackMode or bandMode) and shortReject)
+
+armedLong  := pullbackMode or bandMode ? (longEntry  ? false : close > longRef  ? false : armedLong  or touchL) : false
+armedShort := pullbackMode or bandMode ? (shortEntry ? false : close < shortRef ? false : armedShort or touchS) : false
+
+// Signal markers
+plotshape(longEntry,  "Long Entry",  style = shape.triangleup,   location = location.belowbar,
+     color = color.new(#089981, 0), text = "LONG",  textcolor = color.new(#089981, 0), size = size.small)
+plotshape(shortEntry, "Short Entry", style = shape.triangledown, location = location.abovebar,
+     color = color.new(#f23645, 0), text = "SHORT", textcolor = color.new(#f23645, 0), size = size.small)
+
+// ATR-based stop-loss / take-profit guides
+float atrVal = ta.atr(atrLen)
+
+if longEntry and showStops
+    float slL = close - atrVal * slMult
+    float tpL = close + atrVal * slMult * rrRatio
+    line.new(bar_index, slL, bar_index + 15, slL, color = color.new(#f23645, 0), style = line.style_dashed)
+    line.new(bar_index, tpL, bar_index + 15, tpL, color = color.new(#089981, 0), style = line.style_dashed)
+    label.new(bar_index + 15, slL, "SL " + str.tostring(slL, format.mintick), style = label.style_none,
+         color = color.new(color.white, 100), textcolor = color.new(#f23645, 0), size = size.small)
+    label.new(bar_index + 15, tpL, "TP " + str.tostring(tpL, format.mintick), style = label.style_none,
+         color = color.new(color.white, 100), textcolor = color.new(#089981, 0), size = size.small)
+
+if shortEntry and showStops
+    float slS = close + atrVal * slMult
+    float tpS = close - atrVal * slMult * rrRatio
+    line.new(bar_index, slS, bar_index + 15, slS, color = color.new(#f23645, 0), style = line.style_dashed)
+    line.new(bar_index, tpS, bar_index + 15, tpS, color = color.new(#089981, 0), style = line.style_dashed)
+    label.new(bar_index + 15, slS, "SL " + str.tostring(slS, format.mintick), style = label.style_none,
+         color = color.new(color.white, 100), textcolor = color.new(#f23645, 0), size = size.small)
+    label.new(bar_index + 15, tpS, "TP " + str.tostring(tpS, format.mintick), style = label.style_none,
+         color = color.new(color.white, 100), textcolor = color.new(#089981, 0), size = size.small)
+
 // ────────────────────────────── Info table ───────────────────────────────────
 var table info = table.new(position.top_right, 2, 3,
      bgcolor = color.new(color.black, 80), border_width = 1,
@@ -272,3 +358,8 @@ alertcondition(xUpB, "DAVWAP: Cross Above VWAP B",
      "DAVWAP: {{ticker}} crossed ABOVE VWAP B @ {{close}}")
 alertcondition(xDnB, "DAVWAP: Cross Below VWAP B",
      "DAVWAP: {{ticker}} crossed BELOW VWAP B @ {{close}}")
+
+alertcondition(longEntry, "DAVWAP: Long Entry",
+     "DAVWAP LONG entry on {{ticker}} @ {{close}} ({{interval}})")
+alertcondition(shortEntry, "DAVWAP: Short Entry",
+     "DAVWAP SHORT entry on {{ticker}} @ {{close}} ({{interval}})")

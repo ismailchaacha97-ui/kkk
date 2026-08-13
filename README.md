@@ -26,8 +26,27 @@ as they happen.
 - **Trend tinting** — optionally color lines by whether price is above/below.
 - **Anchor markers** — tiny triangles mark each new anchor as it confirms (hover for tooltip).
 - **Info table** (top-right) — current mode, anchor dates, and price distance (%) from each VWAP.
-- **Alerts** — price crossing above/below VWAP A and VWAP B (`alertcondition`).
+- **🎯 Entry signals** — see below.
+- **Alerts** — price crossings *and* long/short entries (`alertcondition`).
 - **No-volume feeds** (some FX/indices) automatically fall back to equal bar weighting.
+
+### 🎯 Entry signals
+
+Pick the logic in **Settings → 🎯 Entry Signals → Entry Logic**:
+
+| Logic | LONG when… | SHORT when… |
+|---|---|---|
+| **Pullback Reclaim (Trend)** ⭐ | price wicks into the support-side VWAP (line B in Auto mode) and **closes back above** it — classic trend-continuation | price tags the resistance-side VWAP (line A) and closes back below |
+| **Band Reversal (Mean Reversion)** | same logic against **Band 1** lower — fades stretched moves back to the VWAP *(requires Band 1 enabled)* | mirror at Band 1 upper |
+| **VWAP Cross** | close crosses above the support-side line | close crosses below the resistance-side line |
+
+Details:
+
+- **One signal per touch** — an internal "arming" state prevents repeated signals while price sits at the line.
+- **Slope filter** (optional, ON by default): longs only when the support VWAP is rising, shorts only when the resistance VWAP is falling.
+- **Stop/target guides** (optional): on each signal the script draws an ATR-based stop (`ATR(14) × 1.5`) and a target at `Risk × 2.0`, projected 15 bars forward with price labels.
+- **Alerts**: `DAVWAP: Long Entry` / `DAVWAP: Short Entry` in the alert dialog.
+- Markers: ▲ `LONG` below the bar, ▼ `SHORT` above the bar.
 
 ### How to install on TradingView
 
