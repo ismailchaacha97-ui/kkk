@@ -1,0 +1,274 @@
+//@version=6
+// ══════════════════════════════════════════════════════════════════════════════
+//  Dynamic Anchored VWAP [DAVWAP]
+// ──────────────────────────────────────────────────────────────────────────────
+//  A classic Anchored VWAP is pinned to ONE manually chosen bar. This indicator
+//  makes the anchor DYNAMIC: it automatically re-anchors the VWAP to fresh,
+//  market-defined events as they happen:
+//
+//    • Swing High & Low (Auto) → two VWAPs, one re-anchored to the most recent
+//      confirmed swing HIGH (acts as supply/resistance) and one to the most
+//      recent confirmed swing LOW (acts as demand/support). New swings move
+//      the anchors — this is the signature "Dynamic AVWAP" behaviour.
+//    • Highest High / Lowest Low / Highest Volume inside a rolling window.
+//    • Calendar resets: New Day / New Week / New Month.
+//    • A classic Manual Time anchor as fallback.
+//
+//  Extras: volume-weighted standard-deviation bands (2 levels), trend tinting,
+//  a supply/demand cloud between the two auto anchors, anchor markers, an info
+//  table, and price-cross alerts.
+//
+//  Note on pivots: a swing only confirms after "Pivot Right Bars" bars have
+//  printed. When it confirms, the VWAP is rebuilt starting from the actual
+//  swing bar. This is standard, non-repainting pivot behaviour — past values
+//  of the line are not changed retroactively; the line simply switches to the
+//  freshly confirmed anchor going forward.
+//
+//  Symbols without a volume feed (some FX pairs / indices) automatically fall
+//  back to equal bar weighting.
+// ══════════════════════════════════════════════════════════════════════════════
+indicator("Dynamic Anchored VWAP [DAVWAP]", shorttitle = "DAVWAP", overlay = true,
+     max_lines_count = 500, max_labels_count = 500, max_bars_back = 5000)
+
+// ─────────────────────────────── Inputs ──────────────────────────────────────
+grpAnchor = "⚓ Anchor Settings"
+grpBands  = "📊 Bands"
+grpStyle  = "🎨 Style & Display"
+
+anchorMode = input.string("Swing High & Low (Auto)", "Anchor Mode",
+     options = ["Swing High & Low (Auto)", "Swing High", "Swing Low",
+                "Highest High (Window)", "Lowest Low (Window)", "Highest Volume (Window)",
+                "New Day", "New Week", "New Month", "Manual Time"],
+     group = grpAnchor,
+     tooltip = "What event the VWAP anchor follows.\n\n" +
+               "• Swing High & Low (Auto): two VWAPs re-anchored to the latest confirmed swing high and swing low.\n" +
+               "• Window modes: anchor sits on the extreme bar inside the rolling lookback window.\n" +
+               "• New Day/Week/Month: anchor resets at the start of each calendar period.\n" +
+               "• Manual Time: classic fixed anchor at the chosen date/time.")
+
+leftBars   = input.int(5, "Pivot Left Bars",  minval = 1, maxval = 100, group = grpAnchor)
+rightBars  = input.int(5, "Pivot Right Bars", minval = 1, maxval = 100, group = grpAnchor,
+     tooltip = "Bars required after a swing point to confirm it. Higher = stronger swings, later confirmation.")
+lookback   = input.int(300, "Window Lookback", minval = 20, maxval = 5000, group = grpAnchor,
+     tooltip = "Bars scanned by the window-based anchors. Also caps how far back any anchor may sit (anchor memory).")
+manualTime = input.time(timestamp("01 Jan 2024 00:00 +0000"), "Manual Anchor", group = grpAnchor,
+     tooltip = "Used only in 'Manual Time' mode.")
+priceInput = input.source(hlc3, "Price Source", group = grpAnchor)
+
+showBand1 = input.bool(true,  "Band 1  ×", inline = "bd1", group = grpBands)
+bandMult1 = input.float(1.0,  "", minval = 0.1, maxval = 10, step = 0.25, inline = "bd1", group = grpBands)
+showBand2 = input.bool(false, "Band 2  ×", inline = "bd2", group = grpBands)
+bandMult2 = input.float(2.0,  "", minval = 0.1, maxval = 10, step = 0.25, inline = "bd2", group = grpBands)
+
+colA       = input.color(color.new(#f23645, 0), "VWAP A (from high)", group = grpStyle)
+colB       = input.color(color.new(#089981, 0), "VWAP B (from low)",  group = grpStyle)
+colorTrend = input.bool(false, "Tint Lines By Trend (price above/below VWAP)", group = grpStyle)
+showCloud  = input.bool(true,  "Shade Area Between A & B (Auto Mode)", group = grpStyle)
+showLabels = input.bool(true,  "Mark New Anchors", group = grpStyle)
+showInfo   = input.bool(true,  "Show Info Table", group = grpStyle)
+
+// ─────────────────────── Volume-weighted accumulators ────────────────────────
+float px  = priceInput
+float vol = nz(volume, 1.0)          // equal weighting when the feed has no volume
+
+var float cumPV  = 0.0               // Σ(price · volume)       since chart start
+var float cumV   = 0.0               // Σ(volume)               since chart start
+var float cumP2V = 0.0               // Σ(price² · volume)      since chart start
+cumPV  += px * vol
+cumV   += vol
+cumP2V += px * px * vol
+
+// Rolling history (prefix sums) so any anchor → now range can be rebuilt in O(1)
+var array<float> histPV  = array.new<float>()
+var array<float> histV   = array.new<float>()
+var array<float> histP2V = array.new<float>()
+
+var int baseBar = na                 // bar_index of history element 0
+if na(baseBar)
+    baseBar := bar_index
+
+array.push(histPV,  cumPV)
+array.push(histV,   cumV)
+array.push(histP2V, cumP2V)
+
+int maxKeep = lookback + rightBars + 10
+while array.size(histV) > maxKeep
+    array.shift(histPV)
+    array.shift(histV)
+    array.shift(histP2V)
+    baseBar += 1
+
+// VWAP + volume-weighted stdev from `anchorBar` to the current bar
+f_stats(int anchorBar) =>
+    int lastIdx = array.size(histV) - 1
+    int aIdx    = math.min(math.max(anchorBar - baseBar, 0), lastIdx)   // clamp into retained window
+    float pv0   = aIdx > 0 ? array.get(histPV,  aIdx - 1) : 0.0
+    float v0    = aIdx > 0 ? array.get(histV,   aIdx - 1) : 0.0
+    float p2v0  = aIdx > 0 ? array.get(histP2V, aIdx - 1) : 0.0
+    float sumV  = cumV - v0
+    float vwap  = sumV > 0 ? (cumPV - pv0) / sumV : px
+    float varr  = sumV > 0 ? math.max((cumP2V - p2v0) / sumV - vwap * vwap, 0.0) : 0.0
+    [vwap, math.sqrt(varr)]
+
+// ───────────────────────────── Anchor detection ──────────────────────────────
+// Swing anchors (confirm `rightBars` bars after the pivot actually forms)
+float ph = ta.pivothigh(high, leftBars, rightBars)
+float pl = ta.pivotlow(low,  leftBars, rightBars)
+
+var int swingHiAnchor = na
+var int swingLoAnchor = na
+if not na(ph)
+    swingHiAnchor := bar_index - rightBars
+if not na(pl)
+    swingLoAnchor := bar_index - rightBars
+
+// Window anchors (ta.highestbars/lowestbars return a negative offset)
+int hhAnchor = bar_index + ta.highestbars(high, lookback)
+int llAnchor = bar_index + ta.lowestbars(low,  lookback)
+int hvAnchor = bar_index + ta.highestbars(vol,  lookback)
+
+// Calendar-period anchors
+bool newPeriod = switch anchorMode
+    "New Day"   => timeframe.change("D")
+    "New Week"  => timeframe.change("W")
+    "New Month" => timeframe.change("M")
+    => false
+
+var int periodAnchor = 0
+if newPeriod
+    periodAnchor := bar_index
+
+// Manual anchor: first bar at/after the chosen time
+var int manualAnchor = na
+bool manNow = na(manualAnchor) and time >= manualTime and nz(time[1], 0) < manualTime
+if manNow
+    manualAnchor := bar_index
+
+// ───────────────────────── Mode → anchor resolution ──────────────────────────
+bool dualMode = anchorMode == "Swing High & Low (Auto)"
+bool useHi    = anchorMode == "Swing High"
+bool useLo    = anchorMode == "Swing Low"
+bool useHH    = anchorMode == "Highest High (Window)"
+bool useLL    = anchorMode == "Lowest Low (Window)"
+bool useHV    = anchorMode == "Highest Volume (Window)"
+bool usePer   = anchorMode == "New Day" or anchorMode == "New Week" or anchorMode == "New Month"
+bool useMan   = anchorMode == "Manual Time"
+
+int anchorA = dualMode or useHi ? swingHiAnchor :
+              useLo  ? swingLoAnchor :
+              useHH  ? hhAnchor :
+              useLL  ? llAnchor :
+              useHV  ? hvAnchor :
+              usePer ? periodAnchor :
+              useMan ? manualAnchor : baseBar
+
+int anchorB = dualMode ? swingLoAnchor : na
+
+bool okA = not na(anchorA)
+bool okB = dualMode and not na(anchorB)
+
+// ─────────────────────────── VWAP & band values ──────────────────────────────
+[vwapAr, sdA] = f_stats(okA ? anchorA : baseBar)
+[vwapBr, sdB] = f_stats(okB ? anchorB : baseBar)
+
+float vwapA = okA ? vwapAr : na
+float vwapB = okB ? vwapBr : na
+
+float aU1 = okA and showBand1 ? vwapA + sdA * bandMult1 : na
+float aL1 = okA and showBand1 ? vwapA - sdA * bandMult1 : na
+float aU2 = okA and showBand2 ? vwapA + sdA * bandMult2 : na
+float aL2 = okA and showBand2 ? vwapA - sdA * bandMult2 : na
+float bU1 = okB and showBand1 ? vwapB + sdB * bandMult1 : na
+float bL1 = okB and showBand1 ? vwapB - sdB * bandMult1 : na
+float bU2 = okB and showBand2 ? vwapB + sdB * bandMult2 : na
+float bL2 = okB and showBand2 ? vwapB - sdB * bandMult2 : na
+
+colLineA = colorTrend and okA ? (close >= vwapA ? color.new(#089981, 0) : color.new(#f23645, 0)) : colA
+colLineB = colorTrend and okB ? (close >= vwapB ? color.new(#089981, 0) : color.new(#f23645, 0)) : colB
+
+// ──────────────────────────────── Plots ──────────────────────────────────────
+pA   = plot(vwapA, "VWAP A", colLineA, 2)
+pB   = plot(vwapB, "VWAP B", colLineB, 2)
+
+pAU1 = plot(aU1, "A Upper Band 1", color.new(colA, 55))
+pAL1 = plot(aL1, "A Lower Band 1", color.new(colA, 55))
+pAU2 = plot(aU2, "A Upper Band 2", color.new(colA, 70), 1, plot.style_circles)
+pAL2 = plot(aL2, "A Lower Band 2", color.new(colA, 70), 1, plot.style_circles)
+pBU1 = plot(bU1, "B Upper Band 1", color.new(colB, 55))
+pBL1 = plot(bL1, "B Lower Band 1", color.new(colB, 55))
+pBU2 = plot(bU2, "B Upper Band 2", color.new(colB, 70), 1, plot.style_circles)
+pBL2 = plot(bL2, "B Lower Band 2", color.new(colB, 70), 1, plot.style_circles)
+
+fill(pAU1, pAL1, color = color.new(colA, 93), title = "A Band 1 Zone")
+fill(pBU1, pBL1, color = color.new(colB, 93), title = "B Band 1 Zone")
+
+// Supply/demand cloud between the two auto-anchored VWAPs
+fill(pA, pB, title = "A/B Cloud",
+     color = dualMode and showCloud ? (vwapA >= vwapB ? color.new(colA, 90) : color.new(colB, 90)) : na)
+
+// ───────────────────────────── Anchor markers ────────────────────────────────
+if showLabels and not na(ph) and (dualMode or useHi)
+    label.new(bar_index - rightBars, high[rightBars], "",
+         color = color.new(colA, 10), style = label.style_triangledown,
+         textcolor = color.new(color.white, 0), size = size.tiny,
+         tooltip = "New VWAP anchor: swing high")
+
+if showLabels and not na(pl) and (dualMode or useLo)
+    label.new(bar_index - rightBars, low[rightBars], "",
+         color = color.new(colB, 10), style = label.style_triangleup,
+         textcolor = color.new(color.white, 0), size = size.tiny,
+         tooltip = "New VWAP anchor: swing low")
+
+if showLabels and usePer and newPeriod
+    label.new(bar_index, low, "",
+         color = color.new(color.gray, 30), style = label.style_circle,
+         textcolor = color.new(color.white, 0), size = size.tiny,
+         tooltip = "New VWAP anchor: period start")
+
+if showLabels and useMan and manNow
+    label.new(bar_index, low, "",
+         color = color.new(color.gray, 10), style = label.style_triangleup,
+         textcolor = color.new(color.white, 0), size = size.small,
+         tooltip = "New VWAP anchor: manual time")
+
+// ────────────────────────────── Info table ───────────────────────────────────
+var table info = table.new(position.top_right, 2, 3,
+     bgcolor = color.new(color.black, 80), border_width = 1,
+     border_color = color.new(color.gray, 60), frame_width = 1,
+     frame_color = color.new(color.gray, 60))
+
+if showInfo and barstate.islast
+    // Offset of each anchor (clamped so time[] lookups stay within buffer)
+    int offA = okA ? math.min(bar_index - anchorA, 4900) : na
+    int offB = okB ? math.min(bar_index - anchorB, 4900) : na
+
+    string aDate = okA ? str.format_time(time[offA], "yyyy.MM.dd HH:mm", syminfo.timezone) : "—"
+    string bDate = okB ? str.format_time(time[offB], "yyyy.MM.dd HH:mm", syminfo.timezone) : "—"
+
+    float dA = (close - vwapA) / vwapA * 100
+    float dB = (close - vwapB) / vwapB * 100
+    string aDist = okA ? (dA >= 0 ? "+" : "") + str.tostring(dA, "#.##") + "%" : ""
+    string bDist = okB ? (dB >= 0 ? "+" : "") + str.tostring(dB, "#.##") + "%" : ""
+
+    table.cell(info, 0, 0, "Anchor Mode", text_color = color.new(color.white, 0), text_size = size.small)
+    table.cell(info, 1, 0, anchorMode,    text_color = color.new(color.white, 0), text_size = size.small)
+    table.cell(info, 0, 1, "A  " + aDist, text_color = colA, text_size = size.small)
+    table.cell(info, 1, 1, aDate,         text_color = color.new(color.white, 0), text_size = size.small)
+    table.cell(info, 0, 2, "B  " + bDist, text_color = colB, text_size = size.small)
+    table.cell(info, 1, 2, dualMode ? bDate : "off (single-anchor mode)",
+         text_color = color.new(color.white, 0), text_size = size.small)
+
+// ──────────────────────────────── Alerts ─────────────────────────────────────
+bool xUpA = okA and ta.crossover(close,  nz(vwapA, close))
+bool xDnA = okA and ta.crossunder(close, nz(vwapA, close))
+bool xUpB = okB and ta.crossover(close,  nz(vwapB, close))
+bool xDnB = okB and ta.crossunder(close, nz(vwapB, close))
+
+alertcondition(xUpA, "DAVWAP: Cross Above VWAP A",
+     "DAVWAP: {{ticker}} crossed ABOVE VWAP A @ {{close}}")
+alertcondition(xDnA, "DAVWAP: Cross Below VWAP A",
+     "DAVWAP: {{ticker}} crossed BELOW VWAP A @ {{close}}")
+alertcondition(xUpB, "DAVWAP: Cross Above VWAP B",
+     "DAVWAP: {{ticker}} crossed ABOVE VWAP B @ {{close}}")
+alertcondition(xDnB, "DAVWAP: Cross Below VWAP B",
+     "DAVWAP: {{ticker}} crossed BELOW VWAP B @ {{close}}")
