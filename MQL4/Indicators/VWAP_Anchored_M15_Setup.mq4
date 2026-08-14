@@ -410,7 +410,8 @@ void PlaceSignal(datetime entryTime, int dir, double entryPrice, double extreme,
    if(ci < 0)
       return;
 
-   double offset = 6 * Point * MathPow(10, (MarketInfo(Symbol(), MODE_DIGITS) % 2));
+   int    dg     = (int)MarketInfo(Symbol(), MODE_DIGITS);
+   double offset = 6 * Point * MathPow(10.0, (double)(dg % 2));
    if(dir > 0)
       LongBuf[ci] = iLow(NULL, PERIOD_CURRENT, ci) - offset;
    else
