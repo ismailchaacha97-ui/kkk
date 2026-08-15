@@ -1,0 +1,295 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════════════════
+//  ORIGIN OF THE MOVE (OFM) — "Failed Squeeze Refill"
+//  Order-flow scalping model approximated with Volume Delta, wick rejection & HVN logic
+// ───────────────────────────────────────────────────────────────────────────────────────
+//  MODEL (4 stages):
+//   1) AGGRESSION + ABSORPTION  : a high-volume / high-delta candle where the aggressive
+//                                 side gets absorbed -> price is rejected and closes back
+//                                 against the aggressors, leaving a long wick.
+//                                 The wick extreme = "Squeeze Catalyst".
+//   2) SQUEEZE FAILURE          : price then breaks the OPPOSITE side of that candle
+//                                 ("punch to the wall") -> the aggressors are trapped.
+//   3) REFILL ZONE              : the origin of that move (wick/body of the absorbed
+//                                 candle) is drawn as a box and extended right.
+//   4) REFILL ENTRY             : price retraces back into the zone -> the trapped side
+//                                 gets "refilled" (stopped out) -> SELL / BUY signal.
+//
+//  Bearish setup  = absorbed BUYING  (upper wick, +delta) -> break of the LOW  -> SELL zone
+//  Bullish setup  = absorbed SELLING (lower wick, -delta) -> break of the HIGH -> BUY  zone
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+indicator("Origin of the Move | Failed Squeeze Refill [OFM]", shorttitle="OFM Refill",
+     overlay = true, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
+
+// ═══════════════════════════════ 1. INPUTS ════════════════════════════════════════════
+
+// ---- Aggression / absorption detection -----------------------------------------------
+var string G1 = "1 • Aggression & Absorption"
+volLen      = input.int(20,   "Volume Average Length",          minval = 2,  group = G1,
+     tooltip = "Lookback for the average volume / average absolute delta baseline.")
+volMult     = input.float(1.8, "Volume Multiplier",             minval = 1.0, step = 0.1, group = G1,
+     tooltip = "A candle is 'aggressive' when its volume >= Volume Multiplier x average volume.")
+useDelta    = input.bool(true, "Require Delta Confirmation",    group = G1,
+     tooltip = "Require the delta to be pushing in the ABSORBED direction "
+     + "(positive delta for an upper-wick absorption, negative for a lower-wick absorption).")
+deltaMult   = input.float(1.2, "Delta Surge Multiplier",        minval = 0.0, step = 0.1, group = G1,
+     tooltip = "|delta| must be >= this multiple of the average |delta|.")
+wickPct     = input.float(50.0, "Min Rejection Wick (% of range)", minval = 10.0, maxval = 90.0, step = 5.0, group = G1,
+     tooltip = "The rejection wick must be at least this % of the candle's total range.")
+closePct    = input.float(40.0, "Max Close Position (% of range)", minval = 5.0, maxval = 90.0, step = 5.0, group = G1,
+     tooltip = "For an absorbed-buying candle the close must sit in the bottom X% of the range "
+     + "(mirrored for absorbed selling). This is the 'trapped' close.")
+useHVN      = input.bool(true, "Require High-Volume Node",      group = G1,
+     tooltip = "Only accept the catalyst if its volume is the highest of the last N bars "
+     + "(a real high-volume node, i.e. where size actually traded).")
+hvnLen      = input.int(10,   "HVN Lookback (bars)",            minval = 2,  group = G1)
+
+// ---- Volume delta engine --------------------------------------------------------------
+var string G2 = "2 • Volume Delta Engine"
+useLTF      = input.bool(true, "Use Lower-Timeframe Delta",     group = G2,
+     tooltip = "ON  : intrabar delta built from a lower timeframe (closest to real order flow).\n"
+     + "OFF : proxy delta derived from where the candle closes inside its range.\n"
+     + "If the LTF data is unavailable the script falls back to the proxy automatically.")
+ltfRes      = input.timeframe("1", "Lower Timeframe",           group = G2)
+
+// ---- Squeeze failure --------------------------------------------------------------------
+var string G3 = "3 • Squeeze Failure"
+failWindow  = input.int(6,    "Max Bars to Confirm Failure",    minval = 1, maxval = 50, group = G3,
+     tooltip = "Price must break the opposite side of the catalyst candle within this many bars, "
+     + "otherwise the setup is discarded (the squeeze never failed).")
+failByClose = input.bool(false, "Require Close Beyond Level",   group = G3,
+     tooltip = "ON = the failure break must CLOSE beyond the catalyst's opposite extreme. "
+     + "OFF = a wick through it is enough.")
+
+// ---- Refill zone -------------------------------------------------------------------------
+var string G4 = "4 • Refill Zone & Entry"
+zoneMode    = input.string("Wick to Body", "Zone Anatomy", options = ["Wick to Body", "Full Candle", "Body Only"], group = G4,
+     tooltip = "Wick to Body = the absorbed wick only (the true 'origin', tightest zone).\n"
+     + "Full Candle = wick extreme to the opposite extreme.\n"
+     + "Body Only = the candle body (where most of the absorbed size printed).")
+entryMode   = input.string("Touch Proximal", "Refill Trigger", options = ["Touch Proximal", "Close Inside", "Reach 50%"], group = G4,
+     tooltip = "How deep price must retrace into the zone before the signal fires.")
+deleteOnHit = input.bool(true, "Delete Zone After Test (mitigated)", group = G4)
+invalidate  = input.bool(true, "Delete Zone If Fully Broken",   group = G4,
+     tooltip = "A close beyond the distal edge means the trapped side got out / the zone failed.")
+extendBars  = input.int(30,   "Extend Zone (bars right)",       minval = 1, group = G4)
+maxZones    = input.int(8,    "Max Live Zones",                 minval = 1, maxval = 60, group = G4)
+
+// ---- Visuals ------------------------------------------------------------------------------
+var string G5 = "5 • Visuals"
+bullCol     = input.color(color.new(color.green, 80), "Bullish Refill Zone", group = G5)
+bearCol     = input.color(color.new(color.red,   80), "Bearish Refill Zone", group = G5)
+showCatalyst= input.bool(true,  "Mark Squeeze Catalyst",  group = G5)
+showZoneTxt = input.bool(true,  "Zone Labels",            group = G5)
+showSignals = input.bool(true,  "Entry Signals",          group = G5)
+showDelta   = input.bool(false, "Colour Bars by Delta",   group = G5)
+
+// ═══════════════════════════════ 2. VOLUME DELTA ═══════════════════════════════════════
+// Lower-timeframe delta: every intrabar is classified as buy (up close) or sell (down close)
+// volume, exactly like a footprint's "bid x ask" approximation.
+// NOTE: request.security_lower_tf() must live at global scope.
+[ltfVol, ltfSign] = request.security_lower_tf(syminfo.tickerid, ltfRes, [volume, math.sign(close - open)])
+
+float ltfDelta = 0.0
+bool  ltfOk    = false
+if not na(ltfVol) and array.size(ltfVol) > 0 and array.size(ltfVol) == array.size(ltfSign)
+    ltfOk := true
+    for i = 0 to array.size(ltfVol) - 1
+        ltfDelta += nz(array.get(ltfVol, i)) * nz(array.get(ltfSign, i))
+
+// Proxy delta: buyVol = vol*(close-low)/range, sellVol = vol*(high-close)/range
+rng          = high - low
+float proxyDelta = rng > 0 ? volume * ((close - low) - (high - close)) / rng : 0.0
+
+// Effective delta used by the engine
+float delta  = (useLTF and ltfOk) ? ltfDelta : proxyDelta
+avgVol       = ta.sma(volume, volLen)
+avgAbsDelta  = ta.sma(math.abs(delta), volLen)
+
+// ═══════════════════════════════ 3. CANDLE ANATOMY ═════════════════════════════════════
+bodyTop    = math.max(open, close)
+bodyBot    = math.min(open, close)
+upperWick  = high - bodyTop
+lowerWick  = bodyBot - low
+closePos   = rng > 0 ? (close - low) / rng * 100.0 : 50.0   // 0% = at the low, 100% = at the high
+
+// ---- Stage 1 filters -------------------------------------------------------------------
+bool aggressive = volume >= avgVol * volMult and rng > 0                       // size actually traded
+bool isHVN      = not useHVN or volume >= ta.highest(volume, hvnLen)           // high-volume node
+bool deltaSurge = math.abs(delta) >= avgAbsDelta * deltaMult
+
+// BEARISH catalyst: aggressive BUYING absorbed -> long UPPER wick, close near the low,
+// delta positive (buyers were the aggressors but price refused to hold up).
+bool bearAbsorb = aggressive and isHVN
+     and upperWick >= rng * wickPct / 100.0
+     and closePos <= closePct
+     and (not useDelta or (delta > 0 and deltaSurge))
+
+// BULLISH catalyst: aggressive SELLING absorbed -> long LOWER wick, close near the high,
+// delta negative (sellers were the aggressors but price refused to break down).
+bool bullAbsorb = aggressive and isHVN
+     and lowerWick >= rng * wickPct / 100.0
+     and closePos >= 100.0 - closePct
+     and (not useDelta or (delta < 0 and deltaSurge))
+     and not bearAbsorb   // one candle cannot be both; bearish takes precedence
+
+// ═══════════════════════════════ 4. DATA STRUCTURES ════════════════════════════════════
+// Pending setup = catalyst found, waiting for the squeeze to FAIL (stage 2).
+type Setup
+    bool  bear        // true = trapped buyers (sell setup)
+    float top         // zone upper edge
+    float bot         // zone lower edge
+    float failLevel   // the opposite extreme that must break to confirm the trap
+    int   bar         // bar_index of the catalyst
+
+// Live refill zone = failure confirmed, waiting for price to come back (stage 4).
+type Zone
+    bool  bear
+    float top
+    float bot
+    box   bx
+    label lb
+    bool  hit
+
+var array<Setup> pending = array.new<Setup>()
+var array<Zone>  zones   = array.new<Zone>()
+
+// Signal flags (must be global series for plotshape / alertcondition)
+bool sigBuy  = false
+bool sigSell = false
+
+// ---- Helper: build the zone edges from the catalyst candle ------------------------------
+buildZone(bool bear) =>
+    float t = na
+    float b = na
+    if zoneMode == "Full Candle"
+        t := high
+        b := low
+    else if zoneMode == "Body Only"
+        t := bodyTop
+        b := bodyBot
+    else // "Wick to Body" -> only the absorbed wick, the true origin of the move
+        t := bear ? high    : bodyBot
+        b := bear ? bodyTop : low
+    // Degenerate (no wick) protection: give the zone a minimal thickness
+    if t - b <= 0
+        float pad = math.max(syminfo.mintick, rng * 0.05)
+        t := bear ? high : b + pad
+        b := bear ? t - pad : low
+    [t, b]
+
+// ═══════════════ 5. STAGE 1 -> register the Squeeze Catalyst ═══════════════════════════
+if (bearAbsorb or bullAbsorb) and barstate.isconfirmed
+    bool bear = bearAbsorb
+    [zt, zb] = buildZone(bear)
+    // failLevel = the OPPOSITE side of the absorbed candle ("the wall")
+    array.push(pending, Setup.new(bear, zt, zb, bear ? low : high, bar_index))
+    if showCatalyst
+        label.new(bar_index, bear ? high : low,
+             text  = bear ? "▼ ABS" : "▲ ABS",
+             style = bear ? label.style_label_down : label.style_label_up,
+             color = color.new(bear ? color.red : color.green, 30),
+             textcolor = color.white, size = size.tiny,
+             tooltip = "Squeeze Catalyst | vol " + str.tostring(volume, format.volume)
+                 + "  delta " + str.tostring(delta, format.volume))
+
+// ═══════════════ 6. STAGE 2 -> confirm the Squeeze FAILURE, draw the zone ══════════════
+if array.size(pending) > 0
+    for i = array.size(pending) - 1 to 0
+        Setup s = array.get(pending, i)
+        if bar_index > s.bar
+            // Has the "wall" broken? (trapped side confirmed)
+            bool broke = s.bear ? (failByClose ? close < s.failLevel : low  < s.failLevel)
+                 : (failByClose ? close > s.failLevel : high > s.failLevel)
+            if broke
+                // Stage 3 — draw the Refill Zone (Origin of the Move)
+                box bx = box.new(s.bar, s.top, bar_index + extendBars, s.bot,
+                     border_color = color.new(s.bear ? color.red : color.green, 40),
+                     border_width = 1,
+                     bgcolor      = s.bear ? bearCol : bullCol,
+                     xloc         = xloc.bar_index)
+                label lb = na
+                if showZoneTxt
+                    lb := label.new(bar_index + extendBars, s.bear ? s.top : s.bot,
+                         text  = s.bear ? "OFM Supply (trapped buyers)" : "OFM Demand (trapped sellers)",
+                         style = s.bear ? label.style_label_down : label.style_label_up,
+                         color = color.new(color.black, 100),
+                         textcolor = s.bear ? color.red : color.green,
+                         size = size.tiny)
+                array.push(zones, Zone.new(s.bear, s.top, s.bot, bx, lb, false))
+                array.remove(pending, i)
+            else if bar_index - s.bar > failWindow
+                array.remove(pending, i)   // squeeze never failed -> discard
+
+// Keep only the newest N zones
+while array.size(zones) > maxZones
+    Zone old = array.shift(zones)
+    box.delete(old.bx)
+    label.delete(old.lb)
+
+// ═══════════════ 7. STAGE 4 -> the REFILL entry ════════════════════════════════════════
+if array.size(zones) > 0
+    for i = array.size(zones) - 1 to 0
+        Zone z = array.get(zones, i)
+        float mid      = (z.top + z.bot) / 2.0
+        // Proximal = the edge price meets first coming back into the zone
+        float proximal = z.bear ? z.bot : z.top
+        bool  touched  = z.bear ? high >= proximal : low <= proximal
+        bool  closedIn = close <= z.top and close >= z.bot
+        bool  reachMid = z.bear ? high >= mid : low <= mid
+        bool  trigger  = entryMode == "Close Inside" ? closedIn : entryMode == "Reach 50%" ? reachMid : touched
+
+        // Zone fully violated -> trapped side escaped, the level is dead
+        bool dead = invalidate and (z.bear ? close > z.top : close < z.bot)
+
+        if not z.hit and trigger and not dead
+            z.hit := true
+            if z.bear
+                sigSell := true
+            else
+                sigBuy := true
+            if showSignals
+                label.new(bar_index, z.bear ? high : low,
+                     text  = z.bear ? "SELL" : "BUY",
+                     style = z.bear ? label.style_label_down : label.style_label_up,
+                     color = z.bear ? color.new(color.red, 10) : color.new(color.green, 10),
+                     textcolor = color.white, size = size.small,
+                     tooltip = "Refill of the Origin of the Move\n"
+                         + (z.bear ? "Trapped buyers being refilled" : "Trapped sellers being refilled"))
+            if deleteOnHit
+                box.delete(z.bx)
+                label.delete(z.lb)
+                array.remove(zones, i)
+                continue
+        if dead
+            box.delete(z.bx)
+            label.delete(z.lb)
+            array.remove(zones, i)
+            continue
+        // Still live -> keep extending it to the right
+        box.set_right(z.bx, bar_index + extendBars)
+        if not na(z.lb)
+            label.set_x(z.lb, bar_index + extendBars)
+
+// ═══════════════════════════════ 8. PLOTS & ALERTS ═════════════════════════════════════
+plotshape(showSignals and sigBuy,  title = "Refill Buy",  style = shape.triangleup,
+     location = location.belowbar, color = color.new(color.green, 0), size = size.tiny)
+plotshape(showSignals and sigSell, title = "Refill Sell", style = shape.triangledown,
+     location = location.abovebar, color = color.new(color.red, 0),   size = size.tiny)
+
+barcolor(showDelta ? (delta > 0 ? color.new(color.teal, 40) : color.new(color.maroon, 40)) : na, title = "Delta Bars")
+
+// Optional delta readout in the Data Window (does not clutter the chart)
+plot(delta,        title = "Volume Delta",  color = color.new(color.gray, 100), display = display.data_window)
+plot(avgAbsDelta,  title = "Avg |Delta|",   color = color.new(color.gray, 100), display = display.data_window)
+plot(avgVol,       title = "Avg Volume",    color = color.new(color.gray, 100), display = display.data_window)
+
+alertcondition(sigBuy,  title = "OFM Refill BUY",  message = "OFM: price refilled a bullish Origin-of-the-Move zone (trapped sellers) on {{ticker}} {{interval}}")
+alertcondition(sigSell, title = "OFM Refill SELL", message = "OFM: price refilled a bearish Origin-of-the-Move zone (trapped buyers) on {{ticker}} {{interval}}")
+alertcondition(sigBuy or sigSell, title = "OFM Refill ANY", message = "OFM: refill entry triggered on {{ticker}} {{interval}}")
+
+if sigBuy
+    alert("OFM Refill BUY @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar)
+if sigSell
+    alert("OFM Refill SELL @ " + str.tostring(close, format.mintick), alert.freq_once_per_bar)
