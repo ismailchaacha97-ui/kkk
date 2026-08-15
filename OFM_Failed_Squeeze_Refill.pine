@@ -76,6 +76,18 @@ invalidate  = input.bool(true, "Delete Zone If Fully Broken",   group = G4,
 extendBars  = input.int(30,   "Extend Zone (bars right)",       minval = 1, group = G4)
 maxZones    = input.int(8,    "Max Live Zones",                 minval = 1, maxval = 60, group = G4)
 
+// ---- Reality check / statistics -----------------------------------------------------------
+var string G6 = "6 • Reality Check (measure your REAL hit rate)"
+showStats   = input.bool(true,  "Show Stats Table",       group = G6,
+     tooltip = "Tracks every signal to a fixed stop/target and reports the ACTUAL win rate "
+     + "on this symbol and timeframe. Trust this number, not a number you hoped for.")
+atrLen      = input.int(14,     "ATR Length",             minval = 1, group = G6)
+stopMult    = input.float(1.0,  "Stop = ATR x",           minval = 0.1, step = 0.1, group = G6,
+     tooltip = "Stop is placed beyond the zone's distal edge by this ATR multiple.")
+rrTarget    = input.float(2.0,  "Target R:R",             minval = 0.1, step = 0.1, group = G6,
+     tooltip = "Lower R:R = higher win rate, smaller wins. Raise it and the win rate FALLS. "
+     + "That trade-off is the whole game — the table lets you see it directly.")
+
 // ---- Visuals ------------------------------------------------------------------------------
 var string G5 = "5 • Visuals"
 bullCol     = input.color(color.new(color.green, 80), "Bullish Refill Zone", group = G5)
@@ -152,8 +164,22 @@ type Zone
     label lb
     bool  hit
 
+// A tracked trade — used ONLY to measure the real hit rate of the model on your symbol.
+type Trade
+    bool  bear
+    float entry
+    float stop
+    float target
+    bool  open
+
 var array<Setup> pending = array.new<Setup>()
 var array<Zone>  zones   = array.new<Zone>()
+var array<Trade> trades  = array.new<Trade>()
+
+// Running tally
+var int wins    = 0
+var int losses  = 0
+var int taken   = 0
 
 // Signal flags (must be global series for plotshape / alertcondition)
 bool sigBuy  = false
@@ -271,6 +297,71 @@ if array.size(zones) > 0
         box.set_right(z.bx, bar_index + extendBars)
         if not na(z.lb)
             label.set_x(z.lb, bar_index + extendBars)
+
+// ═══════════════ 7b. REALITY CHECK — track every signal to stop or target ══════════════
+// This does NOT change the strategy. It exists so you can read your true hit rate on YOUR
+// symbol/timeframe instead of trusting a claimed number.
+atr = ta.atr(atrLen)
+
+if showStats and (sigBuy or sigSell)
+    bool bear   = sigSell
+    float entry = close
+    float stop  = bear ? entry + atr * stopMult : entry - atr * stopMult
+    float risk  = math.abs(entry - stop)
+    float targ  = bear ? entry - risk * rrTarget : entry + risk * rrTarget
+    array.push(trades, Trade.new(bear, entry, stop, targ, true))
+    taken += 1
+
+if showStats and array.size(trades) > 0
+    for i = array.size(trades) - 1 to 0
+        Trade t = array.get(trades, i)
+        if t.open
+            // Conservative: if both levels are touched in the same bar, count it as a LOSS.
+            bool stopHit = t.bear ? high >= t.stop   : low  <= t.stop
+            bool targHit = t.bear ? low  <= t.target : high >= t.target
+            if stopHit
+                losses += 1
+                t.open := false
+                array.remove(trades, i)
+            else if targHit
+                wins += 1
+                t.open := false
+                array.remove(trades, i)
+
+// ---- Stats table -----------------------------------------------------------------------
+var table stats = table.new(position.top_right, 2, 7,
+     bgcolor = color.new(color.black, 20), border_color = color.new(color.gray, 50), border_width = 1)
+
+if showStats and barstate.islast
+    int  closed  = wins + losses
+    float wr     = closed > 0 ? wins / closed * 100.0 : 0.0
+    // Break-even win rate for the chosen R:R — the number you must BEAT to make money
+    float beWR   = 100.0 / (1.0 + rrTarget)
+    float expR   = closed > 0 ? (wins * rrTarget - losses) / closed : 0.0
+    color wrCol  = closed == 0 ? color.gray : wr >= beWR ? color.lime : color.red
+
+    table.cell(stats, 0, 0, "OFM — REAL RESULTS", text_color = color.white, text_size = size.small, bgcolor = color.new(color.blue, 50))
+    table.cell(stats, 1, 0, str.tostring(rrTarget, "#.#") + "R target", text_color = color.white, text_size = size.small, bgcolor = color.new(color.blue, 50))
+
+    table.cell(stats, 0, 1, "Signals",      text_color = color.silver, text_size = size.small)
+    table.cell(stats, 1, 1, str.tostring(taken), text_color = color.white, text_size = size.small)
+
+    table.cell(stats, 0, 2, "Wins / Losses", text_color = color.silver, text_size = size.small)
+    table.cell(stats, 1, 2, str.tostring(wins) + " / " + str.tostring(losses), text_color = color.white, text_size = size.small)
+
+    table.cell(stats, 0, 3, "WIN RATE",     text_color = color.silver, text_size = size.small)
+    table.cell(stats, 1, 3, closed > 0 ? str.tostring(wr, "#.#") + "%" : "n/a", text_color = wrCol, text_size = size.small)
+
+    table.cell(stats, 0, 4, "Break-even WR", text_color = color.silver, text_size = size.small)
+    table.cell(stats, 1, 4, str.tostring(beWR, "#.#") + "%", text_color = color.orange, text_size = size.small)
+
+    table.cell(stats, 0, 5, "Expectancy",   text_color = color.silver, text_size = size.small)
+    table.cell(stats, 1, 5, closed > 0 ? str.tostring(expR, "#.##") + "R" : "n/a",
+         text_color = expR > 0 ? color.lime : color.red, text_size = size.small)
+
+    table.cell(stats, 0, 6, "Sample size",  text_color = color.silver, text_size = size.small)
+    table.cell(stats, 1, 6, closed < 30 ? "TOO SMALL (" + str.tostring(closed) + ")" : str.tostring(closed) + " ✓",
+         text_color = closed < 30 ? color.red : color.lime, text_size = size.small)
 
 // ═══════════════════════════════ 8. PLOTS & ALERTS ═════════════════════════════════════
 plotshape(showSignals and sigBuy,  title = "Refill Buy",  style = shape.triangleup,
