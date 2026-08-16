@@ -10,6 +10,11 @@ Everything that happens is written into **The Chronicle**: a maester's prose acc
 
 - 🏰 **Procedural realm** — realm name, 6 regions, a royal house, great houses, and 20+ minor houses, each with a generated name, seat, motto, and heraldic sigil (SVG, drawn in code)
 - 👥 **Living characters** — traits, four skills (war / diplomacy / stewardship / intrigue), aging, wounds, glory, earned epithets, permadeath
+- ❖ **Character interactions (v2)** — click any kinsman: tutor them in a skill, grant gifts (heals resentment), send them adventuring (they return with gold, scars, dragon eggs — or not at all), name an heir to override succession law, or banish them forever
+- ⚖ **The Small Council (v2)** — appoint a Castellan (+income), Marshal (+battle power, safer kin), Envoy (+diplomacy and marriages), and Spymaster (+schemes, unlocks the catspaw)
+- 🗡 **Assassination (v2)** — with a Spymaster seated, mark anyone in the realm for a quiet death. Failure means the rack, and the realm knows
+- 💾 **Autosave (v2)** — the chronicle persists in your browser; close the tab mid-winter and return
+- 🕯 **The Forbidden Shelf (v2)** — type `valar` anywhere to unlock ten cheat volumes: rains of gold, an instant dragon, plague for your rivals, or simply the throne. Every use is recorded in the chronicle, which will judge you
 - 💍 **Marriage & alliances** — propose matches; higher houses may refuse a lesser name
 - ⚔️ **Wars** — declare war, allies join by oath and friendship, named battles kill named characters, wars end in tribute or white peace. Raise banners against the throne itself and you can found a new royal dynasty
 - 🃏 **Event cards** — hedge knights, hungry smallfolk, insults at court, bastard rumors, royal wardships
@@ -46,6 +51,9 @@ js/rng.js         seeded RNG
 js/names.js       people/house/seat/motto name generators
 js/sigil.js       procedural heraldry (SVG shields)
 js/dragons.js     dragons: stages, power, riders, wild lairs
+js/characters.js  character interactions, small council, adventures, assassination
+js/cheats.js      the Forbidden Shelf (cheats)
+js/save.js        localStorage save/load
 js/world.js       world generation, characters, succession
 js/engine.js      season simulation: economy, mortality, births, marriages, wars, events, actions
 js/chronicle.js   prose history generator

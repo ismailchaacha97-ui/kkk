@@ -9,6 +9,7 @@ import {
   makeDragon, dragonAge, dragonStage, dragonStageName, dragonPower,
   describeDragon, livingDragons, houseDragons, wildDragons, killDragon, hasDragonblood,
 } from './dragons.js';
+import { councilBonus, resolveAdventures, isAway } from './characters.js';
 
 export const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
 
@@ -156,6 +157,8 @@ function tickEconomy(state, rng) {
     if (state.season === 2) inc = Math.floor(inc * 1.25); // harvest
     const lord = state.characters[house.lordId];
     if (lord) inc = Math.floor(inc * (0.8 + lord.skills.stew * 0.025));
+    const castellan = councilBonus(state, house, 'castellan');
+    if (castellan) inc += Math.floor(castellan / 2);
     house.gold += inc;
     // upkeep
     house.gold -= Math.floor(house.troops / 100);
@@ -291,6 +294,8 @@ function housePower(state, house) {
   let p = house.troops;
   const lord = state.characters[house.lordId];
   if (lord) p *= 0.85 + lord.skills.war * 0.02;
+  const marshal = councilBonus(state, house, 'marshal');
+  if (marshal) p *= 1 + marshal * 0.012;
   // Dragons are worth armies — more with a rider on their back.
   for (const d of houseDragons(state, house.id)) {
     let dp = dragonPower(state, d);
@@ -398,10 +403,12 @@ function tickWar(state, rng) {
     const onWinning = (winnerSide === 'A') === w.attackers.includes(id);
     const lossFrac = onWinning ? rng.range(0.04, 0.10) : rng.range(0.10, 0.22);
     h.troops = Math.max(100, Math.floor(h.troops * (1 - lossFrac)));
-    // named characters risk death in battle
+    // named characters risk death in battle (marshals keep kin out of the worst of it)
+    const marshalGuard = councilBonus(state, h, 'marshal') > 0 ? 0.8 : 1;
     for (const ch of livingMembers(state, h)) {
       if (ch.gender !== 'm' || age(state, ch) < 16 || age(state, ch) > 60) continue;
-      const risk = (h.lordId === ch.id ? 0.03 : 0.05) * (onWinning ? 0.6 : 1.3);
+      if (isAway(state, ch)) continue;
+      const risk = (h.lordId === ch.id ? 0.03 : 0.05) * (onWinning ? 0.6 : 1.3) * marshalGuard;
       if (rng.chance(risk)) {
         kill(state, rng, ch, `fell in the ${battleName}`);
       } else if (rng.chance(0.05)) {
@@ -782,6 +789,7 @@ export function advanceSeason(state) {
   if (state.gameOver) { archiveSeason(state); return; }
   tickBirths(state, rng);
   tickAIMarriages(state, rng);
+  resolveAdventures(state, rng, kill, makeDragon);
   tickDragons(state, rng);
   if (state.gameOver) { archiveSeason(state); return; }
   tickWar(state, rng);
@@ -856,7 +864,7 @@ export const ACTIONS = {
       const h = state.houses[state.playerHouseId];
       if (h.id === state.crownHouseId) return 'You ARE the crown. The mirror is flattered.';
       const lord = state.characters[h.lordId];
-      const bonus = lord ? lord.skills.dip : 6;
+      const bonus = (lord ? lord.skills.dip : 6) + councilBonus(state, h, 'envoy');
       const gain = rng.int(6, 12) + Math.floor(bonus / 3);
       relMod(state, h.id, state.crownHouseId, gain);
       h.prestige += 2;
@@ -872,7 +880,7 @@ export const ACTIONS = {
       const T = state.houses[targetId];
       if (!T || !T.alive) return 'The target of your scheme no longer matters.';
       const lord = state.characters[h.lordId];
-      const skill = lord ? lord.skills.intr : 6;
+      const skill = (lord ? lord.skills.intr : 6) + Math.floor(councilBonus(state, h, 'spymaster') / 2);
       const p = 0.35 + skill * 0.03;
       if (rng.chance(p)) {
         const mode = rng.pick(['coin', 'shame', 'discord']);
@@ -965,6 +973,7 @@ export function arrangeMarriage(state, myCharId, targetHouseId) {
   let p = 0.55 + rel / 200 - Math.max(0, prestigeGap) / 150;
   const lord = state.characters[h.lordId];
   if (lord) p += lord.skills.dip * 0.015;
+  p += councilBonus(state, h, 'envoy') * 0.01;
   state.actionsLeft -= 1;
   if (!rng.chance(Math.max(0.1, Math.min(0.95, p)))) {
     relMod(state, h.id, T.id, -3);

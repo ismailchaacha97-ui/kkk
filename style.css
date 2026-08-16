@@ -190,6 +190,40 @@ body {
 .dragon-sub, .dragon-kills { font-size: 14px; }
 .dragon-tag { color: #8c3a12; font-weight: bold; }
 .trait-blood { border-color: #8c3a12; color: #8c3a12; background: #b0501e14; font-weight: bold; }
+.trait-bad { border-color: var(--blood); color: var(--blood); }
+
+/* ---------- council & interactions ---------- */
+.council-panel {
+  border: 1px solid var(--line); border-radius: 3px;
+  background: #fff3; padding: 10px 14px; margin-bottom: 14px;
+}
+.council-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+.council-cell { border: 1px dotted var(--line); border-radius: 3px; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; }
+.council-post { font-family: 'Cinzel', serif; font-weight: 700; font-size: 14px; color: var(--seal); }
+.council-holder { font-size: 14.5px; }
+.council-desc { font-size: 12.5px; }
+.council-cell .btn { align-self: flex-start; margin-top: 4px; }
+.council-tag { color: var(--seal); font-weight: bold; }
+.heir-tag {
+  font-size: 11px; letter-spacing: .1em; color: #fff;
+  background: var(--gold); border-radius: 3px; padding: 1px 6px; vertical-align: 2px;
+}
+.away-tag { color: #1f3a5f; font-style: italic; }
+.char-card.clickable { cursor: pointer; transition: box-shadow .12s, transform .12s; }
+.char-card.clickable:hover { box-shadow: 0 3px 10px #0004; transform: translateY(-1px); }
+.char-card.away { opacity: .65; background: repeating-linear-gradient(45deg, #fff4, #fff4 8px, #00000006 8px, #00000006 16px); }
+.interact-hint { font-style: italic; }
+.opt-note { float: right; font-size: 12.5px; font-style: italic; }
+
+/* ---------- cheats ---------- */
+.cheat-panel {
+  grid-column: 1 / -1;
+  border: 1px dashed #3d2b56; border-radius: 3px;
+  background: linear-gradient(#efe0d6, #e2ccc0);
+  padding: 10px 14px;
+}
+.cheat-title { color: #3d2b56; border-bottom-color: #3d2b5666; }
+.log-entry.kind-cheat { border-left-color: #3d2b56; background: #3d2b5612; font-style: italic; }
 .char-card.rider { border-color: #b0501e; background: #b0501e0e; }
 .dragon-realm-row { background: #b0501e0a; }
 

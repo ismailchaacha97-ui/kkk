@@ -3,11 +3,30 @@ import { generateWorld, livingMembers, age, fullName, shortName, regionName } fr
 import { advanceSeason, runAction, resolveDecision, arrangeMarriage, ACTIONS, SEASONS } from './engine.js';
 import { sigilSVG, sigilBlazon } from './sigil.js';
 import { houseDragons, wildDragons, livingDragons, describeDragon, dragonStageName, dragonMark, hasDragonblood } from './dragons.js';
+import {
+  tutorCharacter, rewardCharacter, sendAdventuring, banishCharacter, nameHeir,
+  appointCouncil, assassinate, isAway, COUNCIL_POSTS,
+} from './characters.js';
+import { CHEATS, runCheat } from './cheats.js';
+import { saveGame, loadGame, hasSave, clearSave } from './save.js';
 import { buildChronicle, chroniclePlainText } from './chronicle.js';
 import { makeRng } from './rng.js';
 
 let state = null;
 let currentTab = 'court';
+let cheatsUnlocked = false;
+let cheatBuffer = '';
+
+// Type "valar" anywhere to unlock the Forbidden Shelf
+document.addEventListener('keydown', (e) => {
+  if (e.key.length !== 1) return;
+  cheatBuffer = (cheatBuffer + e.key.toLowerCase()).slice(-5);
+  if (cheatBuffer === 'valar' && !cheatsUnlocked) {
+    cheatsUnlocked = true;
+    toast('🕯 The Forbidden Shelf creaks open… (cheats unlocked — see the Court tab)');
+    if (state && state.playerHouseId) renderGame();
+  }
+});
 
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, html) => {
@@ -20,6 +39,15 @@ const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 
 // ---------- Setup flow ----------
 export function boot() {
+  if (hasSave()) {
+    const loaded = loadGame();
+    if (loaded && loaded.playerHouseId && loaded.houses[loaded.playerHouseId]) {
+      state = loaded;
+      renderGame();
+      toast(`Save restored — ${SEASONS[state.season]}, Year ${state.year}. The chronicle continues.`);
+      return;
+    }
+  }
   showSetup();
 }
 
@@ -69,6 +97,11 @@ function regenSetup(seed) {
   const reroll = el('button', 'btn btn-ghost', '☈ Consult other ravens (new realm)');
   reroll.onclick = () => regenSetup(Math.floor(Math.random() * 1e9));
   wrap.appendChild(reroll);
+  if (hasSave()) {
+    const cont = el('button', 'btn btn-ghost', '📜 Return to the saved chronicle');
+    cont.onclick = () => { const l = loadGame(); if (l) { state = l; renderGame(); } else toast('The saved chronicle is illegible.'); };
+    wrap.appendChild(cont);
+  }
   app.appendChild(wrap);
 }
 
@@ -145,10 +178,29 @@ function renderGame() {
   const endBtn = el('button', 'btn btn-endturn', `Let the season pass ➤`);
   endBtn.onclick = () => {
     advanceSeason(state);
+    saveGame(state);
     currentTab = 'court';
     renderGame();
   };
   bottom.appendChild(endBtn);
+
+  const menuBtn = el('button', 'btn btn-ghost btn-small', '☰');
+  menuBtn.title = 'Menu';
+  menuBtn.onclick = () => modal('The Maester\u2019s Desk', (body, close) => {
+    const s = el('button', 'btn btn-option', '💾 Save the chronicle now');
+    s.onclick = () => { saveGame(state) ? toast('Saved. The ink dries.') : toast('The ink refuses to dry (save failed).'); close(); };
+    body.appendChild(s);
+    const n = el('button', 'btn btn-option', '🗡 Abandon this dynasty (new game)');
+    n.onclick = () => { if (confirm('Abandon House ' + state.houses[state.playerHouseId].name + ' and its whole chronicle?')) { clearSave(); close(); showSetup(); } };
+    body.appendChild(n);
+    const c = el('button', 'btn btn-option', cheatsUnlocked ? '🕯 The Forbidden Shelf is open' : '🕯 A locked shelf (hint: say the word that all men must)');
+    c.onclick = () => {
+      if (!cheatsUnlocked) { toast('Type the word. Five letters. High Valyrian. All men must know it.'); return; }
+      close(); openCheats();
+    };
+    body.appendChild(c);
+  });
+  bottom.appendChild(menuBtn);
   app.appendChild(bottom);
 }
 
@@ -210,10 +262,66 @@ function renderCourt(main) {
   mrow.appendChild(mb);
   actList.appendChild(mrow);
 
+  // assassination action (spymaster only)
+  const arow = el('div', 'action-row');
+  const haveSpy = !!P.council.spymaster;
+  arow.innerHTML = `<div class="action-info"><div class="action-label">Send a Catspaw <span class="action-cost">90 🜚</span></div><div class="action-desc">${haveSpy ? 'A quiet death for a chosen enemy. Deniable. Usually.' : 'Requires a Spymaster on your council (see Family tab).'}</div></div>`;
+  const ab = el('button', 'btn btn-small btn-danger', 'Choose victim…');
+  ab.disabled = !haveSpy || state.actionsLeft <= 0 || P.gold < 90;
+  ab.onclick = () => pickVictim();
+  arow.appendChild(ab);
+  actList.appendChild(arow);
+
   actPanel.appendChild(actList);
   grid.appendChild(actPanel);
 
+  // Cheats panel
+  if (cheatsUnlocked) {
+    const cp = el('div', 'panel cheat-panel');
+    cp.appendChild(el('div', 'panel-title cheat-title', '🕯 The Forbidden Shelf'));
+    cp.appendChild(el('p', 'dim panel-note', 'Volumes the Citadel pretends do not exist. Each use is recorded in the chronicle, which will judge you.'));
+    const btn = el('button', 'btn btn-small', 'Open the shelf…');
+    btn.onclick = () => openCheats();
+    cp.appendChild(btn);
+    grid.appendChild(cp);
+  }
+
   main.appendChild(grid);
+}
+
+function openCheats() {
+  modal('🕯 The Forbidden Shelf', (body, close) => {
+    body.appendChild(el('p', 'dim', 'Ten volumes bound in black. Their use marks the chronicle forever.'));
+    for (const c of CHEATS) {
+      const row = el('div', 'target-row');
+      row.innerHTML = `<span class="tr-name">${c.icon} <strong>${esc(c.label)}</strong><br><em class="dim">${esc(c.desc)}</em></span>`;
+      const b = el('button', 'btn btn-small', 'Read it');
+      b.onclick = () => { const msg = runCheat(state, c.id); saveGame(state); close(); toast(msg); renderGame(); };
+      row.appendChild(b);
+      body.appendChild(row);
+    }
+  }, true);
+}
+
+function pickVictim() {
+  const P = state.houses[state.playerHouseId];
+  modal('A name for the catspaw', (body, close) => {
+    body.appendChild(el('p', 'dim', 'Lords are guarded; royalty doubly so. Choose someone whose death buys something.'));
+    const houses = Object.values(state.houses).filter((h) => h.alive && h.id !== P.id).sort((a, b) => (P.relations[a.id] || 0) - (P.relations[b.id] || 0));
+    for (const h of houses) {
+      for (const c of livingMembers(state, h).filter((x) => age(state, x) >= 14)) {
+        const isLord = h.lordId === c.id;
+        const row = el('div', 'target-row');
+        row.innerHTML = `<span class="tr-sigil">${sigilSVG(h.sigil, 24)}</span>
+          <span class="tr-name">${esc(shortName(state, c))}${isLord ? ' <em class="dim">(rules ' + esc(h.seat) + ')</em>' : ''}</span>
+          <span class="tr-rel ${(P.relations[h.id] || 0) < 0 ? 'neg' : 'pos'}">${P.relations[h.id] >= 0 ? '+' : ''}${P.relations[h.id] || 0}</span>`;
+        const b = el('button', 'btn btn-small btn-danger', 'Mark');
+        b.onclick = () => { const r = assassinate(state, c.id); toast(r.msg); close(); renderGame(); };
+        row.appendChild(b);
+        body.appendChild(row);
+      }
+    }
+  }, true);
 }
 
 function pickTarget(actionKey) {
@@ -297,17 +405,40 @@ function renderFamily(main) {
     panel.appendChild(dPanel);
   }
 
+  // Small council
+  const cPanel = el('div', 'council-panel');
+  cPanel.appendChild(el('div', 'panel-title', '⚖ The Small Council'));
+  const cGrid = el('div', 'council-grid');
+  for (const [post, def] of Object.entries(COUNCIL_POSTS)) {
+    const holder = P.council[post] ? state.characters[P.council[post]] : null;
+    const cell = el('div', 'council-cell');
+    cell.innerHTML = `<div class="council-post">${esc(def.label)}</div>
+      <div class="council-holder">${holder ? esc(shortName(state, holder)) + ` <em class="dim">(${def.skill === 'war' ? '⚔' : def.skill === 'dip' ? '🕊' : def.skill === 'stew' ? '🜚' : '🗡'} ${holder.skills[def.skill]})</em>` : '<em class="dim">vacant</em>'}</div>
+      <div class="council-desc dim">${esc(def.desc)}</div>`;
+    const b = el('button', 'btn btn-small', holder ? 'Replace' : 'Appoint');
+    b.onclick = () => pickCouncil(post);
+    cell.appendChild(b);
+    cGrid.appendChild(cell);
+  }
+  cPanel.appendChild(cGrid);
+  panel.appendChild(cPanel);
+
+  panel.appendChild(el('p', 'dim panel-note interact-hint', '❖ Click any kinsman below to interact: tutor, reward, send adventuring, name heir, or worse.'));
+
   const members = livingMembers(state, P).sort((a, b) => (P.lordId === a.id ? -1 : P.lordId === b.id ? 1 : a.birthYear - b.birthYear));
   const grid = el('div', 'family-grid');
   for (const c of members) {
     const isLord = P.lordId === c.id;
-    const card = el('div', 'char-card' + (isLord ? ' lord' : '') + (c.dragonId ? ' rider' : ''));
+    const isHeir = P.designatedHeirId === c.id;
+    const away = isAway(state, c);
+    const card = el('div', 'char-card clickable' + (isLord ? ' lord' : '') + (c.dragonId ? ' rider' : '') + (away ? ' away' : ''));
     const sp = c.spouseId ? state.characters[c.spouseId] : null;
     const mount = c.dragonId ? state.dragons[c.dragonId] : null;
+    const post = Object.entries(P.council).find(([, id]) => id === c.id);
     card.innerHTML = `
-      <div class="char-name">${isLord ? (c.gender === 'f' ? '♛ Lady ' : '♛ Lord ') : ''}${esc(fullName(state, c))}${mount ? ' ' + dragonMark(mount, 15) : ''}</div>
-      <div class="char-sub">${c.gender === 'f' ? 'Female' : 'Male'}, aged ${age(state, c)}${c.wounded ? ' · <span class="neg">wounded</span>' : ''}${c.glory ? ` · glory ${'✦'.repeat(Math.min(5, c.glory))}` : ''}${mount ? ` · <span class="dragon-tag">rides ${esc(mount.name)}</span>` : ''}</div>
-      <div class="char-traits">${c.traits.map((t) => `<span class="trait${t === 'Dragonblood' ? ' trait-blood' : ''}">${esc(t)}</span>`).join('')}</div>
+      <div class="char-name">${isLord ? (c.gender === 'f' ? '♛ Lady ' : '♛ Lord ') : ''}${esc(fullName(state, c))}${mount ? ' ' + dragonMark(mount, 15) : ''}${isHeir ? ' <span class="heir-tag">HEIR</span>' : ''}</div>
+      <div class="char-sub">${c.gender === 'f' ? 'Female' : 'Male'}, aged ${age(state, c)}${c.wounded ? ' · <span class="neg">wounded</span>' : ''}${c.glory ? ` · glory ${'✦'.repeat(Math.min(5, c.glory))}` : ''}${mount ? ` · <span class="dragon-tag">rides ${esc(mount.name)}</span>` : ''}${post ? ` · <span class="council-tag">${esc(COUNCIL_POSTS[post[0]].label)}</span>` : ''}${away ? ` · <span class="away-tag">away: ${esc(c.awayReason || 'on the road')}</span>` : ''}</div>
+      <div class="char-traits">${c.traits.map((t) => `<span class="trait${t === 'Dragonblood' ? ' trait-blood' : ''}${t === 'Resentful' ? ' trait-bad' : ''}">${esc(t)}</span>`).join('')}</div>
       <div class="char-skills">
         <span title="War">⚔ ${c.skills.war}</span>
         <span title="Diplomacy">🕊 ${c.skills.dip}</span>
@@ -316,6 +447,7 @@ function renderFamily(main) {
       </div>
       <div class="char-rel dim">${sp ? (sp.alive ? 'Wed to ' + esc(shortName(state, sp)) : 'Widowed') : age(state, c) >= 16 ? 'Unwed' : 'A child'}${c.childrenIds.length ? ` · ${c.childrenIds.filter((k) => state.characters[k].alive).length} living children` : ''}</div>
     `;
+    card.onclick = () => openCharacter(c.id);
     grid.appendChild(card);
   }
   panel.appendChild(grid);
@@ -331,6 +463,77 @@ function renderFamily(main) {
     panel.appendChild(dl);
   }
   main.appendChild(panel);
+}
+
+function openCharacter(chId) {
+  const P = state.houses[state.playerHouseId];
+  const c = state.characters[chId];
+  if (!c || !c.alive) return;
+  const isLord = P.lordId === c.id;
+  const away = isAway(state, c);
+  modal(fullName(state, c), (body, close) => {
+    const a = age(state, c);
+    body.appendChild(el('p', 'dim', `${c.gender === 'f' ? 'A lady' : 'A man'} of ${a}. ${c.traits.join(', ')}. ` +
+      (away ? `Currently away — ${esc(c.awayReason || 'on the road')}.` : `In residence at ${esc(P.seat)}.`) +
+      (c.mood >= 2 ? ' In high spirits.' : c.mood <= -2 ? ' In a black mood.' : '')));
+
+    const actRow = (label, note, fn, disabled = false, danger = false) => {
+      const b = el('button', 'btn btn-option' + (danger ? ' btn-danger' : ''), `${label} <em class="dim opt-note">${note}</em>`);
+      b.disabled = disabled;
+      b.onclick = () => { const r = fn(); if (r) toast(r.msg); close(); renderGame(); };
+      body.appendChild(b);
+    };
+
+    const noActs = state.actionsLeft <= 0;
+    if (!away) {
+      // Tutor (pick skill)
+      const tut = el('button', 'btn btn-option', `📖 Tutor for a season <em class="dim opt-note">1 action · +skill, better when young</em>`);
+      tut.disabled = noActs;
+      tut.onclick = () => {
+        body.innerHTML = '';
+        body.appendChild(el('p', 'dim', `What shall ${esc(c.name)} study?`));
+        for (const [sk, lbl] of [['war', '⚔ The sword and the field'], ['dip', '🕊 Courtesy and statecraft'], ['stew', '🜚 Ledgers and land'], ['intr', '🗡 Watching and whispering']]) {
+          const sb = el('button', 'btn btn-option', `${lbl} <em class="dim opt-note">currently ${c.skills[sk]}</em>`);
+          sb.onclick = () => { const r = tutorCharacter(state, c.id, sk); toast(r.msg); close(); renderGame(); };
+          body.appendChild(sb);
+        }
+      };
+      body.appendChild(tut);
+
+      actRow('❦ Grant a gift', '1 action · 30 gold · loyalty, heals resentment', () => rewardCharacter(state, c.id), noActs || P.gold < 30);
+      if (!isLord && a >= 16) {
+        actRow('🐎 Send adventuring', '1 action · away 2-4 seasons · gold, glory, scars… or worse', () => sendAdventuring(state, c.id), noActs);
+      }
+    }
+    if (!isLord) {
+      actRow(P.designatedHeirId === c.id ? '♛ Already the named heir' : '♛ Name heir to the seat', 'free · overrides succession law', () => nameHeir(state, c.id), P.designatedHeirId === c.id);
+      actRow('⚔ Banish from the house', '1 action · -3 prestige · gone forever', () => banishCharacter(state, c.id), noActs, true);
+    }
+  });
+}
+
+function pickCouncil(post) {
+  const P = state.houses[state.playerHouseId];
+  const def = COUNCIL_POSTS[post];
+  modal(`Appoint a ${def.label}`, (body, close) => {
+    body.appendChild(el('p', 'dim', `${def.desc} The office favors ${def.skill === 'war' ? '⚔ war' : def.skill === 'dip' ? '🕊 diplomacy' : def.skill === 'stew' ? '🜚 stewardship' : '🗡 intrigue'}.`));
+    const cands = livingMembers(state, P).filter((x) => age(state, x) >= 16 && !isAway(state, x))
+      .sort((x, y) => y.skills[def.skill] - x.skills[def.skill]);
+    for (const c of cands) {
+      const row = el('div', 'target-row');
+      const held = Object.entries(P.council).find(([, id]) => id === c.id);
+      row.innerHTML = `<span class="tr-name">${esc(shortName(state, c))} <em class="dim">(${def.skill === 'war' ? '⚔' : def.skill === 'dip' ? '🕊' : def.skill === 'stew' ? '🜚' : '🗡'} ${c.skills[def.skill]}${held ? ', now ' + COUNCIL_POSTS[held[0]].label : ''})</em></span>`;
+      const b = el('button', 'btn btn-small', 'Appoint');
+      b.onclick = () => { const r = appointCouncil(state, post, c.id); toast(r.msg); close(); renderGame(); };
+      row.appendChild(b);
+      body.appendChild(row);
+    }
+    if (P.council[post]) {
+      const b = el('button', 'btn btn-option', 'Leave the office vacant');
+      b.onclick = () => { const r = appointCouncil(state, post, null); toast(r.msg); close(); renderGame(); };
+      body.appendChild(b);
+    }
+  });
 }
 
 // ---------- Realm tab ----------
@@ -432,7 +635,7 @@ function renderGameOver(main) {
   const b1 = el('button', 'btn btn-primary', 'Read the Chronicle');
   b1.onclick = () => { state.gameOver._read = true; modal(`The Chronicle of House ${P.name}`, (body) => { body.appendChild(el('div', 'chron-body', buildChronicle(state))); }, true); };
   const b2 = el('button', 'btn btn-ghost', 'Begin a new dynasty');
-  b2.onclick = () => showSetup();
+  b2.onclick = () => { clearSave(); showSetup(); };
   panel.appendChild(b1); panel.appendChild(b2);
   main.appendChild(panel);
 }

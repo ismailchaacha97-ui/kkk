@@ -29,6 +29,10 @@ export function makeCharacter(state, rng, opts = {}) {
     epithet: null,
     glory: 0, // tourney wins, battle honors
     wounded: false,
+    awayUntil: null,   // turnCount until which the character is off adventuring
+    awayReason: null,
+    mood: 0,           // -3..3, affected by interactions
+    tutoredThisYear: false,
   };
   // Dragonblood: rare heritable gift of the old blood
   if (opts.dragonblood || (!opts.fatherId && !opts.motherId && rng.chance(0.03))) {
@@ -108,6 +112,8 @@ function makeHouse(state, rng, tier, regionId, liegeId) {
     troops: tier === 'royal' ? rng.int(7000, 10000) : tier === 'great' ? rng.int(2800, 5200) : rng.int(500, 1400),
     prestige: tier === 'royal' ? rng.int(80, 95) : tier === 'great' ? rng.int(48, 70) : rng.int(12, 34),
     relations: {},
+    council: { castellan: null, marshal: null, envoy: null, spymaster: null },
+    designatedHeirId: null,
     foundedNote: null,
   };
   state.houses[id] = house;
@@ -238,9 +244,13 @@ export function shortName(state, ch) {
   return ch.name + (h ? ' ' + h.name : '');
 }
 
-// Succession: eldest son -> eldest daughter -> eldest living male member -> eldest living member
+// Succession: designated heir -> eldest son -> eldest daughter -> eldest blood member -> anyone
 export function findHeir(state, house, excludeId) {
   const living = livingMembers(state, house).filter((c) => c.id !== excludeId);
+  if (house.designatedHeirId) {
+    const dh = state.characters[house.designatedHeirId];
+    if (dh && dh.alive && dh.houseId === house.id && dh.id !== excludeId) return dh;
+  }
   if (living.length === 0) return null;
   const lord = state.characters[house.lordId];
   const kids = (lord ? lord.childrenIds : [])
