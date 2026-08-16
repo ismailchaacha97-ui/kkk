@@ -35,6 +35,23 @@ export function buildChronicle(state) {
     ).join('') + '</ul>');
   }
 
+  // The Dragons
+  const dragons = Object.values(state.dragons || {});
+  const houseTouched = dragons.filter((d) => d.houseId === P.id || (d.kills || []).some((k) => k.includes(P.name) || k.includes(P.seat)));
+  const listed = houseTouched.length ? houseTouched : dragons;
+  if (listed.length) {
+    parts.push(`<h3 class="chron-year">Of the Dragons</h3>`);
+    const lines = listed.map((d) => {
+      let s = `<strong>${escapeHtml(d.name)}</strong>, ${escapeHtml(d.colorDesc)}`;
+      s += d.alive
+        ? ` — living still${d.wild ? ', wild and masterless' : d.houseId === P.id ? `, a dragon of House ${escapeHtml(P.name)}` : ''}.`
+        : ` — dead in Year ${d.deathYear}; ${escapeHtml(d.causeOfDeath || 'the manner unrecorded')}.`;
+      if ((d.kills || []).length) s += ` The record charges it with: ${escapeHtml(d.kills.join('; '))}.`;
+      return `<li>${s}</li>`;
+    });
+    parts.push(`<ul class="chron-fallen">${lines.join('')}</ul>`);
+  }
+
   // Closing
   if (state.gameOver) {
     parts.push(`<p class="chron-end">Here the record ends. In the year ${state.gameOver.year}, the line of ${P.name} was extinguished, and ${P.seat} passed into other hands. ${escapeHtml(state.gameOver.reason)} Let those who read this remember that the house existed, and that for a time it mattered.</p>`);

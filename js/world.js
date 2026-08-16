@@ -2,6 +2,7 @@
 import { makeRng } from './rng.js';
 import { makeNamer, TRAITS } from './names.js';
 import { makeSigil } from './sigil.js';
+import { makeDragon } from './dragons.js';
 
 export function newCharId(state) { return 'c' + (state.nextCharId++); }
 
@@ -29,6 +30,18 @@ export function makeCharacter(state, rng, opts = {}) {
     glory: 0, // tourney wins, battle honors
     wounded: false,
   };
+  // Dragonblood: rare heritable gift of the old blood
+  if (opts.dragonblood || (!opts.fatherId && !opts.motherId && rng.chance(0.03))) {
+    ch.traits.push('Dragonblood');
+  } else if (opts.fatherId || opts.motherId) {
+    const f = state.characters[opts.fatherId];
+    const m = state.characters[opts.motherId];
+    const fB = f && f.traits.includes('Dragonblood');
+    const mB = m && m.traits.includes('Dragonblood');
+    if ((fB && mB && rng.chance(0.85)) || ((fB || mB) && rng.chance(0.45))) {
+      ch.traits.push('Dragonblood');
+    }
+  }
   // Trait skill bumps
   if (traits.includes('Brave')) ch.skills.war += 2;
   if (traits.includes('Shrewd')) { ch.skills.stew += 2; ch.skills.intr += 1; }
@@ -109,8 +122,9 @@ export function generateWorld(seed) {
     rngSeed: seed,
     year: rng.int(180, 340),
     season: 0, // 0 spring, 1 summer, 2 autumn, 3 winter
-    nextCharId: 1, nextHouseId: 1,
-    characters: {}, houses: {},
+    nextCharId: 1, nextHouseId: 1, nextDragonId: 1,
+    characters: {}, houses: {}, dragons: {},
+    dragonEggs: 0, // eggs held by the player house
     regions: [], realmName: null,
     crownHouseId: null,
     playerHouseId: null,
@@ -161,6 +175,39 @@ export function generateWorld(seed) {
     if (ha.regionId === hb.regionId && ha.tier === 'minor' && hb.tier === 'minor') base -= 8; // local rivals
     state.houses[a].relations[b] = Math.max(-80, Math.min(80, base));
   }
+  // ---- Dragons: the last fires of the world ----
+  // The crown keeps one chained wonder — the reason no one has taken the throne in living memory.
+  const crownLord = state.characters[crown.lordId];
+  if (crownLord && rng.chance(0.7)) crownLord.traits.push('Dragonblood');
+  const royalDragon = makeDragon(state, rng, {
+    houseId: crown.id,
+    riderId: crownLord && crownLord.traits.includes('Dragonblood') && rng.chance(0.7) ? crownLord.id : null,
+    birthYear: state.year - rng.int(40, 90),
+  });
+  if (royalDragon.riderId) crownLord.dragonId = royalDragon.id;
+
+  // One or two wild dragons haunt the far regions.
+  const nWild = rng.chance(0.6) ? 2 : 1;
+  for (let i = 0; i < nWild; i++) {
+    makeDragon(state, rng, {
+      wild: true,
+      lairRegionId: rng.pick(state.regions).id,
+      birthYear: state.year - rng.int(15, 70),
+    });
+  }
+
+  // A couple of Dragonblood lines among the great/minor houses (dormant gift, no dragon)
+  const bloodHouses = rng.shuffle(ids.filter((i) => state.houses[i].tier !== 'royal')).slice(0, 3);
+  for (const bi of bloodHouses) {
+    const bh = state.houses[bi];
+    const bl = state.characters[bh.lordId];
+    if (bl && !bl.traits.includes('Dragonblood')) bl.traits.push('Dragonblood');
+    for (const kidId of (bl ? bl.childrenIds : [])) {
+      const k = state.characters[kidId];
+      if (k && rng.chance(0.45) && !k.traits.includes('Dragonblood')) k.traits.push('Dragonblood');
+    }
+  }
+
   // Seed one famous blood feud
   const feudPool = ids.filter((i) => state.houses[i].tier !== 'royal');
   const fa = rng.pick(feudPool);

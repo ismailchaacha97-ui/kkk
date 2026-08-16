@@ -2,6 +2,7 @@
 import { generateWorld, livingMembers, age, fullName, shortName, regionName } from './world.js';
 import { advanceSeason, runAction, resolveDecision, arrangeMarriage, ACTIONS, SEASONS } from './engine.js';
 import { sigilSVG, sigilBlazon } from './sigil.js';
+import { houseDragons, wildDragons, livingDragons, describeDragon, dragonStageName, dragonMark, hasDragonblood } from './dragons.js';
 import { buildChronicle, chroniclePlainText } from './chronicle.js';
 import { makeRng } from './rng.js';
 
@@ -38,7 +39,9 @@ function regenSetup(seed) {
   const wrap = el('div', 'setup-wrap');
   wrap.appendChild(el('h1', 'game-title', 'OATHS &amp; BANNERS'));
   wrap.appendChild(el('p', 'subtitle', `A dynasty simulation. The realm of <strong>${esc(state.realmName)}</strong> awaits in the years of ${esc(state.dynastyEra)}.`));
-  wrap.appendChild(el('p', 'setup-lead', 'Choose the minor house whose story you will write. Guide it across generations: marry well, feed the smallfolk, win tourneys, survive winters — and perhaps, one day, take the throne itself.'));
+  const wilds = wildDragons(state);
+  const crownH = state.houses[state.crownHouseId];
+  wrap.appendChild(el('p', 'setup-lead', `Choose the minor house whose story you will write. Guide it across generations: marry well, feed the smallfolk, win tourneys, survive winters — and perhaps, one day, take the throne itself. Know this: House ${esc(crownH.name)} keeps a dragon at ${esc(crownH.seat)}, and ${wilds.length ? (wilds.length > 1 ? wilds.length + ' wild dragons haunt' : 'a wild dragon haunts') + ' the far country' : 'the wild dragons are gone from the maps'}. The old blood still runs in a few unlikely veins. Perhaps yours.`));
 
   const row = el('div', 'house-pick-row');
   for (const h of picks) {
@@ -103,6 +106,8 @@ function renderGame() {
       <span class="tb-stat" title="Income per season">±${P.income}/s</span>
       <span class="tb-stat" title="Troops">⚔ ${P.troops}</span>
       <span class="tb-stat" title="Prestige">★ ${Math.round(P.prestige)}</span>
+      ${houseDragons(state, P.id).length ? `<span class="tb-stat tb-dragon" title="Dragons of your house">${dragonMark(houseDragons(state, P.id)[0], 16)} ${houseDragons(state, P.id).length}</span>` : ''}
+      ${state.dragonEggs ? `<span class="tb-stat tb-egg" title="Dragon eggs in your crypt">◉ ${state.dragonEggs} egg${state.dragonEggs > 1 ? 's' : ''}</span>` : ''}
       <span class="tb-stat" title="Actions left this season">◆ ${state.actionsLeft} action${state.actionsLeft === 1 ? '' : 's'}</span>
     </div>
     <div class="topbar-right">
@@ -270,16 +275,39 @@ function renderFamily(main) {
   panel.appendChild(el('div', 'panel-title', `⚘ The Blood of House ${esc(P.name)}`));
   panel.appendChild(el('p', 'dim panel-note', `&ldquo;${esc(P.motto)}&rdquo; — ${esc(sigilBlazon(P.sigil))}. Seat: ${esc(P.seat)}, ${esc(regionName(state, P.regionId))}.`));
 
+  // Dragons of the house
+  const myDragons = houseDragons(state, P.id);
+  if (myDragons.length || state.dragonEggs) {
+    const dPanel = el('div', 'dragon-panel');
+    dPanel.appendChild(el('div', 'panel-title dragon-title', '🜂 The Dragons of the House'));
+    for (const d of myDragons) {
+      const rider = d.riderId ? state.characters[d.riderId] : null;
+      const row = el('div', 'dragon-row');
+      row.innerHTML = `${dragonMark(d, 26)}
+        <div class="dragon-info">
+          <div class="dragon-name">${esc(d.name)} <em class="dim">(${esc(dragonStageName(state, d))}, ${state.year - d.birthYear} years)</em></div>
+          <div class="dragon-sub dim">${esc(d.colorDesc)}, ${esc(d.temperament)}${rider ? ` · ridden by <strong>${esc(shortName(state, rider))}</strong>` : ' · <span class="neg">unridden</span> — only the old blood may try'}</div>
+          ${d.kills.length ? `<div class="dragon-kills dim">Deeds: ${esc(d.kills.slice(-2).join('; '))}</div>` : ''}
+        </div>`;
+      dPanel.appendChild(row);
+    }
+    if (state.dragonEggs) {
+      dPanel.appendChild(el('div', 'dragon-row dim', `◉ ${state.dragonEggs} dragon egg${state.dragonEggs > 1 ? 's' : ''} warm in the crypt. Winter may quicken them — or reveal them to be very expensive stones.`));
+    }
+    panel.appendChild(dPanel);
+  }
+
   const members = livingMembers(state, P).sort((a, b) => (P.lordId === a.id ? -1 : P.lordId === b.id ? 1 : a.birthYear - b.birthYear));
   const grid = el('div', 'family-grid');
   for (const c of members) {
     const isLord = P.lordId === c.id;
-    const card = el('div', 'char-card' + (isLord ? ' lord' : ''));
+    const card = el('div', 'char-card' + (isLord ? ' lord' : '') + (c.dragonId ? ' rider' : ''));
     const sp = c.spouseId ? state.characters[c.spouseId] : null;
+    const mount = c.dragonId ? state.dragons[c.dragonId] : null;
     card.innerHTML = `
-      <div class="char-name">${isLord ? (c.gender === 'f' ? '♛ Lady ' : '♛ Lord ') : ''}${esc(fullName(state, c))}</div>
-      <div class="char-sub">${c.gender === 'f' ? 'Female' : 'Male'}, aged ${age(state, c)}${c.wounded ? ' · <span class="neg">wounded</span>' : ''}${c.glory ? ` · glory ${'✦'.repeat(Math.min(5, c.glory))}` : ''}</div>
-      <div class="char-traits">${c.traits.map((t) => `<span class="trait">${esc(t)}</span>`).join('')}</div>
+      <div class="char-name">${isLord ? (c.gender === 'f' ? '♛ Lady ' : '♛ Lord ') : ''}${esc(fullName(state, c))}${mount ? ' ' + dragonMark(mount, 15) : ''}</div>
+      <div class="char-sub">${c.gender === 'f' ? 'Female' : 'Male'}, aged ${age(state, c)}${c.wounded ? ' · <span class="neg">wounded</span>' : ''}${c.glory ? ` · glory ${'✦'.repeat(Math.min(5, c.glory))}` : ''}${mount ? ` · <span class="dragon-tag">rides ${esc(mount.name)}</span>` : ''}</div>
+      <div class="char-traits">${c.traits.map((t) => `<span class="trait${t === 'Dragonblood' ? ' trait-blood' : ''}">${esc(t)}</span>`).join('')}</div>
       <div class="char-skills">
         <span title="War">⚔ ${c.skills.war}</span>
         <span title="Diplomacy">🕊 ${c.skills.dip}</span>
@@ -312,6 +340,30 @@ function renderRealm(main) {
   const crown = state.houses[state.crownHouseId];
   panel.appendChild(el('div', 'panel-title', `♛ The Realm of ${esc(state.realmName)}`));
   panel.appendChild(el('p', 'dim panel-note', `House ${esc(crown.name)} holds the throne from ${esc(crown.seat)}. ${state.war ? `The realm bleeds: ${esc(state.war.name)}.` : 'The realm is at peace — for now.'}`));
+
+  // Dragons of the realm
+  const allDragons = livingDragons(state);
+  if (allDragons.length) {
+    const dSec = el('div', 'region-sec');
+    dSec.appendChild(el('div', 'region-name dragon-title', '🜂 The Last Dragons'));
+    const dl = el('div', 'realm-list');
+    for (const d of allDragons) {
+      const rider = d.riderId ? state.characters[d.riderId] : null;
+      const owner = d.houseId ? state.houses[d.houseId] : null;
+      const row = el('div', 'realm-row dragon-realm-row');
+      row.innerHTML = `<span class="tr-sigil">${dragonMark(d, 26)}</span>
+        <span class="rr-name">${esc(d.name)} <em class="dim">${esc(dragonStageName(state, d))}</em></span>
+        <span class="rr-seat dim">${d.wild ? 'WILD — lairs in ' + esc(regionName(state, d.lairRegionId || state.regions[0].id)) : owner ? 'of House ' + esc(owner.name) : '—'}</span>
+        <span class="rr-lord dim">${rider ? 'ridden by ' + esc(shortName(state, rider)) : 'unridden'}</span>
+        <span class="rr-stats">${esc(d.colorDesc)}</span>
+        <span class="tr-rel"></span>`;
+      dl.appendChild(row);
+    }
+    dSec.appendChild(dl);
+    panel.appendChild(dSec);
+  } else {
+    panel.appendChild(el('p', 'dim panel-note', '🜂 No dragon flies in the world. The age of fire is ended — unless an egg somewhere remembers otherwise.'));
+  }
 
   for (const region of state.regions) {
     const rHouses = Object.values(state.houses).filter((h) => h.regionId === region.id && h.tier !== 'royal');

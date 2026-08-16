@@ -13,6 +13,7 @@ Everything that happens is written into **The Chronicle**: a maester's prose acc
 - 💍 **Marriage & alliances** — propose matches; higher houses may refuse a lesser name
 - ⚔️ **Wars** — declare war, allies join by oath and friendship, named battles kill named characters, wars end in tribute or white peace. Raise banners against the throne itself and you can found a new royal dynasty
 - 🃏 **Event cards** — hedge knights, hungry smallfolk, insults at court, bastard rumors, royal wardships
+- 🐉 **The Last Dragons** — a royal dragon chained beneath the throne, wild dragons raiding the countryside, and the rare **Dragonblood** trait passed down bloodlines. Buy eggs from suspicious merchants (some are painted rocks), hatch them in winter, bond riders — or die trying. Dragons burn hosts in battle, duel each other in **Dances of Dragons**, fall to massed scorpion bolts, grieve their dead riders, lay clutches, and go extinct if the realm is careless. You can even mount a dragon-hunt and hang a skull in your hall
 - ❄️ **Seasons & winters** — harvest booms, winters of varying severity that kill the old and the young
 - 📜 **The Chronicle** — your full history as prose, copyable as plain text to share
 - 🎖️ **Rise in standing** — reach 80 prestige as a minor house and be raised to a great house by royal decree
@@ -44,6 +45,7 @@ style.css         parchment / manuscript UI
 js/rng.js         seeded RNG
 js/names.js       people/house/seat/motto name generators
 js/sigil.js       procedural heraldry (SVG shields)
+js/dragons.js     dragons: stages, power, riders, wild lairs
 js/world.js       world generation, characters, succession
 js/engine.js      season simulation: economy, mortality, births, marriages, wars, events, actions
 js/chronicle.js   prose history generator

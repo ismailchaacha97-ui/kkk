@@ -168,6 +168,30 @@ body {
 .log-entry.kind-season { font-style: italic; color: var(--ink-soft); }
 .log-entry.kind-warn { border-left-color: #a8631e; }
 .log-entry.kind-action, .log-entry.kind-decision { border-left-color: #1f3a5f; }
+.log-entry.kind-dragon, .log-entry.kind-dragon-player {
+  border-left-color: #b0501e;
+  background: linear-gradient(90deg, #b0501e1e, #b0501e08);
+}
+.log-entry.kind-dragon-player { font-weight: bold; }
+
+/* ---------- dragons ---------- */
+.dragon-title { color: #8c3a12; }
+.tb-dragon, .tb-egg { color: #8c3a12; font-weight: bold; }
+.dragon-panel {
+  border: 1px solid #b0501e66; border-radius: 3px;
+  background: linear-gradient(#f2e2c8, #ecd6ae);
+  padding: 10px 14px; margin-bottom: 14px;
+  box-shadow: 0 2px 6px #0002;
+}
+.dragon-panel .panel-title { border-bottom-color: #b0501e66; }
+.dragon-row { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; border-bottom: 1px dotted #b0501e44; }
+.dragon-row:last-child { border-bottom: none; }
+.dragon-name { font-family: 'Cinzel', serif; font-weight: 700; font-size: 15.5px; }
+.dragon-sub, .dragon-kills { font-size: 14px; }
+.dragon-tag { color: #8c3a12; font-weight: bold; }
+.trait-blood { border-color: #8c3a12; color: #8c3a12; background: #b0501e14; font-weight: bold; }
+.char-card.rider { border-color: #b0501e; background: #b0501e0e; }
+.dragon-realm-row { background: #b0501e0a; }
 
 .action-list { display: flex; flex-direction: column; gap: 8px; }
 .action-row {

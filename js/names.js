@@ -46,6 +46,13 @@ const REGION_NAMES = [
 const REALM_A = ['Aster', 'Vael', 'Cor', 'Thal', 'Mor', 'Eld', 'Bran', 'Cael', 'Dor', 'Ostr'];
 const REALM_B = ['ia', 'oria', 'wyn', 'mere', 'gard', 'eth', 'una', 'oth', 'avia', 'enn'];
 
+const DRAGON_NAMES = [
+  'Balerax', 'Vhagrix', 'Syraxis', 'Morghul', 'Aethrax', 'Cinderfell', 'Umbrax', 'Nyxwing',
+  'Pyraxes', 'Sorrowfyre', 'Gryvane', 'Tempesth', 'Veldrith', 'Ashvein', 'Duskrender', 'Embermaw',
+  'Karrax', 'Smokewing', 'Thornfyre', 'Valdrax', 'Wintermaw', 'Hexwing', 'Ironfyre', 'Stormcaller',
+  'Ravenna', 'Goldwrath', 'Seylix', 'Mordrake', 'Cryptfyre', 'Halyx', 'Obsidyan', 'Bruma',
+];
+
 const MOTTO_TEMPLATES = [
   'NOUN and NOUN2', 'We Do Not VERB', 'NOUN Endures', 'From NOUN, VERB2', 'Ours Is the NOUN',
   'NOUN Before NOUN2', 'The NOUN Remembers', 'VERB2 and Prevail', 'No NOUN Without NOUN2',
@@ -58,6 +65,7 @@ const MOTTO_VERBS2 = ['Rise', 'Strike', 'Endure', 'Stand', 'Reap', 'Guard', 'Bur
 export function makeNamer(rng) {
   const usedHouse = new Set();
   const usedSeat = new Set();
+  const usedDragon = new Set();
 
   function firstName(gender) {
     return rng.pick(gender === 'f' ? F_FIRST : M_FIRST);
@@ -97,11 +105,19 @@ export function makeNamer(rng) {
     return rng.pick(REALM_A) + rng.pick(REALM_B);
   }
 
+  function dragonName() {
+    for (let i = 0; i < 100; i++) {
+      const n = rng.pick(DRAGON_NAMES);
+      if (!usedDragon.has(n)) { usedDragon.add(n); return n; }
+    }
+    return 'Nameless Terror';
+  }
+
   function regions(count) {
     return rng.shuffle(REGION_NAMES).slice(0, count);
   }
 
-  return { firstName, houseName, seatName, motto, realmName, regions };
+  return { firstName, houseName, seatName, motto, realmName, regions, dragonName };
 }
 
 export const TRAITS = [

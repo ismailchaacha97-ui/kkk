@@ -5,6 +5,10 @@ import {
   makeCharacter, age, livingMembers, fullName, shortName,
   findHeir, regionName,
 } from './world.js';
+import {
+  makeDragon, dragonAge, dragonStage, dragonStageName, dragonPower,
+  describeDragon, livingDragons, houseDragons, wildDragons, killDragon, hasDragonblood,
+} from './dragons.js';
 
 export const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
 
@@ -29,6 +33,21 @@ function relMod(state, aId, bId, delta) {
 export function kill(state, rng, ch, cause) {
   if (!ch.alive) return;
   ch.alive = false; ch.deathYear = state.year; ch.causeOfDeath = cause;
+  // A dragon that loses its rider grieves — and grows dangerous.
+  if (ch.dragonId) {
+    const d = state.dragons[ch.dragonId];
+    if (d && d.alive && d.riderId === ch.id) {
+      d.riderId = null;
+      if (rng.chance(0.25)) {
+        d.wild = true; d.houseId = null;
+        d.lairRegionId = state.houses[ch.houseId] ? state.houses[ch.houseId].regionId : state.regions[0].id;
+        log(state, `${d.name} shrieks over the pyre of ${shortName(state, ch)} for three days, then breaks its chains and flies beyond the maps. The realm has a new wild dragon.`, 'dragon');
+      } else {
+        log(state, `${d.name} will let no other soul near it since ${shortName(state, ch)} died. It coils in the dark and waits.`, 'dragon');
+      }
+    }
+    ch.dragonId = null;
+  }
   const house = state.houses[ch.houseId];
   if (!house) return;
   const isPlayer = house.id === state.playerHouseId;
@@ -185,11 +204,100 @@ function tickAIMarriages(state, rng) {
   }
 }
 
+// ---------- Dragons ----------
+function tickDragons(state, rng) {
+  // Wild dragon raids
+  for (const d of wildDragons(state)) {
+    if (!rng.chance(0.16)) continue;
+    const region = state.regions.find((r) => r.id === d.lairRegionId) || rng.pick(state.regions);
+    const prey = Object.values(state.houses).filter((h) => h.alive && h.regionId === region.id);
+    if (!prey.length) continue;
+    const h = rng.pick(prey);
+    const dmgGold = Math.min(h.gold, rng.int(20, 70));
+    const dmgTroops = rng.int(80, 260);
+    h.gold -= dmgGold;
+    h.troops = Math.max(100, h.troops - dmgTroops);
+    d.kills.push(`the burning of the lands about ${h.seat} (Year ${state.year})`);
+    log(state, `${d.name} descends on the lands about ${h.seat} — flocks taken, granaries burned, ${dmgTroops} levies dead or fled. ${region.name} whispers the old prayers.`, 'dragon');
+    // sometimes it kills someone named
+    if (rng.chance(0.08)) {
+      const victims = livingMembers(state, h).filter((c) => age(state, c) >= 14);
+      if (victims.length) {
+        const v = rng.pick(victims);
+        kill(state, rng, v, `was burned alive by the wild dragon ${d.name}`);
+      }
+    }
+    // occasionally it migrates
+    if (rng.chance(0.25)) d.lairRegionId = rng.pick(state.regions).id;
+  }
+
+  // Old dragons die rarely; hatchlings are fragile
+  for (const d of livingDragons(state)) {
+    const stage = dragonStage(state, d);
+    let p = 0;
+    if (stage === 0) p = 0.02;
+    else if (stage === 3) p = 0.012;
+    if (rng.chance(p)) {
+      killDragon(state, d, stage === 0 ? 'sickened and died in the shell-years, as most hatchlings do' : 'died of its vast age, and the fires of the world grew dimmer');
+      log(state, `${d.name} is dead — ${d.causeOfDeath}. ${stage === 3 ? 'Singers will argue for a century over its hoard.' : ''}`, 'dragon');
+      const rider = d.riderId ? state.characters[d.riderId] : null;
+      if (rider) { rider.dragonId = null; }
+    }
+  }
+
+  // Grown dragons sometimes lay clutches — the fire refuses to die entirely.
+  // But the world can only hold so much fire: breeding fades as dragons multiply.
+  const nAlive = livingDragons(state).length;
+  const clutchChance = nAlive <= 2 ? 0.02 : nAlive <= 5 ? 0.012 : nAlive <= 8 ? 0.005 : 0.001;
+  for (const d of livingDragons(state)) {
+    if (dragonStage(state, d) < 2 || !rng.chance(clutchChance)) continue;
+    if (d.wild) {
+      // A wild clutch: one egg may quicken years later into a new wild hatchling
+      if (rng.chance(0.5)) {
+        const kid = makeDragon(state, rng, { wild: true, lairRegionId: d.lairRegionId, birthYear: state.year });
+        log(state, `Hunters in ${regionName(state, d.lairRegionId || state.regions[0].id)} find eggshells the size of shields near the lair of ${d.name} — and something small and ${kid.colorDesc} watching them from the rocks. The wild dragons are BREEDING.`, 'dragon');
+      }
+    } else {
+      const owner = state.houses[d.houseId];
+      if (!owner || !owner.alive) continue;
+      if (owner.id === state.playerHouseId) {
+        state.dragonEggs += 1;
+        log(state, `${d.name} has laid a clutch in the crypt of ${owner.seat}. One egg is warm to the touch. The dragonkeepers weep openly.`, 'dragon-player');
+      } else if (rng.chance(0.45)) {
+        const kid = makeDragon(state, rng, { houseId: owner.id, birthYear: state.year });
+        log(state, `Word from ${owner.seat}: ${d.name} has hatched an egg. House ${owner.name} counts a new hatchling, ${kid.name}, ${kid.colorDesc}.`, 'dragon');
+      }
+    }
+  }
+
+  // Player egg hatching check (each winter, warm eggs may quicken)
+  if (state.dragonEggs > 0 && state.season === 3 && rng.chance(0.18)) {
+    const P = state.houses[state.playerHouseId];
+    if (P && P.alive) {
+      state.dragonEggs -= 1;
+      if (rng.chance(0.55)) {
+        const hatchling = makeDragon(state, rng, { houseId: P.id, birthYear: state.year });
+        log(state, `In the deep of winter, a cracking sound from the hearth-crypt of ${P.seat}: an egg QUICKENS. A hatchling — ${hatchling.name}, ${hatchling.colorDesc} — screams its first fire into the world. House ${P.name} has a dragon.`, 'dragon-player');
+        P.prestige += 15;
+      } else {
+        log(state, `An egg in the crypt of ${P.seat} cracks in the winter cold — and spills only grey dust and a smell of old fire. The maesters bow their heads.`, 'dragon');
+      }
+    }
+  }
+}
+
 // ---------- Wars ----------
 function housePower(state, house) {
   let p = house.troops;
   const lord = state.characters[house.lordId];
   if (lord) p *= 0.85 + lord.skills.war * 0.02;
+  // Dragons are worth armies — more with a rider on their back.
+  for (const d of houseDragons(state, house.id)) {
+    let dp = dragonPower(state, d);
+    if (d.riderId && state.characters[d.riderId] && state.characters[d.riderId].alive) dp *= 1.5;
+    else dp *= 0.4; // an unridden dragon defends its home fires only grudgingly
+    p += dp;
+  }
   return p;
 }
 
@@ -228,6 +336,57 @@ function tickWar(state, rng) {
   const site = rng.pick(['the fords of', 'the fields before', 'the walls of', 'the pass at', 'the burning of']);
   const place = state.houses[rng.pick(rng.chance(0.5) ? aliveD : aliveA)].seat;
   const battleName = `Battle at ${site} ${place}`;
+
+  // Dragons over the field
+  const dragonsA = aliveA.flatMap((i) => houseDragons(state, i)).filter((d) => dragonStage(state, d) >= 1);
+  const dragonsD = aliveD.flatMap((i) => houseDragons(state, i)).filter((d) => dragonStage(state, d) >= 1);
+  if (dragonsA.length && dragonsD.length && rng.chance(0.6)) {
+    // DANCE OF DRAGONS: the two strongest duel above the battle
+    const da = dragonsA.sort((x, y) => dragonPower(state, y) - dragonPower(state, x))[0];
+    const dd = dragonsD.sort((x, y) => dragonPower(state, y) - dragonPower(state, x))[0];
+    const pA = dragonPower(state, da) * (da.riderId ? 1.4 : 0.8) * rng.range(0.7, 1.3);
+    const pD = dragonPower(state, dd) * (dd.riderId ? 1.4 : 0.8) * rng.range(0.7, 1.3);
+    const [winD, loseD] = pA >= pD ? [da, dd] : [dd, da];
+    log(state, `THE SKY BURNS over the ${battleName}: ${winD.name} and ${loseD.name} meet in the air. Men on both sides forget to fight, watching.`, 'dragon');
+    if (rng.chance(0.55)) {
+      const loserRider = loseD.riderId ? state.characters[loseD.riderId] : null;
+      killDragon(state, loseD, `torn from the sky by ${winD.name} above the ${battleName}`);
+      winD.kills.push(`slew ${loseD.name} above the ${battleName} (Year ${state.year})`);
+      log(state, `${loseD.name} falls, a comet of fire and black blood. ${winD.name} screams its victory over the field.`, 'dragon');
+      if (loserRider && loserRider.alive) {
+        loserRider.dragonId = null;
+        if (rng.chance(0.7)) kill(state, rng, loserRider, `fell with ${loseD.name} in the dance of dragons above the ${battleName}`);
+        else { loserRider.wounded = true; log(state, `${shortName(state, loserRider)} is pulled, burned and broken, from the wreck of ${loseD.name}.`, 'note'); }
+      }
+    } else {
+      log(state, `The dragons break apart, scorched and shrieking, neither able to finish the other. The old songs undersold the terror of it.`, 'dragon');
+    }
+  } else {
+    // One-sided dragonfire: lone dragons scourge the enemy host, but bows and scorpions answer
+    for (const [ds, enemyIds, mySide] of [[dragonsA, aliveD, 'A'], [dragonsD, aliveA, 'D']]) {
+      for (const d of ds) {
+        if (!rng.chance(0.7)) continue;
+        for (const eid of enemyIds) {
+          const eh = state.houses[eid];
+          eh.troops = Math.max(100, Math.floor(eh.troops * (1 - rng.range(0.04, 0.12))));
+        }
+        log(state, `${d.name} sweeps the field at the ${battleName}; whole companies break and run from the fire.`, 'dragon');
+        d.kills.push(`burned the host at the ${battleName} (Year ${state.year})`);
+        // scorpion risk — smaller dragons die easier
+        const deathRiskD = dragonStage(state, d) === 1 ? 0.12 : 0.05;
+        if (rng.chance(deathRiskD)) {
+          const rider = d.riderId ? state.characters[d.riderId] : null;
+          killDragon(state, d, `brought down by massed scorpion bolts at the ${battleName}`);
+          log(state, `A lucky bolt takes ${d.name} through the eye. The great shape falls into its own fire. A thousand men claim the shot.`, 'dragon');
+          if (rider && rider.alive) {
+            rider.dragonId = null;
+            if (rng.chance(0.6)) kill(state, rng, rider, `died in the fall of ${d.name} at the ${battleName}`);
+            else { rider.wounded = true; log(state, `${shortName(state, rider)} crawls from the wreckage, alive but fire-marked forever.`, 'note'); }
+          }
+        }
+      }
+    }
+  }
 
   let winnerSide, margin;
   if (ratio > 1) { winnerSide = 'A'; w.score += ratio > 1.5 ? 2 : 1; margin = ratio; }
@@ -352,6 +511,41 @@ function tickEvents(state, rng) {
   ];
   for (const [p, fn] of flavorRolls) if (rng.chance(p)) fn();
 
+  // Dragon flavor
+  if (rng.chance(0.05)) {
+    const ds = livingDragons(state);
+    if (ds.length) {
+      const d = rng.pick(ds);
+      if (d.wild) {
+        log(state, `Shepherds in ${regionName(state, d.lairRegionId || state.regions[0].id)} swear they saw ${d.name} pass before the moon, ${d.colorDesc}. Flocks are being driven into caves.`, 'omen');
+      } else {
+        const owner = state.houses[d.houseId];
+        if (owner && owner.alive) log(state, `Travelers speak of ${d.name} sunning itself on the towers of ${owner.seat}, ${d.colorDesc}, vast and indifferent as weather.`, 'omen');
+      }
+    } else {
+      log(state, 'A hedge wizard in the market swears the age of dragons is not done. He is pelted with turnips, but gently, in case he is right.', 'omen');
+    }
+  }
+  // An unbonded house dragon may be claimed by AI dragonblood kin
+  if (rng.chance(0.15)) {
+    for (const d of livingDragons(state)) {
+      if (d.wild || d.riderId || dragonStage(state, d) < 1) continue;
+      const owner = state.houses[d.houseId];
+      if (!owner || !owner.alive || owner.id === state.playerHouseId) continue;
+      const kin = livingMembers(state, owner).filter((c) => hasDragonblood(c) && !c.dragonId && age(state, c) >= 14);
+      if (kin.length && rng.chance(0.5)) {
+        const c = rng.pick(kin);
+        if (rng.chance(0.7)) {
+          d.riderId = c.id; c.dragonId = d.id; owner.prestige += 8;
+          log(state, `Word from ${owner.seat}: ${shortName(state, c)} has mounted ${d.name}. House ${owner.name} has a dragonrider again.`, 'dragon');
+        } else {
+          kill(state, rng, c, `was slain attempting to mount the dragon ${d.name} at ${owner.seat}`);
+        }
+        break;
+      }
+    }
+  }
+
   // Crown politics
   if (rng.chance(0.05)) {
     const crown = state.houses[state.crownHouseId];
@@ -438,6 +632,97 @@ function maybePlayerDecision(state, rng) {
     });
   }
 
+  // --- Dragon decisions ---
+  if (rng.chance(0.35)) {
+    decisions.push({
+      id: 'egg_merchant',
+      title: 'A Merchant of Impossible Things',
+      text: `A trader from beyond the Jade Strait is shown into your hall, smelling of spice and lies. From a lacquered box he draws a stone the size of a man's head, scaled, faintly warm. "A dragon's egg, my ${lord && lord.gender === 'f' ? 'lady' : 'lord'}. The last fires of the old world. For you — a bargain."`,
+      options: [
+        { label: 'Buy the egg (120 gold)', effect: (st, r) => {
+            const h = st.houses[st.playerHouseId];
+            if (h.gold < 120) return 'Your steward coughs politely. The box closes. The merchant bows his way out.';
+            h.gold -= 120;
+            if (r.chance(0.7)) { st.dragonEggs += 1; return 'The egg sits warm in your crypt now. The maesters say it is stone. The maesters have been wrong before. (Egg acquired — winter may quicken it.)'; }
+            return 'Weeks later a hairline crack reveals painted plaster and river sand. The merchant is long gone. Your hall does not speak of it.';
+          } },
+        { label: 'Have him searched as a fraud', effect: (st, r) => {
+            const h = st.houses[st.playerHouseId];
+            if (r.chance(0.5)) { h.gold += 40; return 'His packs hold forged seals and someone else\u2019s coin. You confiscate the lot and put him on the road. (+40 gold)'; }
+            relMod(st, st.playerHouseId, st.crownHouseId, -5);
+            return 'He is exactly what he claims, and loudly offended. The story of your discourtesy travels to court. (-crown favor)';
+          } },
+        { label: 'Send him away', effect: () => 'The box closes with a click you will hear in your dreams for years.' },
+      ],
+    });
+  }
+
+  const myWild = wildDragons(state);
+  const bloodKin = livingMembers(state, P).filter((c) => hasDragonblood(c) && age(state, c) >= 14);
+  if (myWild.length && bloodKin.length && rng.chance(0.5)) {
+    const wd = rng.pick(myWild);
+    const claimant = bloodKin.sort((a, b) => b.skills.war - a.skills.war)[0];
+    decisions.push({
+      id: 'claim_dragon',
+      title: 'The Old Blood Stirs',
+      text: `${claimant.name} has not slept in three nights. "${wd.name} lairs in ${regionName(state, wd.lairRegionId || P.regionId)}," ${claimant.gender === 'f' ? 'she' : 'he'} says. "I hear it when I close my eyes. The old blood is in me. Let me try." Every maester in the realm agrees this is how members of dragonblood houses die.`,
+      options: [
+        { label: `Let ${claimant.name} attempt the claiming`, effect: (st, r) => {
+            const h = st.houses[st.playerHouseId];
+            const c = st.characters[claimant.id];
+            const d = st.dragons[wd.id];
+            if (!d || !d.alive) return 'The dragon has moved on. The fever passes. The disappointment does not.';
+            let p = 0.35 + c.skills.war * 0.01 + (c.traits.includes('Brave') ? 0.08 : 0);
+            if (dragonStage(st, d) >= 3) p -= 0.12; // elder wyrms suffer no riders gladly
+            if (r.chance(p)) {
+              d.wild = false; d.houseId = h.id; d.riderId = c.id; c.dragonId = d.id;
+              c.glory += 2; h.prestige += 25;
+              if (!c.epithet) c.epithet = r.pick(['the Dragonrider', 'Dragontamer', 'of the Old Blood']);
+              return `It is done. ${c.name} walks out of the smoking lair ALIVE, and ${d.name} follows like a hound the size of a keep. The realm will speak of nothing else for a decade. (+25 prestige)`;
+            }
+            if (r.chance(0.65)) { kill(st, r, c, `was burned and devoured attempting to claim the wild dragon ${d.name}`); return `From the ridge your men see fire, then nothing. There is not enough left of ${c.name} to bury. The dragon keeps the sword as a curiosity.`; }
+            c.wounded = true;
+            return `${c.name} returns after nine days, burned along one side and silent about all of it. The claiming failed. The survival is its own kind of legend.`;
+          } },
+        { label: 'Forbid it', effect: (st, r) => {
+            const c = st.characters[claimant.id];
+            if (r.chance(0.2)) { c.traits.push('Resentful'); return `${c.name} obeys. Something behind ${c.gender === 'f' ? 'her' : 'his'} eyes closes and does not reopen.`; }
+            return 'The fever passes with the season, as fevers do. The dragon dreams remain, unmentioned.';
+          } },
+      ],
+    });
+  }
+
+  const myDragons = houseDragons(state, P.id);
+  const unridden = myDragons.filter((d) => !d.riderId && dragonStage(state, d) >= 1);
+  if (unridden.length && bloodKin.length && rng.chance(0.6)) {
+    const d0 = unridden[0];
+    const cand = rng.pick(bloodKin.filter((c) => !c.dragonId));
+    if (cand) {
+      decisions.push({
+        id: 'bond_dragon',
+        title: 'A Rider for ' + d0.name,
+        text: `${d0.name}, your ${dragonStageName(state, d0)}, has begun watching ${cand.name} in the yard — tracking ${cand.gender === 'f' ? 'her' : 'him'} with one slow eye. The dragonkeepers say the beast has chosen, insofar as such things choose. It remains a creature of fire that eats a bullock a day.`,
+        options: [
+          { label: `Let ${cand.name} approach the dragon`, effect: (st, r) => {
+              const c = st.characters[cand.id];
+              const d = st.dragons[d0.id];
+              if (!d || !d.alive) return 'The moment has passed.';
+              if (r.chance(0.75)) {
+                d.riderId = c.id; c.dragonId = d.id; c.glory += 1;
+                st.houses[st.playerHouseId].prestige += 10;
+                return `${c.name} lays a bare hand on the great snout, and the world holds its breath — then ${d.name} bows its head. House ${st.houses[st.playerHouseId].name} has a DRAGONRIDER. (+10 prestige)`;
+              }
+              if (r.chance(0.4)) { kill(st, r, c, `was killed in a heartbeat of fire by ${d.name}, the dragon ${c.gender === 'f' ? 'she' : 'he'} sought to ride`); return 'It happens too fast to see. The dragonkeepers pull what remains from the pit. The dragon seems, if anything, embarrassed.'; }
+              c.wounded = true;
+              return `${d.name} breaks ${c.name}'s arm with a lazy sweep of its tail and returns to its bullock. Not today, the gesture says. Perhaps not ever.`;
+            } },
+          { label: 'The risk is too great', effect: () => 'The dragon keeps watching the yard. The dragonkeepers keep a list of who it watches. Everyone pretends this is fine.' },
+        ],
+      });
+    }
+  }
+
   decisions.push({
     id: 'bastard',
     title: 'A Bastard Rumor',
@@ -456,7 +741,10 @@ function maybePlayerDecision(state, rng) {
     ],
   });
 
-  state.pendingDecisions.push(rng.pick(decisions));
+  // Dragon matters burn brighter in the mind — they surface more often when available.
+  const dragonD = decisions.filter((d) => ['egg_merchant', 'claim_dragon', 'bond_dragon'].includes(d.id));
+  if (dragonD.length && rng.chance(0.45)) state.pendingDecisions.push(rng.pick(dragonD));
+  else state.pendingDecisions.push(rng.pick(decisions));
 }
 
 // ---------- Promotion / goals ----------
@@ -494,6 +782,8 @@ export function advanceSeason(state) {
   if (state.gameOver) { archiveSeason(state); return; }
   tickBirths(state, rng);
   tickAIMarriages(state, rng);
+  tickDragons(state, rng);
+  if (state.gameOver) { archiveSeason(state); return; }
   tickWar(state, rng);
   tickEvents(state, rng);
   maybePlayerDecision(state, rng);
@@ -597,6 +887,34 @@ export const ACTIONS = {
         return `Your agent is caught in ${T.seat} with your letters on him. House ${T.name} knows, and soon everyone will. (-5 prestige)`;
       }
       return 'The scheme unravels quietly. Money spent, nothing gained — but nothing traced.';
+    },
+  },
+  dragon_hunt: {
+    label: 'Hunt a Wild Dragon', cost: 150,
+    desc: 'March against a wild dragon with scorpions and prayers. Glory or ash.',
+    run(state, rng) {
+      const h = state.houses[state.playerHouseId];
+      const wilds = wildDragons(state);
+      if (!wilds.length) {
+        h.gold += 150; state.actionsLeft += 1; // refund
+        return 'There are no wild dragons left to hunt. The realm is poorer for it, say the singers. Richer, say the shepherds. (Gold refunded.)';
+      }
+      const d = rng.pick(wilds);
+      const lord = state.characters[h.lordId];
+      const champ = livingMembers(state, h).filter((c) => c.gender === 'm' && age(state, c) >= 16 && age(state, c) <= 55).sort((a, b) => b.skills.war - a.skills.war)[0] || lord;
+      const stage = dragonStage(state, d);
+      let p = 0.45 - stage * 0.1 + (champ ? champ.skills.war * 0.015 : 0);
+      const lost = Math.floor(h.troops * rng.range(0.06, 0.16));
+      h.troops = Math.max(100, h.troops - lost);
+      if (rng.chance(Math.max(0.08, p))) {
+        killDragon(state, d, `slain by the men of House ${h.name} in ${regionName(state, d.lairRegionId || h.regionId)}`);
+        h.prestige += 22; h.gold += rng.int(60, 140);
+        if (champ) { champ.glory += 2; if (!champ.epithet) champ.epithet = rng.pick(['Dragonsbane', 'the Wyrmslayer', 'Fireborn']); }
+        return `IT IS DONE. ${d.name} lies dead in its own lair, feathered with scorpion bolts. ${champ ? shortName(state, champ) + ' struck the final blow and will never buy his own ale again.' : ''} The skull will hang in ${h.seat} for a thousand years. (+22 prestige, hoard gold recovered, ${lost} men lost)`;
+      }
+      if (champ && rng.chance(0.35)) kill(state, rng, champ, `was burned to nothing hunting the wild dragon ${d.name}`);
+      d.kills.push(`broke the dragon-hunt of House ${h.name} (Year ${state.year})`);
+      return `The hunt finds ${d.name}. Then, briefly, ${d.name} finds the hunt. ${lost} men do not come home, and the survivors will not speak of the sound it made. The dragon lives.`;
     },
   },
   press_claim: {
