@@ -42,7 +42,7 @@ export function makeCharacter(state, rng, opts = {}) {
     const m = state.characters[opts.motherId];
     const fB = f && f.traits.includes('Dragonblood');
     const mB = m && m.traits.includes('Dragonblood');
-    if ((fB && mB && rng.chance(0.85)) || ((fB || mB) && rng.chance(0.45))) {
+    if ((fB && mB && rng.chance(0.9)) || ((fB || mB) && rng.chance(0.5))) {
       ch.traits.push('Dragonblood');
     }
   }
@@ -147,10 +147,15 @@ export function generateWorld(seed) {
   state.realmName = state.namer.realmName();
   state.dynastyEra = rng.pick(['the Long Peace', 'the Age of Ash', 'the Second Founding', 'the Years of the Broken Wheel', 'the Ravenmarked Century']);
 
-  // Regions
+  // Regions — laid out on a 3x2 map grid (map is 1000x660, crownlands at center)
   const regionDefs = state.namer.regions(6);
+  const cells = rng.shuffle([[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1]]);
   regionDefs.forEach(([name, biome], i) => {
-    state.regions.push({ id: 'r' + i, name, biome });
+    const [cx, cy] = cells[i];
+    state.regions.push({
+      id: 'r' + i, name, biome,
+      mx: cx * 333, my: cy * 330, mw: 334, mh: 330, // map cell bounds
+    });
   });
 
   // Royal house — holds the Wyrmspire Throne
@@ -165,10 +170,26 @@ export function generateWorld(seed) {
     greats.push(g);
   }
 
-  // Minor houses, 2-4 per region sworn to that region's great house
+  // Minor houses, 3-5 per region sworn to that region's great house
   for (const g of greats) {
-    const n = rng.int(2, 4);
+    const n = rng.int(3, 5);
     for (let i = 0; i < n; i++) makeHouse(state, rng, 'minor', g.regionId, g.id);
+  }
+
+  // Map positions: crown at the heart of the realm, others scattered in their region cells
+  crown.mapX = 500; crown.mapY = 330;
+  for (const h of Object.values(state.houses)) {
+    if (h.tier === 'royal') continue;
+    const r = state.regions.find((x) => x.id === h.regionId);
+    for (let tries = 0; tries < 60; tries++) {
+      const x = r.mx + 60 + rng.random() * (r.mw - 120);
+      const y = r.my + 60 + rng.random() * (r.mh - 120);
+      // keep away from crown and from other placed seats
+      const others = Object.values(state.houses).filter((o) => o.mapX != null);
+      const tooClose = others.some((o) => (o.mapX - x) ** 2 + (o.mapY - y) ** 2 < 72 ** 2) ||
+        ((x - 500) ** 2 + (y - 330) ** 2 < 110 ** 2);
+      if (!tooClose || tries === 59) { h.mapX = Math.round(x); h.mapY = Math.round(y); break; }
+    }
   }
 
   // Relations

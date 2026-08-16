@@ -291,6 +291,36 @@ body {
   .rr-seat, .rr-lord { display: none; }
 }
 
+/* ---------- map ---------- */
+.map-wrap {
+  margin: 0 0 16px;
+  border: 1px solid #8a744c;
+  box-shadow: 0 3px 12px #0005;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #d9c894;
+}
+.realm-map { display: block; width: 100%; height: auto; }
+.map-region-label {
+  font-family: 'Cinzel', serif; font-size: 15px; letter-spacing: .14em;
+  fill: #7a6748; opacity: 0.8;
+}
+.map-seat-label {
+  font-family: 'IM Fell English', serif; fill: #2b1d0e;
+  paint-order: stroke; stroke: #e9dcbe; stroke-width: 3px; stroke-linejoin: round;
+}
+.map-seat-label.mine { fill: #6e2440; font-weight: bold; }
+.map-seat-label.dead { opacity: 0.45; text-decoration: line-through; }
+.map-seat:hover path { filter: brightness(1.15); }
+.map-dragon-label {
+  font-family: 'IM Fell English', serif; font-size: 11px; font-style: italic; fill: #7a1f1f;
+  paint-order: stroke; stroke: #e9dcbe; stroke-width: 3px; stroke-linejoin: round;
+}
+.map-cartouche { font-family: 'Cinzel', serif; font-size: 15px; fill: #2b1d0e; font-weight: 700; }
+.map-cartouche-sub { font-family: 'IM Fell English', serif; font-size: 11.5px; font-style: italic; fill: #7a6748; }
+.hinfo-top { display: flex; gap: 14px; align-items: center; }
+.hinfo-motto { font-family: 'Cinzel', serif; font-weight: 700; color: var(--seal); }
+
 /* ---------- chronicle ---------- */
 .chronicle-panel { }
 .chron-tools { display: flex; justify-content: flex-end; margin-bottom: 8px; }

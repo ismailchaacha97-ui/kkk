@@ -142,7 +142,8 @@ function tickBirths(state, rng) {
           if (rng.chance(0.3)) kill(state, rng, ch, 'died in childbed');
         } else {
           const kindTag = kidHouse.id === state.playerHouseId ? 'birth-player' : 'birth';
-          log(state, `A ${kid.gender === 'f' ? 'daughter' : 'son'}, ${kid.name}, is born to ${shortName(state, ch)} at ${kidHouse.seat}.`, kindTag);
+          const blooded = kid.traits.includes('Dragonblood');
+          log(state, `A ${kid.gender === 'f' ? 'daughter' : 'son'}, ${kid.name}, is born to ${shortName(state, ch)} at ${kidHouse.seat}.${blooded ? ' The midwife swears the babe\u2019s eyes caught the hearthlight like coals — the OLD BLOOD runs in this one.' : ''}`, blooded ? (kidHouse.id === state.playerHouseId ? 'dragon-player' : 'dragon') : kindTag);
         }
       }
     }
@@ -971,7 +972,8 @@ export function arrangeMarriage(state, myCharId, targetHouseId) {
   const me = state.characters[myCharId];
   const T = state.houses[targetHouseId];
   if (!me || !T || !T.alive) return { ok: false, msg: 'That match cannot be made.' };
-  const cands = livingMembers(state, T).filter((c) => isUnwed(state, c) && c.gender !== me.gender && age(state, c) >= 16 && age(state, c) <= 50);
+  // Rulers cannot leave their own seat — exclude them so the match always joins YOUR house.
+  const cands = livingMembers(state, T).filter((c) => isUnwed(state, c) && c.gender !== me.gender && age(state, c) >= 16 && age(state, c) <= 50 && T.lordId !== c.id);
   if (!cands.length) return { ok: false, msg: `House ${T.name} has no suitable match of the opposite sex unwed.` };
   // acceptance check
   const rel = h.relations[T.id] || 0;
@@ -990,15 +992,11 @@ export function arrangeMarriage(state, myCharId, targetHouseId) {
   }
   const partner = rng.pick(cands);
   me.spouseId = partner.id; partner.spouseId = me.id;
-  // partner joins player house unless partner is heir/lord of theirs
-  if (T.lordId !== partner.id) {
-    const idx = T.memberIds.indexOf(partner.id);
-    if (idx >= 0) T.memberIds.splice(idx, 1);
-    partner.houseId = h.id;
-    h.memberIds.push(partner.id);
-  } else {
-    // marrying their ruler: our member moves? keep both where they are, alliance only
-  }
+  // partner always joins the player house (rulers were excluded above)
+  const pidx = T.memberIds.indexOf(partner.id);
+  if (pidx >= 0) T.memberIds.splice(pidx, 1);
+  partner.houseId = h.id;
+  h.memberIds.push(partner.id);
   relMod(state, h.id, T.id, rng.int(18, 30));
   h.prestige += T.tier === 'royal' ? 12 : T.tier === 'great' ? 7 : 3;
   const msg = `${shortName(state, me)} weds ${partner.name} of House ${T.name}. Septons bless it; the alliance is sealed with bread and salt.`;

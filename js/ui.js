@@ -9,6 +9,7 @@ import {
 } from './characters.js';
 import { CHEATS, runCheat } from './cheats.js';
 import { saveGame, loadGame, hasSave, clearSave } from './save.js';
+import { renderMapSVG, ensureMapPositions } from './map.js';
 import { buildChronicle, chroniclePlainText } from './chronicle.js';
 import { makeRng } from './rng.js';
 
@@ -545,6 +546,18 @@ function renderRealm(main) {
   panel.appendChild(el('div', 'panel-title', `♛ The Realm of ${esc(state.realmName)}`));
   panel.appendChild(el('p', 'dim panel-note', `House ${esc(crown.name)} holds the throne from ${esc(crown.seat)}. ${state.war ? `The realm bleeds: ${esc(state.war.name)}.` : 'The realm is at peace — for now.'}`));
 
+  // The map
+  ensureMapPositions(state);
+  const mapWrap = el('div', 'map-wrap');
+  mapWrap.innerHTML = renderMapSVG(state);
+  mapWrap.querySelectorAll('.map-seat').forEach((g) => {
+    g.addEventListener('click', () => {
+      const h = state.houses[g.getAttribute('data-house')];
+      if (h) openHouseInfo(h.id);
+    });
+  });
+  panel.appendChild(mapWrap);
+
   // Dragons of the realm
   const allDragons = livingDragons(state);
   if (allDragons.length) {
@@ -607,6 +620,34 @@ function renderRealm(main) {
   panel.appendChild(sec);
 
   main.appendChild(panel);
+}
+
+function openHouseInfo(houseId) {
+  const P = state.houses[state.playerHouseId];
+  const h = state.houses[houseId];
+  if (!h) return;
+  modal(`House ${h.name}${h.id === state.crownHouseId ? ' ♛' : ''}`, (body) => {
+    const lord = h.alive ? state.characters[h.lordId] : null;
+    const rel = h.id === P.id ? null : (P.relations[h.id] || 0);
+    const drs = houseDragons(state, h.id);
+    body.innerHTML = `
+      <div class="hinfo-top">${sigilSVG(h.sigil, 66)}
+        <div>
+          <div class="hinfo-motto">&ldquo;${esc(h.motto)}&rdquo;</div>
+          <div class="dim">${esc(sigilBlazon(h.sigil))}</div>
+          <div class="dim">${h.alive ? (h.tier === 'royal' ? 'The ROYAL house' : h.tier === 'great' ? 'A GREAT house' : 'A minor house') + ' of ' + esc(regionName(state, h.regionId)) : 'EXTINCT since Year ' + h.extinctYear}</div>
+        </div>
+      </div>
+      <hr class="rule">
+      <p><strong>Seat:</strong> ${esc(h.seat)}<br>
+      ${lord ? `<strong>${lord.gender === 'f' ? 'Lady' : 'Lord'}:</strong> ${esc(fullName(state, lord))}, aged ${age(state, lord)}<br>` : ''}
+      ${h.liegeId && state.houses[h.liegeId] ? `<strong>Sworn to:</strong> House ${esc(state.houses[h.liegeId].name)}<br>` : ''}
+      <strong>Strength:</strong> ⚔ ${h.alive ? h.troops : 0} &nbsp; ★ ${Math.round(h.prestige)} prestige<br>
+      ${rel !== null ? `<strong>Relations with you:</strong> <span class="${rel < 0 ? 'neg' : 'pos'}">${rel >= 0 ? '+' : ''}${rel}</span><br>` : ''}
+      ${drs.length ? `<strong>Dragons:</strong> ${drs.map((d) => esc(d.name) + ' (' + esc(dragonStageName(state, d)) + ')').join(', ')}<br>` : ''}
+      ${h.alive ? `<strong>Blood of the house:</strong> ${livingMembers(state, h).length} living</p>` : '</p>'}
+    `;
+  });
 }
 
 // ---------- Chronicle tab ----------
