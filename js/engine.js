@@ -174,8 +174,14 @@ function tickEconomy(state, rng) {
   }
 }
 
+export function isUnwed(state, ch) {
+  if (!ch.spouseId) return true;
+  const sp = state.characters[ch.spouseId];
+  return !sp || !sp.alive; // widowed count as free to wed again
+}
+
 function marriageableOf(state, house, minAge = 16) {
-  return livingMembers(state, house).filter((c) => !c.spouseId && age(state, c) >= minAge && age(state, c) <= 50);
+  return livingMembers(state, house).filter((c) => isUnwed(state, c) && age(state, c) >= minAge && age(state, c) <= 50);
 }
 
 function tickAIMarriages(state, rng) {
@@ -965,7 +971,7 @@ export function arrangeMarriage(state, myCharId, targetHouseId) {
   const me = state.characters[myCharId];
   const T = state.houses[targetHouseId];
   if (!me || !T || !T.alive) return { ok: false, msg: 'That match cannot be made.' };
-  const cands = livingMembers(state, T).filter((c) => !c.spouseId && c.gender !== me.gender && age(state, c) >= 16 && age(state, c) <= 50);
+  const cands = livingMembers(state, T).filter((c) => isUnwed(state, c) && c.gender !== me.gender && age(state, c) >= 16 && age(state, c) <= 50);
   if (!cands.length) return { ok: false, msg: `House ${T.name} has no suitable match of the opposite sex unwed.` };
   // acceptance check
   const rel = h.relations[T.id] || 0;

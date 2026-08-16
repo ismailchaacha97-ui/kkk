@@ -1,6 +1,6 @@
 // UI rendering and interaction.
 import { generateWorld, livingMembers, age, fullName, shortName, regionName } from './world.js';
-import { advanceSeason, runAction, resolveDecision, arrangeMarriage, ACTIONS, SEASONS } from './engine.js';
+import { advanceSeason, runAction, resolveDecision, arrangeMarriage, isUnwed, ACTIONS, SEASONS } from './engine.js';
 import { sigilSVG, sigilBlazon } from './sigil.js';
 import { houseDragons, wildDragons, livingDragons, describeDragon, dragonStageName, dragonMark, hasDragonblood } from './dragons.js';
 import {
@@ -193,10 +193,20 @@ function renderGame() {
     const n = el('button', 'btn btn-option', '🗡 Abandon this dynasty (new game)');
     n.onclick = () => { if (confirm('Abandon House ' + state.houses[state.playerHouseId].name + ' and its whole chronicle?')) { clearSave(); close(); showSetup(); } };
     body.appendChild(n);
-    const c = el('button', 'btn btn-option', cheatsUnlocked ? '🕯 The Forbidden Shelf is open' : '🕯 A locked shelf (hint: say the word that all men must)');
+    const c = el('button', 'btn btn-option', cheatsUnlocked ? '🕯 The Forbidden Shelf is open (see the Court page)' : '🕯 A locked shelf (speak the word that all men must)');
     c.onclick = () => {
-      if (!cheatsUnlocked) { toast('Type the word. Five letters. High Valyrian. All men must know it.'); return; }
-      close(); openCheats();
+      if (!cheatsUnlocked) {
+        const word = prompt('The shelf is locked. Speak the word.\n(Five letters. High Valyrian. All men must heed it.)');
+        if (word && word.trim().toLowerCase() === 'valar') {
+          cheatsUnlocked = true;
+          close(); currentTab = 'court'; renderGame();
+          toast('🕯 The Forbidden Shelf creaks open… (see the Court page)');
+        } else if (word) {
+          toast('The shelf does not stir. That is not the word.');
+        }
+        return;
+      }
+      close(); currentTab = 'court'; renderGame();
     };
     body.appendChild(c);
   });
@@ -275,32 +285,22 @@ function renderCourt(main) {
   actPanel.appendChild(actList);
   grid.appendChild(actPanel);
 
-  // Cheats panel
+  // Cheats panel — buttons right on the page
   if (cheatsUnlocked) {
     const cp = el('div', 'panel cheat-panel');
     cp.appendChild(el('div', 'panel-title cheat-title', '🕯 The Forbidden Shelf'));
     cp.appendChild(el('p', 'dim panel-note', 'Volumes the Citadel pretends do not exist. Each use is recorded in the chronicle, which will judge you.'));
-    const btn = el('button', 'btn btn-small', 'Open the shelf…');
-    btn.onclick = () => openCheats();
-    cp.appendChild(btn);
+    const cGrid = el('div', 'cheat-grid');
+    for (const c of CHEATS) {
+      const b = el('button', 'btn btn-cheat', `<span class="cheat-icon">${c.icon}</span><span class="cheat-label">${esc(c.label)}</span><span class="cheat-desc dim">${esc(c.desc)}</span>`);
+      b.onclick = () => { const msg = runCheat(state, c.id); saveGame(state); toast(msg); renderGame(); };
+      cGrid.appendChild(b);
+    }
+    cp.appendChild(cGrid);
     grid.appendChild(cp);
   }
 
   main.appendChild(grid);
-}
-
-function openCheats() {
-  modal('🕯 The Forbidden Shelf', (body, close) => {
-    body.appendChild(el('p', 'dim', 'Ten volumes bound in black. Their use marks the chronicle forever.'));
-    for (const c of CHEATS) {
-      const row = el('div', 'target-row');
-      row.innerHTML = `<span class="tr-name">${c.icon} <strong>${esc(c.label)}</strong><br><em class="dim">${esc(c.desc)}</em></span>`;
-      const b = el('button', 'btn btn-small', 'Read it');
-      b.onclick = () => { const msg = runCheat(state, c.id); saveGame(state); close(); toast(msg); renderGame(); };
-      row.appendChild(b);
-      body.appendChild(row);
-    }
-  }, true);
 }
 
 function pickVictim() {
@@ -345,7 +345,7 @@ function pickTarget(actionKey) {
 
 function pickMarriage() {
   const P = state.houses[state.playerHouseId];
-  const singles = livingMembers(state, P).filter((c) => !c.spouseId && age(state, c) >= 16 && age(state, c) <= 50);
+  const singles = livingMembers(state, P).filter((c) => isUnwed(state, c) && age(state, c) >= 16 && age(state, c) <= 50);
   if (!singles.length) { toast('No one of your house is both unwed and of age.'); return; }
   modal('Whom shall we wed?', (body, close) => {
     for (const c of singles) {
@@ -355,7 +355,7 @@ function pickMarriage() {
       b.onclick = () => {
         body.innerHTML = '';
         const houses = Object.values(state.houses).filter((h) => h.alive && h.id !== P.id)
-          .filter((h) => livingMembers(state, h).some((x) => !x.spouseId && x.gender !== c.gender && age(state, x) >= 16 && age(state, x) <= 50));
+          .filter((h) => livingMembers(state, h).some((x) => isUnwed(state, x) && x.gender !== c.gender && age(state, x) >= 16 && age(state, x) <= 50));
         if (!houses.length) { body.appendChild(el('p', 'dim', 'No house has a suitable unwed match this season.')); return; }
         body.appendChild(el('p', 'dim', `Seeking a match for ${esc(c.name)}. Higher-tier houses may refuse a lesser name.`));
         for (const h of houses.sort((a, b) => b.prestige - a.prestige)) {
@@ -517,8 +517,9 @@ function pickCouncil(post) {
   const def = COUNCIL_POSTS[post];
   modal(`Appoint a ${def.label}`, (body, close) => {
     body.appendChild(el('p', 'dim', `${def.desc} The office favors ${def.skill === 'war' ? '⚔ war' : def.skill === 'dip' ? '🕊 diplomacy' : def.skill === 'stew' ? '🜚 stewardship' : '🗡 intrigue'}.`));
-    const cands = livingMembers(state, P).filter((x) => age(state, x) >= 16 && !isAway(state, x))
+    const cands = livingMembers(state, P).filter((x) => x.id !== P.lordId && age(state, x) >= 16 && !isAway(state, x))
       .sort((x, y) => y.skills[def.skill] - x.skills[def.skill]);
+    if (!cands.length) body.appendChild(el('p', 'dim', 'No one of age is free to serve. The lord cannot appoint themselves — ruling is already an office.'));
     for (const c of cands) {
       const row = el('div', 'target-row');
       const held = Object.entries(P.council).find(([, id]) => id === c.id);

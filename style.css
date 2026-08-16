@@ -223,6 +223,17 @@ body {
   padding: 10px 14px;
 }
 .cheat-title { color: #3d2b56; border-bottom-color: #3d2b5666; }
+.cheat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.btn-cheat {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; padding: 8px 10px;
+  background: linear-gradient(#e8dcd4, #d8c4b8);
+  border: 1px solid #3d2b5680;
+}
+.btn-cheat:hover:not(:disabled) { box-shadow: 0 0 8px #3d2b5640; }
+.cheat-icon { font-size: 18px; }
+.cheat-label { font-family: 'Cinzel', serif; font-weight: 700; font-size: 13.5px; color: #3d2b56; }
+.cheat-desc { font-size: 12px; line-height: 1.25; }
 .log-entry.kind-cheat { border-left-color: #3d2b56; background: #3d2b5612; font-style: italic; }
 .char-card.rider { border-color: #b0501e; background: #b0501e0e; }
 .dragon-realm-row { background: #b0501e0a; }

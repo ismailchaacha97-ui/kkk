@@ -125,6 +125,7 @@ export function appointCouncil(state, post, chId) {
   }
   const ch = state.characters[chId];
   if (!ch || !ch.alive || ch.houseId !== h.id) return { ok: false, msg: 'They cannot serve.' };
+  if (h.lordId === ch.id) return { ok: false, msg: 'The lord cannot sit their own council. Ruling is already an office.' };
   if (age(state, ch) < 16) return { ok: false, msg: 'They are too young for office.' };
   if (isAway(state, ch)) return { ok: false, msg: `${ch.name} is away from the keep.` };
   for (const p of Object.keys(h.council)) if (h.council[p] === ch.id) h.council[p] = null;
@@ -137,7 +138,7 @@ export function councilBonus(state, house, post) {
   const id = house.council ? house.council[post] : null;
   if (!id) return 0;
   const ch = state.characters[id];
-  if (!ch || !ch.alive || ch.houseId !== house.id) { house.council[post] = null; return 0; }
+  if (!ch || !ch.alive || ch.houseId !== house.id || house.lordId === ch.id) { house.council[post] = null; return 0; }
   if (ch.awayUntil != null && state.turnCount < ch.awayUntil) return 0;
   return ch.skills[COUNCIL_POSTS[post].skill];
 }
