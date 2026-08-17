@@ -22,6 +22,16 @@ Everything that happens is written into **The Chronicle**: a maester's prose acc
 - ❄️ **Seasons & winters** — harvest booms, winters of varying severity that kill the old and the young
 - 📜 **The Chronicle** — your full history as prose, copyable as plain text to share
 - 🎖️ **Rise in standing** — reach 80 prestige as a minor house and be raised to a great house by royal decree
+- 🏆 **Playable tourneys (v3)** — 8-rider brackets with named knights and famous hedge knights, tilt-by-tilt results, 3:1 wagers, and the crown of Love and Beauty (crowning a wedded lady is a diplomatic incident)
+- 🗡 **Nemesis system (v3)** — push a house past hatred and its lord makes your ruin his life's work: bribed toll-keepers, vicious ballads, poisoned friendships, war
+- ⚔ **Succession crises (v3)** — a child, a daughter, or a named favorite on the seat may drive a passed-over kinsman to rebellion: buy him, banish him, or let the swords decide
+- ⚖ **The Great Council (v3)** — when a royal line dies out, the great houses elect the next dynasty; be one of them
+- ☠ **Plagues & wildfire (v3)** — the Pale Sweat walks the realm; forgotten alchemist caches level keeps in green fire
+- 🌾 **Granaries & the Faith (v3)** — stockpile grain to blunt cruel winters; endow the sept and the High Septon names you among the Faithful
+- ★ **Notable characters (v3)** — famous hedge knights, singers, sellsword captains, and mystics roam the realm, ride in your tourneys, and die memorably
+- 🏅 **13 achievements (v3)** — Dragonsbane, Kingmaker, Century House, The Old Blood Restored...
+- ⛵ **Scenario starts (v3)** — The Exile, The Last Dragonlord, The Usurper's Debt
+- 🖼 **Dynasty card (v3)** — export a shareable PNG summary of your dynasty
 
 ## Run locally
 

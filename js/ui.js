@@ -2,19 +2,22 @@
 import { generateWorld, livingMembers, age, fullName, shortName, regionName, lawfulHeir } from './world.js';
 import { advanceSeason, runAction, resolveDecision, arrangeMarriage, isUnwed, autoGovern, ACTIONS, SEASONS } from './engine.js';
 import { sigilSVG, sigilBlazon } from './sigil.js';
-import { houseDragons, wildDragons, livingDragons, describeDragon, dragonStageName, dragonMark, hasDragonblood } from './dragons.js';
+import { houseDragons, wildDragons, livingDragons, describeDragon, dragonStageName, dragonMark, hasDragonblood, makeDragon } from './dragons.js';
+import { makeRng } from './rng.js';
 import {
   tutorCharacter, rewardCharacter, sendAdventuring, banishCharacter, nameHeir,
   appointCouncil, assassinate, isAway, COUNCIL_POSTS,
 } from './characters.js';
 import { CHEATS, runCheat } from './cheats.js';
 import { saveGame, loadGame, hasSave, clearSave } from './save.js';
+import { openTourney, placeWager, runTourneyRound, concludeTourney } from './tourney.js';
+import { ensureNotables, livingNotables, notableRoleLabel, NOTABLE_ROLES } from './notables.js';
+import { ACHIEVEMENTS } from './achievements.js';
 import { renderMapSVG, ensureMapPositions } from './map.js';
 import { ensureLore, houseAncestors, foundingBlurb } from './lore.js';
 import { renderTreeHTML } from './tree.js';
 import { sendGift, proposePact, demandTribute, sendInsult, inviteHunt, hasPact, getPacts } from './diplomacy.js';
 import { buildChronicle, chroniclePlainText } from './chronicle.js';
-import { makeRng } from './rng.js';
 
 let state = null;
 let currentTab = 'court';
@@ -130,6 +133,29 @@ function regenSetup(seed) {
   }
   wrap.appendChild(row);
 
+  // Scenario starts
+  wrap.appendChild(el('div', 'scenario-title', '— or begin with a harder story —'));
+  const scRow = el('div', 'scenario-row');
+  const scenarios = [
+    { id: 'exile', icon: '⛵', name: 'The Exile', desc: 'One ship, near-empty coffers, a legendary blade, and a name in disgrace. Prestige is ash; the heirloom is everything.' },
+    { id: 'dragonlord', icon: '🜂', name: 'The Last Dragonlord', desc: 'A dragon sleeps in your yard and the whole realm hates you for it. Poor, feared, and airborne.' },
+    { id: 'debt', icon: '♛', name: 'The Usurper\u2019s Debt', desc: 'The crown owes your house everything, and would prefer you dead to repayment. Rich, favored... hunted.' },
+  ];
+  for (const sc of scenarios) {
+    const c = el('div', 'scenario-card');
+    c.innerHTML = `<div class="sc-icon">${sc.icon}</div><div class="sc-name">${esc(sc.name)}</div><div class="sc-desc dim">${esc(sc.desc)}</div>`;
+    const b = el('button', 'btn btn-small', 'Begin');
+    b.onclick = () => {
+      const minorPool = Object.values(state.houses).filter((x) => x.tier === 'minor');
+      const h = minorPool[Math.floor(Math.random() * minorPool.length)];
+      applyScenario(sc.id, h);
+      startGame(h.id);
+    };
+    c.appendChild(b);
+    scRow.appendChild(c);
+  }
+  wrap.appendChild(scRow);
+
   const reroll = el('button', 'btn btn-ghost', '☈ Consult other ravens (new realm)');
   reroll.onclick = () => regenSetup(Math.floor(Math.random() * 1e9));
   wrap.appendChild(reroll);
@@ -141,11 +167,38 @@ function regenSetup(seed) {
   app.appendChild(wrap);
 }
 
+function applyScenario(id, h) {
+  ensureLore(state);
+  const HEIRLOOMS = { exile: { kind: 'blade', name: 'the Exile\u2019s Edge', desc: 'a blade of dawn-steel carried across the sea when everything else was lost' } };
+  if (id === 'exile') {
+    h.gold = 40; h.troops = 350; h.prestige = 4;
+    h.heirloom = HEIRLOOMS.exile;
+    state.scenario = 'The Exile';
+    for (const o of Object.values(state.houses)) { if (o.id !== h.id) { h.relations[o.id] = Math.min(h.relations[o.id] || 0, -5); } }
+  } else if (id === 'dragonlord') {
+    h.gold = 60; h.troops = 500; h.prestige = 15;
+    state.scenario = 'The Last Dragonlord';
+    const lord = state.characters[h.lordId];
+    if (lord && !lord.traits.includes('Dragonblood')) lord.traits.push('Dragonblood');
+    const rng = makeRng((state.seed ^ 0xD12A60) >>> 0);
+    const d = makeDragon(state, rng, { houseId: h.id, riderId: lord ? lord.id : null, birthYear: state.year - rng.int(18, 35) });
+    if (lord) lord.dragonId = d.id;
+    for (const o of Object.values(state.houses)) { if (o.id !== h.id) { const v = -20 - Math.floor(Math.random() * 20); h.relations[o.id] = v; o.relations[h.id] = v; } }
+  } else if (id === 'debt') {
+    h.gold = 800; h.troops = 900; h.prestige = 45;
+    state.scenario = 'The Usurper\u2019s Debt';
+    h.relations[state.crownHouseId] = 60;
+    state.houses[state.crownHouseId].relations[h.id] = -70; // they smile; they plot
+    state.nemesisId = state.crownHouseId;
+  }
+}
+
 function startGame(houseId) {
   state.playerHouseId = houseId;
   state.startYear = state.year;
   state.startTier = state.houses[houseId].tier;
   ensureLore(state);
+  ensureNotables(state);
   state.annals.push({ year: state.year, entries: [{ season: SEASONS[state.season], kind: 'crown', text: `The chronicle of House ${state.houses[houseId].name} begins. ${SEASONS[state.season]} of Year ${state.year}.` }] });
   state.log = [{ text: `You are ${lordTitle()} of ${state.houses[houseId].seat}. The realm watches, mostly with indifference. Change that.`, kind: 'crown' }];
   renderGame();
@@ -290,6 +343,20 @@ function renderCourt(main) {
     grid.appendChild(card);
   }
 
+  // Nemesis banner
+  if (state.nemesisId && state.houses[state.nemesisId] && state.houses[state.nemesisId].alive) {
+    const N = state.houses[state.nemesisId];
+    const nb = el('div', 'nemesis-banner');
+    nb.innerHTML = `🗡 <strong>NEMESIS:</strong> House ${esc(N.name)} of ${esc(N.seat)} works ceaselessly toward your ruin. Reconcile (raise relations above -25), destroy them — or endure.`;
+    nb.style.cursor = 'pointer';
+    nb.onclick = () => openHouseInfo(N.id);
+    grid.appendChild(nb);
+  }
+  // Plague banner
+  if (state.plague) {
+    grid.appendChild(el('div', 'plague-banner', `☠ ${esc(state.plague.name)} walks the realm. Fewer feasts. More funerals.`));
+  }
+
   // Events log
   const logPanel = el('div', 'panel log-panel');
   logPanel.appendChild(el('div', 'panel-title', `☙ Tidings — ${SEASONS[state.season]}, Year ${state.year}`));
@@ -313,7 +380,8 @@ function renderCourt(main) {
     const b = el('button', 'btn btn-small' + (key === 'press_claim' ? ' btn-danger' : ''), act.needsTarget ? 'Choose target…' : 'Do it');
     b.disabled = disabled;
     b.onclick = () => {
-      if (act.needsTarget) pickTarget(key);
+      if (act.playable && key === 'tourney') startPlayableTourney();
+      else if (act.needsTarget) pickTarget(key);
       else { const r = runAction(state, key); if (r && !r.ok) toast(r.msg); renderGame(); }
     };
     row.appendChild(b);
@@ -340,6 +408,18 @@ function renderCourt(main) {
 
   actPanel.appendChild(actList);
   grid.appendChild(actPanel);
+
+  // Achievements
+  const earned = state.achievements || {};
+  const achPanel = el('div', 'panel ach-panel');
+  achPanel.appendChild(el('div', 'panel-title', `🏅 Deeds of the Dynasty (${Object.keys(earned).length}/${ACHIEVEMENTS.length})`));
+  const achGrid = el('div', 'ach-grid');
+  for (const a of ACHIEVEMENTS) {
+    const got = earned[a.id];
+    achGrid.appendChild(el('div', 'ach-item' + (got ? ' got' : ''), `<span class="ach-icon">${a.icon}</span><span class="ach-name">${esc(a.name)}</span><span class="ach-desc dim">${got ? 'Year ' + got : esc(a.desc)}</span>`));
+  }
+  achPanel.appendChild(achGrid);
+  grid.appendChild(achPanel);
 
   // Cheats panel — buttons right on the page
   if (cheatsUnlocked) {
@@ -377,6 +457,99 @@ function pickVictim() {
         body.appendChild(row);
       }
     }
+  }, true);
+}
+
+// ---------- Playable tourney ----------
+function startPlayableTourney() {
+  const P = state.houses[state.playerHouseId];
+  if (state.actionsLeft <= 0) { toast('No actions remain this season.'); return; }
+  if (P.gold < 100) { toast('Not enough gold (100 needed).'); return; }
+  const champs = livingMembers(state, P).filter((c) => age(state, c) >= 16 && age(state, c) <= 50 && !c.wounded && !isAway(state, c));
+  if (!champs.length) { toast('No one of your house is fit to ride.'); return; }
+  modal('🏆 A Grand Tourney at ' + P.seat, (body, close) => {
+    body.appendChild(el('p', 'dim', 'Choose the champion who will carry your colors into the lists.'));
+    for (const c of champs.sort((a, b) => b.skills.war - a.skills.war)) {
+      const row = el('div', 'target-row');
+      row.innerHTML = `<span class="tr-name">${esc(shortName(state, c))} <em class="dim">(⚔ ${c.skills.war}${c.glory ? ', glory ' + '✦'.repeat(Math.min(3, c.glory)) : ''})</em></span>`;
+      const b = el('button', 'btn btn-small', 'Ride for the house');
+      b.onclick = () => {
+        P.gold -= 100; state.actionsLeft -= 1;
+        openTourney(state, c.id);
+        close();
+        showTourneyBracket();
+      };
+      row.appendChild(b);
+      body.appendChild(row);
+    }
+  });
+}
+
+function showTourneyBracket() {
+  const t = state.tourney;
+  if (!t) return;
+  const P = state.houses[state.playerHouseId];
+  modal('🏆 The Lists — ' + ['Quarter-finals', 'Semi-finals', 'The Final', 'Champion'][t.round], (body, close) => {
+    // wager UI before first round
+    if (t.round === 0 && t.wager === 0) {
+      const wagerBox = el('div', 'wager-box');
+      wagerBox.appendChild(el('div', 'dim', `The bookmakers cry odds of 3-to-1 on any rider. Wager on a champion? (You hold ${P.gold} gold)`));
+      const sel = document.createElement('select');
+      sel.className = 'tree-select';
+      const optNone = document.createElement('option'); optNone.value = ''; optNone.textContent = '— no wager —'; sel.appendChild(optNone);
+      for (const r of t.bracket) { const o = document.createElement('option'); o.value = r.name; o.textContent = r.name; sel.appendChild(o); }
+      const amt = document.createElement('input');
+      amt.type = 'number'; amt.min = 10; amt.max = P.gold; amt.value = Math.min(50, P.gold); amt.className = 'wager-amt';
+      const wb = el('button', 'btn btn-small', 'Place wager');
+      wb.onclick = () => {
+        if (sel.value && placeWager(state, parseInt(amt.value, 10) || 0, sel.value)) { toast(`Wager placed: ${amt.value} gold on ${sel.value}.`); wb.disabled = true; sel.disabled = true; amt.disabled = true; }
+        else toast('The bookmakers wave you off.');
+      };
+      wagerBox.appendChild(sel); wagerBox.appendChild(amt); wagerBox.appendChild(wb);
+      body.appendChild(wagerBox);
+    }
+    // current field
+    body.appendChild(el('div', 'panel-title', 'The Field'));
+    for (let i = 0; i < t.bracket.length; i += 2) {
+      const A = t.bracket[i], B = t.bracket[i + 1];
+      if (!B) break;
+      body.appendChild(el('div', 'tilt-row', `<span class="${A.isPlayer ? 'mine-rider' : ''}">${esc(A.name)}</span> <em class="dim">vs</em> <span class="${B.isPlayer ? 'mine-rider' : ''}">${esc(B.name)}</span>`));
+    }
+    const runBtn = el('button', 'btn btn-primary', t.bracket.length === 2 ? '⚔ Run the final!' : '⚔ Sound the horns!');
+    runBtn.onclick = () => {
+      const results = runTourneyRound(state);
+      body.innerHTML = '';
+      body.appendChild(el('div', 'panel-title', 'The Tilts'));
+      for (const r of results) {
+        body.appendChild(el('div', 'tilt-result' + (r.winnerRef.isPlayer ? ' mine-win' : ''), `${esc(r.text)} — <strong>${esc(r.winner)}</strong> advances.`));
+      }
+      if (state.tourney && state.tourney.done) {
+        const champ = state.tourney.champion;
+        body.appendChild(el('div', 'tourney-champ', `🏆 CHAMPION: ${esc(champ.name)}`));
+        if (champ.isPlayer) {
+          body.appendChild(el('p', 'dim', 'Your champion holds the crown of Love and Beauty. Lay it in whose lap?'));
+          const sel2 = document.createElement('select');
+          sel2.className = 'tree-select';
+          const oN = document.createElement('option'); oN.value = ''; oN.textContent = '— no one (keep it modest) —'; sel2.appendChild(oN);
+          for (const h of Object.values(state.houses).filter((x) => x.alive && x.id !== P.id)) {
+            const o = document.createElement('option'); o.value = h.id; o.textContent = 'A lady of House ' + h.name; sel2.appendChild(o);
+          }
+          body.appendChild(sel2);
+          const fin = el('button', 'btn btn-primary', 'Conclude the tourney');
+          fin.onclick = () => { concludeTourney(state, sel2.value ? { houseId: sel2.value } : null); saveGame(state); close(); renderGame(); };
+          body.appendChild(fin);
+        } else {
+          const fin = el('button', 'btn btn-primary', 'Conclude the tourney');
+          fin.onclick = () => { concludeTourney(state, null); saveGame(state); close(); renderGame(); };
+          body.appendChild(fin);
+        }
+      } else {
+        const next = el('button', 'btn btn-primary', 'To the next round ➤');
+        next.onclick = () => { close(); showTourneyBracket(); };
+        body.appendChild(next);
+      }
+    };
+    body.appendChild(runBtn);
   }, true);
 }
 
@@ -673,6 +846,26 @@ function renderRealm(main) {
   });
   panel.appendChild(mapWrap);
 
+  // Notable characters of the realm
+  ensureNotables(state);
+  const nts = livingNotables(state).sort((a, b) => b.fame - a.fame);
+  if (nts.length) {
+    const nSec = el('div', 'region-sec');
+    nSec.appendChild(el('div', 'region-name', '★ Names on Every Tongue'));
+    const nl = el('div', 'realm-list');
+    for (const n of nts.slice(0, 8)) {
+      const role = NOTABLE_ROLES[n.role];
+      nl.appendChild(el('div', 'realm-row notable-row', `
+        <span class="tr-sigil notable-icon">${role.icon}</span>
+        <span class="rr-name">${esc(n.name)} <em class="dim">${esc(role.label)}</em></span>
+        <span class="rr-seat dim">${esc(n.deed)}</span>
+        <span class="rr-lord dim">fame ${'★'.repeat(Math.min(5, Math.ceil(n.fame / 4)))}</span>
+        <span class="rr-stats"></span><span class="tr-rel"></span>`));
+    }
+    nSec.appendChild(nl);
+    panel.appendChild(nSec);
+  }
+
   // Dragons of the realm
   const allDragons = livingDragons(state);
   if (allDragons.length) {
@@ -798,9 +991,81 @@ function renderChronicle(main) {
     catch { toast('Could not copy — your browser refused.'); }
   };
   tools.appendChild(copyBtn);
+  const cardBtn = el('button', 'btn btn-small', '🖼 Dynasty card (PNG)');
+  cardBtn.onclick = () => downloadDynastyCard();
+  tools.appendChild(cardBtn);
   panel.appendChild(tools);
   panel.appendChild(el('div', 'chron-body', buildChronicle(state)));
   main.appendChild(panel);
+}
+
+// Shareable dynasty card rendered to canvas
+function downloadDynastyCard() {
+  const P = state.houses[state.playerHouseId];
+  const W = 800, H = 1000;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  // parchment
+  ctx.fillStyle = '#e9dcbe'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = '#8a744c'; ctx.lineWidth = 6; ctx.strokeRect(16, 16, W - 32, H - 32);
+  ctx.strokeStyle = '#8a744c55'; ctx.lineWidth = 2; ctx.strokeRect(28, 28, W - 56, H - 56);
+
+  const drawText = (txt, x, y, font, color, align = 'center') => {
+    ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align; ctx.fillText(txt, x, y);
+  };
+  drawText('OATHS & BANNERS', W / 2, 78, 'bold 26px Georgia', '#7a6748');
+  drawText(`HOUSE ${P.name.toUpperCase()}`, W / 2, 135, 'bold 46px Georgia', '#2b1d0e');
+  drawText(`\u201C${P.motto}\u201D`, W / 2, 172, 'italic 22px Georgia', '#6e2440');
+
+  // sigil (draw the SVG into the canvas)
+  const svg = sigilSVG(P.sigil, 200);
+  const img = new Image();
+  const blob = new Blob([svg], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  img.onload = () => {
+    ctx.drawImage(img, W / 2 - 100, 195, 200, 208);
+    URL.revokeObjectURL(url);
+
+    let y = 460;
+    const line = (label, val) => {
+      drawText(label, W / 2 - 180, y, '18px Georgia', '#7a6748', 'left');
+      drawText(String(val), W / 2 + 180, y, 'bold 18px Georgia', '#2b1d0e', 'right');
+      y += 34;
+    };
+    const lord = state.characters[P.lordId];
+    const dead = Object.values(state.characters).filter((c) => !c.alive && c.deathYear >= state.startYear && (c.houseId === P.id || c.birthHouseId === P.id)).length;
+    line('Realm', state.realmName + (state.scenario ? ` · ${state.scenario}` : ''));
+    line('Seat', P.seat);
+    line('Years of rule', `${state.startYear} – ${state.gameOver ? state.gameOver.year : state.year} (${(state.gameOver ? state.gameOver.year : state.year) - state.startYear})`);
+    line('Standing', P.tier === 'royal' ? '♛ THE ROYAL HOUSE' : P.tier === 'great' ? 'Great House' : 'Minor House');
+    line('Lords of the line', state.lordCount || 1);
+    if (lord && P.alive) line('Current lord', fullName(state, lord));
+    line('Prestige', Math.round(P.prestige));
+    line('The fallen', dead);
+    line('Dragons of the house', houseDragons(state, P.id).length);
+    line('Deeds earned', `${Object.keys(state.achievements || {}).length} / ${ACHIEVEMENTS.length}`);
+    if (state.cheated) line('The maesters note', 'forbidden volumes were consulted');
+
+    y += 10;
+    ctx.strokeStyle = '#8a744c'; ctx.beginPath(); ctx.moveTo(W / 2 - 200, y); ctx.lineTo(W / 2 + 200, y); ctx.stroke();
+    y += 40;
+    // top achievements
+    const got = (state.achievements ? Object.keys(state.achievements) : []).slice(0, 5);
+    drawText(got.length ? 'DEEDS OF THE DYNASTY' : 'A HOUSE STILL WRITING ITS STORY', W / 2, y, 'bold 18px Georgia', '#7a6748'); y += 32;
+    for (const id of got) {
+      const a = ACHIEVEMENTS.find((x) => x.id === id);
+      if (a) { drawText(`${a.icon}  ${a.name}`, W / 2, y, '19px Georgia', '#2b1d0e'); y += 30; }
+    }
+    drawText(P.alive ? 'The chronicle continues.' : 'Here the record ends.', W / 2, H - 60, 'italic 18px Georgia', '#6e2440');
+
+    const a = document.createElement('a');
+    a.download = `house-${P.name.toLowerCase()}-dynasty.png`;
+    a.href = cv.toDataURL('image/png');
+    a.click();
+    toast('Dynasty card downloaded.');
+  };
+  img.src = url;
 }
 
 // ---------- Game over ----------

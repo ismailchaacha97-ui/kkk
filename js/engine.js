@@ -10,6 +10,9 @@ import {
   describeDragon, livingDragons, houseDragons, wildDragons, killDragon, hasDragonblood,
 } from './dragons.js';
 import { councilBonus, resolveAdventures, isAway } from './characters.js';
+import * as drama from './drama.js';
+import * as notables from './notables.js';
+import * as achievements from './achievements.js';
 
 export const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
 
@@ -64,11 +67,17 @@ export function kill(state, rng, ch, cause) {
         house.prestige = Math.max(0, house.prestige - 6);
         log(state, `A child ${title.toLowerCase()} sits uneasy in ${house.seat}; the bannermen mutter.`, 'note');
       }
+      state._successionEvents = state._successionEvents || [];
+      state._successionEvents.push({ houseId: house.id, heirId: heir.id });
+      if (isPlayer) state.lordCount = (state.lordCount || 1) + 1;
     } else {
       house.alive = false; house.extinctYear = state.year;
       log(state, `${fullName(state, ch)} — ${cause}. With no heir of the blood, House ${house.name} is EXTINGUISHED. ${house.seat} stands empty.`, 'extinct');
       if (isPlayer) {
         state.gameOver = { reason: `House ${house.name} died with ${shortName(state, ch)}. ${cause}.`, year: state.year };
+      }
+      if (house.id === state.crownHouseId && !isPlayer) {
+        state._crownExtinct = true;
       }
     }
   } else {
@@ -362,6 +371,7 @@ export function startWar(state, rng, attackerId, defenderId, cause) {
     score: 0, seasonsLeft: rng.int(3, 6), startYear: state.year, battles: [],
   };
   relMod(state, attackerId, defenderId, -40);
+  if (attackers.includes(state.playerHouseId) || defenders.includes(state.playerHouseId)) state.sawWar = true;
   log(state, `WAR! ${state.war.name} begins. House ${A.name} marches on House ${D.name} — ${cause}. Banners: ${attackers.length} against ${defenders.length}.`, 'war');
 }
 
@@ -918,7 +928,13 @@ export function advanceSeason(state) {
   if (state.season === 3) {
     state.winterSeverity = rng.weighted([[0.3, 30], [0.6, 40], [1.0, 22], [1.5, 8]]);
     if (state.prophecy === 'winter') { state.winterSeverity = Math.max(state.winterSeverity, 1.5); state.prophecy = null; log(state, 'The witch\u2019s winter has come, exactly as promised. Those who salted meat smile grimly. Those who laughed do not.', 'omen'); }
+    if ((state.granary || 0) > 0 && state.winterSeverity >= 1.0) {
+      state.granary -= 1;
+      state.winterSeverity = Math.min(state.winterSeverity, 0.6);
+      log(state, 'The granaries of your house open. Where other seats count their dead this winter, yours counts sacks. (granary spent, winter blunted)', 'event');
+    }
     const w = state.winterSeverity;
+    if (w >= 1.5) state.sawCruelWinter = true;
     log(state, w >= 1.5 ? 'A CRUEL WINTER descends. The old men say they have seen nothing like it.' :
       w >= 1.0 ? 'Winter comes hard this year. Snows close the high roads.' :
       'Winter settles over the realm.', 'season');
@@ -935,8 +951,28 @@ export function advanceSeason(state) {
   if (state.gameOver) { archiveSeason(state); return; }
   tickWar(state, rng);
   tickEvents(state, rng);
+  drama.tickNemesis(state, rng);
+  drama.tickCatastrophes(state, rng);
+  drama.tickFaith(state, rng);
+  notables.tickNotables(state, rng, log);
+  if (state.gameOver) { archiveSeason(state); return; }
+  // succession crises raised by deaths this season
+  if (state._successionEvents) {
+    for (const ev of state._successionEvents) {
+      const h = state.houses[ev.houseId];
+      const heir = state.characters[ev.heirId];
+      if (h && heir && heir.alive) drama.checkSuccessionCrisis(state, rng, h, heir);
+    }
+    state._successionEvents = null;
+  }
+  // crown extinct -> Great Council
+  if (state._crownExtinct) {
+    state._crownExtinct = false;
+    drama.greatCouncil(state, rng);
+  }
   maybePlayerDecision(state, rng);
   checkStanding(state);
+  achievements.checkAchievements(state);
 
   state.actionsLeft = 2;
   archiveSeason(state);
@@ -974,9 +1010,11 @@ export const ACTIONS = {
     },
   },
   tourney: {
-    label: 'Host a Tourney', cost: 100,
-    desc: '+prestige, glory for your kin, goodwill — and splintered lances.',
+    label: 'Host a Grand Tourney', cost: 100,
+    desc: 'A playable 8-rider joust: pick your champion, wager gold, crown a queen.',
+    playable: true,
     run(state, rng) {
+      // Fallback (observer/auto mode): quick resolution
       const h = state.houses[state.playerHouseId];
       h.prestige += rng.int(6, 12);
       const knights = livingMembers(state, h).filter((c) => age(state, c) >= 16 && age(state, c) <= 45 && c.gender === 'm');
@@ -992,10 +1030,27 @@ export const ACTIONS = {
           extra = ` ${shortName(state, k)} is carried from the lists with a shattered shoulder.`;
         }
       }
-      // goodwill with random attendees
       const others = Object.values(state.houses).filter((x) => x.alive && x.id !== h.id);
       for (let i = 0; i < 3 && others.length; i++) relMod(state, h.id, rng.pick(others).id, rng.int(3, 8));
       return `Banners crowd the fields below ${h.seat}. The tourney is the talk of the realm.${extra}`;
+    },
+  },
+  granary: {
+    label: 'Fill the Granaries', cost: 70,
+    desc: 'Store a winter\u2019s worth of grain. Blunts the next hard winter.',
+    run(state, rng) {
+      state.granary = Math.min(3, (state.granary || 0) + 1);
+      return `Wagons groan up the hill road for a month. The granaries of ${state.houses[state.playerHouseId].seat} stand full (${state.granary} winter${state.granary > 1 ? 's' : ''} stored). Old men nod approvingly, which is how you know it was wise.`;
+    },
+  },
+  sept: {
+    label: 'Endow the Sept', cost: 60,
+    desc: 'Gild the altars, feed the septons. The Faith remembers its friends.',
+    run(state, rng) {
+      state.piety = (state.piety || 10) + rng.int(8, 15);
+      const h = state.houses[state.playerHouseId];
+      h.prestige += 2;
+      return `Gold leaf for the Seven, bread for the begging brothers, a new bell that can be heard two valleys off. The Faith speaks warmly of House ${h.name}. (+piety, +2 prestige)`;
     },
   },
   court_crown: {
@@ -1057,6 +1112,7 @@ export const ACTIONS = {
       h.troops = Math.max(100, h.troops - lost);
       if (rng.chance(Math.max(0.08, p))) {
         killDragon(state, d, `slain by the men of House ${h.name} in ${regionName(state, d.lairRegionId || h.regionId)}`);
+        state.dragonSlain = true;
         h.prestige += 22; h.gold += rng.int(60, 140);
         if (champ) { champ.glory += 2; if (!champ.epithet) champ.epithet = rng.pick(['Dragonsbane', 'the Wyrmslayer', 'Fireborn']); }
         return `IT IS DONE. ${d.name} lies dead in its own lair, feathered with scorpion bolts. ${champ ? shortName(state, champ) + ' struck the final blow and will never buy his own ale again.' : ''} The skull will hang in ${h.seat} for a thousand years. (+22 prestige, hoard gold recovered, ${lost} men lost)`;
