@@ -67,6 +67,35 @@ Measured by porting the algorithm to Python and instrumenting it:
 Work grows **linearly** (~6 comparisons per bar) and the object count is
 constant regardless of how much history is loaded.
 
+## Entry signals
+
+`LONG` / `SHORT` labels print on the bar that triggers. Two setups:
+
+- **Pullback (with trend)** — the bar's low dips into the support line but the
+  **close holds above** it → `LONG`. Mirror for shorts. With
+  *"require matching line slope"* on (default), longs need a **rising** support
+  line and shorts a **falling** resistance line, so it only signals with the
+  trend. A close *through* the line is a breakdown, not a pullback, and is
+  correctly excluded.
+- **Breakout** — a bar closes through the opposite line (same event as the
+  break alerts).
+
+Pick one or both via **Entry type**. Two alerts are included:
+`Long entry signal` and `Short entry signal`.
+
+**De-duplication** matters here: price drifting along a line would otherwise
+print an arrow every single bar. Each side latches after firing and only
+re-arms once price closes clear of the zone (`2 × zone`). Verified: 40
+consecutive touching bars produce **1** signal instead of 40, while a genuine
+dip → leave → dip sequence still produces 2. Turn it off with
+*"One signal per touch"*.
+
+Tuning: **Pullback zone (ATR multiple)** sets how near the bar must come to the
+line to count as a touch — widen it on noisy instruments if signals are sparse.
+
+> These are **signal markers only** — no stops, targets, or sizing, and no
+> backtested edge. See the notes below.
+
 ## Settings
 
 **Detection**
@@ -93,6 +122,10 @@ The algorithm was ported to Python and tested before shipping:
 
 - **Validity invariant** — across 72 synthetic datasets (up/down/flat trends),
   no in-between pivot ever violated a drawn line. ✅
+- **Entry logic** — 7 tests covering de-duplication (40 touching bars → 1
+  signal), genuine re-tests still firing, the trend filter blocking
+  counter-trend pullbacks, closes *through* a line not counting as pullbacks,
+  breakouts firing on the cross bar, and `na` lines producing no signals. ✅
 - **Direction filter** — in strict mode, every drawn resistance was falling and
   every support rising (23 lines). ✅
 - **Edge cases** — 8-bar series and perfectly flat data produce no line instead
@@ -112,3 +145,9 @@ The algorithm was ported to Python and tested before shipping:
   intraday — the cost is a slightly larger search.
 - Only the single best support and resistance line are drawn, by design. The
   goal is a clean, readable chart rather than a thicket of lines.
+- **The entry signals have no tested edge.** Their *logic* is verified, but
+  whether trendline pullbacks and breakouts are profitable on your instrument
+  is untested — after spread and commission the expectancy could be zero or
+  negative. Because the entries depend on the line, and the line re-anchors
+  when a new pivot confirms, historical arrows are also flattered by hindsight
+  relative to what you'd have seen live. Backtest before risking money.

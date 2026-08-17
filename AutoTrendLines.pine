@@ -41,6 +41,11 @@ indicator(title            = "Auto Trend Lines - S/R (90-Day Lookback)",
 const string GRP_DET = "Detection"
 const string GRP_STY = "Style"
 const string GRP_ALR = "Alerts & Extras"
+const string GRP_ENT = "Entries"
+
+const string ENT_PB   = "Pullback (with trend)"
+const string ENT_BO   = "Breakout"
+const string ENT_BOTH = "Both"
 
 const int MS_IN_DAY = 86400000          // milliseconds in one calendar day
 const int ATR_LEN   = 14                // ATR length used for the tolerance
@@ -84,6 +89,24 @@ bool showWin   = input.bool(false, "Shade the lookback window",  group = GRP_STY
 
 bool alertsOn = input.bool(true, "Enable break alerts", group = GRP_ALR,
       tooltip = "Fires when a bar CLOSES beyond the projected trend line.")
+
+// ---- Entry signal inputs ----------------------------------------------------
+bool showEntries = input.bool(true, "Show entry signals", group = GRP_ENT)
+
+string entryMode = input.string(ENT_BOTH, "Entry type",
+      options = [ENT_PB, ENT_BO, ENT_BOTH], group = GRP_ENT,
+      tooltip = "Pullback = price dips to the trend line and closes back on the trend side (with-trend entry). Breakout = price closes through the opposite line.")
+
+bool trendFilter = input.bool(true, "Pullback: require matching line slope",
+      group = GRP_ENT,
+      tooltip = "Only take long pullbacks when support is RISING and short pullbacks when resistance is FALLING. Turning this off will signal pullbacks inside downtrends too.")
+
+float zoneMult = input.float(0.5, "Pullback zone (ATR multiple)",
+      minval = 0.05, maxval = 3.0, step = 0.05, group = GRP_ENT,
+      tooltip = "How close the bar's low (or high) must come to the line to count as a touch.")
+
+bool oneSignal = input.bool(true, "One signal per touch", group = GRP_ENT,
+      tooltip = "Suppresses repeat arrows while price stays around the same line. Prevents a cluster of signals on consecutive bars.")
 
 // Translate the style dropdown into a Pine line-style constant a single time.
 string lineStyleConst = lineSty == "Dashed" ? line.style_dashed :
@@ -371,7 +394,77 @@ plot(resNow, "Resistance level", color = colDown, display = display.data_window)
 plot(supNow, "Support level",    color = colUp,   display = display.data_window)
 
 // =============================================================================
-//  8. ALERTS - fire when a bar CLOSES beyond the projected trend line
+//  8. ENTRY SIGNALS
+// -----------------------------------------------------------------------------
+//  Two setups, both evaluated on the CLOSE of the bar (no intrabar repainting
+//  of the trigger itself - but note the LINE can still re-anchor when a new
+//  pivot confirms, which is inherent to pivot-based trend lines).
+//
+//    PULLBACK : price dips into the trend line and closes back on the trend
+//               side of it. With `trendFilter` on, longs need a RISING support
+//               line and shorts need a FALLING resistance line, so this is a
+//               with-trend entry.
+//    BREAKOUT : price closes through the opposite line (the same event the
+//               alerts fire on).
+//
+//  These are signal markers only - no stops, targets or position sizing.
+// =============================================================================
+bool wantPB = entryMode == ENT_PB or entryMode == ENT_BOTH
+bool wantBO = entryMode == ENT_BO or entryMode == ENT_BOTH
+
+// Touch zone: how near the bar must come to the line to count as a test.
+float zone = nz(ta.atr(ATR_LEN)) * zoneMult
+
+// ---- Pullback conditions ----------------------------------------------------
+// Long: the bar's LOW reached down into the support line, but the CLOSE held
+// above it. Optionally require that support is actually rising (uptrend).
+bool pbLongRaw = wantPB and not na(supNow) and
+      low <= supNow + zone and close > supNow and
+      (not trendFilter or supRising)
+
+// Short: the bar's HIGH pushed into resistance, but the CLOSE stayed below it.
+bool pbShortRaw = wantPB and not na(resNow) and
+      high >= resNow - zone and close < resNow and
+      (not trendFilter or resFalling)
+
+// ---- Breakout conditions ----------------------------------------------------
+// Reuse the same close-through-the-line events used by the alerts below.
+bool boLongRaw = wantBO and not na(resNow) and not na(resNow[1]) and
+      close > resNow and close[1] <= resNow[1]
+bool boShortRaw = wantBO and not na(supNow) and not na(supNow[1]) and
+      close < supNow and close[1] >= supNow[1]
+
+// ---- De-duplication ---------------------------------------------------------
+// Without this a slow drift along a line prints an arrow on every bar. We latch
+// each side and only re-arm once price has clearly left the zone again.
+var bool longArmed  = true
+var bool shortArmed = true
+
+// Re-arm the long side once price closes well clear of support (or it is gone).
+if na(supNow) or close > supNow + zone * 2
+    longArmed := true
+if na(resNow) or close < resNow - zone * 2
+    shortArmed := true
+
+bool longSignal  = showEntries and (pbLongRaw  or boLongRaw)  and (not oneSignal or longArmed)
+bool shortSignal = showEntries and (pbShortRaw or boShortRaw) and (not oneSignal or shortArmed)
+
+// Consume the latch so the next bar does not repeat the same signal.
+if longSignal
+    longArmed := false
+if shortSignal
+    shortArmed := false
+
+// ---- Plot the signals -------------------------------------------------------
+plotshape(longSignal, title = "Long entry", style = shape.labelup,
+      location = location.belowbar, color = colUp, textcolor = color.white,
+      text = "LONG", size = size.small)
+plotshape(shortSignal, title = "Short entry", style = shape.labeldown,
+      location = location.abovebar, color = colDown, textcolor = color.white,
+      text = "SHORT", size = size.small)
+
+// =============================================================================
+//  9. ALERTS - fire when a bar CLOSES beyond the projected trend line
 // =============================================================================
 bool resBreakUp = alertsOn and not na(resNow) and not na(resNow[1]) and
       close > resNow and close[1] <= resNow[1]
@@ -382,3 +475,8 @@ alertcondition(resBreakUp, title = "Resistance trend line broken",
       message = "Price closed ABOVE the resistance trend line ({{ticker}}, {{interval}})")
 alertcondition(supBreakDn, title = "Support trend line broken",
       message = "Price closed BELOW the support trend line ({{ticker}}, {{interval}})")
+
+alertcondition(longSignal, title = "Long entry signal",
+      message = "LONG entry signal on {{ticker}} ({{interval}}) at {{close}}")
+alertcondition(shortSignal, title = "Short entry signal",
+      message = "SHORT entry signal on {{ticker}} ({{interval}}) at {{close}}")
