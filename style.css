@@ -265,6 +265,20 @@ body {
 .char-skills { display: flex; gap: 14px; font-size: 14.5px; margin: 3px 0; }
 .char-rel { font-size: 13.5px; }
 
+.lore-founding {
+  font-style: italic; color: var(--ink-soft); font-size: 15px;
+  border-left: 3px solid var(--gold); padding: 4px 10px; background: #8a6d1a0d;
+  margin: 4px 0 10px;
+}
+.heirloom-card {
+  border: 1px solid var(--gold); border-radius: 3px; padding: 8px 12px;
+  background: linear-gradient(#f4ecd2, #ecdfb6);
+  font-size: 14.5px; margin-bottom: 12px;
+}
+.heirloom-name { font-family: 'Cinzel', serif; font-weight: 700; color: var(--gold); }
+.dead-sub { text-align: center; font-style: italic; font-size: 13px; margin: 8px 0 4px; }
+.dead-entry.ancestor { border-left-color: #8a744c; opacity: 0.85; }
+
 .dead-title { margin-top: 20px; }
 .dead-list { display: flex; flex-direction: column; gap: 4px; }
 .dead-entry { font-size: 14.5px; color: var(--ink-soft); border-left: 3px solid #555; padding-left: 8px; }

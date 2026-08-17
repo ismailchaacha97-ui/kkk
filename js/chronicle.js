@@ -10,8 +10,19 @@ export function buildChronicle(state) {
   parts.push(`<p class="chron-sub">Being a true account, set down by the maesters of ${P.seat}, of the deeds and dooms of the ${P.alive ? 'living' : 'fallen'} House ${P.name} of ${regionOf(state, P)}, in the realm of ${state.realmName}, in the years of ${state.dynastyEra}.</p>`);
   parts.push(`<p class="chron-motto">&ldquo;${P.motto}&rdquo;</p>`);
 
+  // Elder Days: realm history before the record
+  if (state.realmHistory && state.realmHistory.length) {
+    parts.push(`<h3 class="chron-year">The Elder Days</h3>`);
+    parts.push('<p>' + state.realmHistory.map((e) => `<span class="chron-season">[Year ${e.year}]</span> In that year, ${escapeHtml(e.text)}.`).join(' ') + '</p>');
+  }
+
+  // The founding
+  if (P.lore) {
+    parts.push(`<h3 class="chron-year">The Founding</h3>`);
+    parts.push(`<p>House ${P.name} was raised in Year ${P.lore.foundingYear} by ${escapeHtml(P.lore.founderName)}, who ${escapeHtml(P.lore.deed)}. ${P.heirloom ? `Of the founder's era the house keeps ${escapeHtml(P.heirloom.name)} — ${escapeHtml(P.heirloom.desc)}.` : 'Of the founder\u2019s era, little survives but the name and the stones.'}</p>`);
+  }
+
   // Opening
-  const first = state.annals[0];
   parts.push(`<p>In the year ${state.startYear}, when this record begins, House ${P.name} was counted ${state.startTier === 'minor' ? 'among the minor houses' : 'among the great houses'} of the realm, holding ${P.seat} and swearing its swords where honor demanded. What follows is what the years made of it.</p>`);
 
   // Year by year
@@ -26,7 +37,7 @@ export function buildChronicle(state) {
 
   // The Fallen
   const fallen = Object.values(state.characters)
-    .filter((c) => !c.alive && c.deathYear && wasOfHouse(state, c, P.id))
+    .filter((c) => !c.alive && c.deathYear && c.deathYear >= state.startYear && wasOfHouse(state, c, P.id))
     .sort((a, b) => a.deathYear - b.deathYear);
   if (fallen.length) {
     parts.push(`<h3 class="chron-year">The Fallen of House ${P.name}</h3>`);

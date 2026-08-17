@@ -281,7 +281,8 @@ function tickDragons(state, rng) {
   }
 
   // Player egg hatching check (each winter, warm eggs may quicken)
-  if (state.dragonEggs > 0 && state.season === 3 && rng.chance(0.18)) {
+  const hatchChance = state.prophecy === 'dragon' ? 0.30 : 0.18; // the witch's word warms the shell
+  if (state.dragonEggs > 0 && state.season === 3 && rng.chance(hatchChance)) {
     const P = state.houses[state.playerHouseId];
     if (P && P.alive) {
       state.dragonEggs -= 1;
@@ -296,6 +297,10 @@ function tickDragons(state, rng) {
   }
 }
 
+function heirloomKind(house) {
+  return house.heirloom ? house.heirloom.kind : null;
+}
+
 // ---------- Wars ----------
 function housePower(state, house) {
   let p = house.troops;
@@ -303,6 +308,10 @@ function housePower(state, house) {
   if (lord) p *= 0.85 + lord.skills.war * 0.02;
   const marshal = councilBonus(state, house, 'marshal');
   if (marshal) p *= 1 + marshal * 0.012;
+  const hk = heirloomKind(house);
+  if (hk === 'blade') p *= 1.05;       // the old steel remembers
+  if (hk === 'horn') p *= 1.08;        // the levies come running
+  if (hk === 'shield') p *= 1.03;
   // Dragons are worth armies — more with a rider on their back.
   for (const d of houseDragons(state, house.id)) {
     let dp = dragonPower(state, d);
@@ -411,7 +420,7 @@ function tickWar(state, rng) {
     const lossFrac = onWinning ? rng.range(0.04, 0.10) : rng.range(0.10, 0.22);
     h.troops = Math.max(100, Math.floor(h.troops * (1 - lossFrac)));
     // named characters risk death in battle (marshals keep kin out of the worst of it)
-    const marshalGuard = councilBonus(state, h, 'marshal') > 0 ? 0.8 : 1;
+    const marshalGuard = (councilBonus(state, h, 'marshal') > 0 ? 0.8 : 1) * (heirloomKind(h) === 'shield' ? 0.85 : 1);
     for (const ch of livingMembers(state, h)) {
       if (ch.gender !== 'm' || age(state, ch) < 16 || age(state, ch) > 60) continue;
       if (isAway(state, ch)) continue;
@@ -737,6 +746,90 @@ function maybePlayerDecision(state, rng) {
     }
   }
 
+  // --- Lore decisions ---
+  if (P.lore && (state.year - P.lore.foundingYear) % 50 === 0 && state.season === 1 && !state.feastHeldYear) {
+    const yrs = state.year - P.lore.foundingYear;
+    decisions.push({
+      id: 'founding_feast',
+      title: `${yrs} Years of House ${P.name}`,
+      text: `This summer marks ${yrs} years since ${P.lore.founderName} ${P.lore.deed}. The household looks to you: will the house feast its own legend?`,
+      options: [
+        { label: 'A feast worthy of the founder (60 gold)', effect: (st, r) => {
+            const h = st.houses[st.playerHouseId];
+            st.feastHeldYear = st.year;
+            if (h.gold < 60) return 'The coffers gape empty. The anniversary passes with thin soup and thinner songs.';
+            h.gold -= 60; h.prestige += 10;
+            for (const c of livingMembers(st, h)) c.mood = Math.min(3, c.mood + 1);
+            return `For three days ${h.seat} blazes with light. The tale of ${h.lore.founderName} is told so many times it gains two dragons and a prophecy. (+10 prestige, household heartened)`;
+          } },
+        { label: 'A quiet toast', effect: (st) => { st.feastHeldYear = st.year; return `A single cup raised in the founder's name. ${st.houses[st.playerHouseId].lore.founderName} would have either approved or started a war about it.`; } },
+      ],
+    });
+  }
+
+  if (P.heirloom && rng.chance(0.2)) {
+    decisions.push({
+      id: 'heirloom_theft',
+      title: `${P.heirloom.name} Is Gone`,
+      text: `A servant's scream at dawn: ${P.heirloom.name} — ${P.heirloom.desc} — is missing from its place. A window stands open. A groom is gone with a fast horse.`,
+      options: [
+        { label: 'Hunt the thief (40 gold, send riders)', effect: (st, r) => {
+            const h = st.houses[st.playerHouseId];
+            if (h.gold < 40) { h.heirloom = null; h.prestige = Math.max(0, h.prestige - 8); return 'You cannot even afford the hunt. The relic is gone, and the shame stays. (-8 prestige, heirloom lost)'; }
+            h.gold -= 40;
+            if (r.chance(0.65)) { h.prestige += 4; return `Your riders take the thief at a river crossing, three days out. ${h.heirloom.name} comes home wrapped in oilcloth, and the thief feeds the crows. (+4 prestige)`; }
+            h.heirloom = null; h.prestige = Math.max(0, h.prestige - 8);
+            return 'The trail ends at a harbor and an empty berth. Somewhere across the water, your history is being sold by weight. (-8 prestige, heirloom lost)';
+          } },
+        { label: 'Let it go', effect: (st) => { const h = st.houses[st.playerHouseId]; h.heirloom = null; h.prestige = Math.max(0, h.prestige - 10); return 'Some things, once gone, are more expensive to chase than to mourn. The hall feels lighter and worse. (-10 prestige, heirloom lost)'; } },
+      ],
+    });
+  }
+
+  if (rng.chance(0.25)) {
+    const ded = Object.values(state.characters).filter((c) => !c.alive && c.houseId === P.id && c.epithet);
+    if (ded.length) {
+      const anc = rng.pick(ded);
+      decisions.push({
+        id: 'crypt_whisper',
+        title: 'A Voice From the Crypts',
+        text: `The septon reports the crypt door open again — third time this moon. The servants whisper that ${anc.name} ${anc.epithet || ''} walks, and will not rest while the house ${rng.pick(['forgets its dead', 'leaves a wrong unavenged', 'lets the old sword rust'])}.`,
+        options: [
+          { label: 'Hold a rite of remembrance (25 gold)', effect: (st, r) => {
+              const h = st.houses[st.playerHouseId];
+              if (h.gold < 25) return 'No coin for candles. The door is barred with a bench instead. The bench is found split at dawn.';
+              h.gold -= 25;
+              for (const c of livingMembers(st, h)) c.mood = Math.min(3, c.mood + 1);
+              h.prestige += 3;
+              return `The whole house descends with candles, and the names of the dead are read from the founding onward. The door stays shut after. (+3 prestige, household heartened)`;
+            } },
+          { label: 'It is drafts and superstition', effect: (st, r) => (r.chance(0.3) ? 'The door is found open every dawn for nine days. Then it stops. Nobody discusses why it stops.' : 'You are almost certainly right. The bench holds. Almost certainly drafts.') },
+        ],
+      });
+    }
+  }
+
+  if (rng.chance(0.12)) {
+    decisions.push({
+      id: 'woods_witch',
+      title: 'The Woods Witch',
+      text: `A bent old woman is found sleeping in your godswood. The guards want to whip her off the land. She looks at you with clouded eyes and says she has a word for the ${lord && lord.gender === 'f' ? 'lady' : 'lord'} of ${P.seat}, if the ${lord && lord.gender === 'f' ? 'lady' : 'lord'} has bread for a witch.`,
+      options: [
+        { label: 'Bread, salt, and a hearing', effect: (st, r) => {
+            const h = st.houses[st.playerHouseId];
+            const omens = [
+              () => { st.prophecy = 'dragon'; return `She eats, then says: "An egg cracks twice. Once in fire, once in sorrow. Keep the second child close." She is gone by morning.`; },
+              () => { h.prestige += 2; return `She eats, then blesses the hall in a tongue your maester pretends not to recognize. The bread was cheap; whatever this was, it felt expensive. (+2 prestige)`; },
+              () => { st.prophecy = 'winter'; return `She eats, then looks at the fire a long time. "Stack wood. Salt meat. The winter after next has your name in it." She is gone by morning.`; },
+              () => { const kids = livingMembers(st, h).filter((c) => age(st, c) < 16); if (!kids.length) return 'She eats, says nothing worth a raven, and leaves a circle of white stones by the gate.'; const k = r.pick(kids); k.skills[r.pick(['war', 'dip', 'intr'])] += 2; return `She eats, then takes young ${k.name}'s hand and studies it. "This one," she says, and nothing more. (${k.name} +2 to a skill)`; },
+            ];
+            return r.pick(omens)();
+          } },
+        { label: 'Whip her off the land', effect: (st, r) => { const h = st.houses[st.playerHouseId]; if (r.chance(0.35)) { h.prestige = Math.max(0, h.prestige - 3); return 'She goes without a word. The godswood heart tree weeps sap that winter, and the smallfolk notice. (-3 prestige)'; } return 'She goes. The guards laugh about it for a day or two, then stop mentioning it.'; } },
+      ],
+    });
+  }
+
   decisions.push({
     id: 'bastard',
     title: 'A Bastard Rumor',
@@ -784,6 +877,7 @@ export function advanceSeason(state) {
   if (state.season === 0) state.year += 1;
   if (state.season === 3) {
     state.winterSeverity = rng.weighted([[0.3, 30], [0.6, 40], [1.0, 22], [1.5, 8]]);
+    if (state.prophecy === 'winter') { state.winterSeverity = Math.max(state.winterSeverity, 1.5); state.prophecy = null; log(state, 'The witch\u2019s winter has come, exactly as promised. Those who salted meat smile grimly. Those who laughed do not.', 'omen'); }
     const w = state.winterSeverity;
     log(state, w >= 1.5 ? 'A CRUEL WINTER descends. The old men say they have seen nothing like it.' :
       w >= 1.0 ? 'Winter comes hard this year. Snows close the high roads.' :
@@ -871,7 +965,7 @@ export const ACTIONS = {
       const h = state.houses[state.playerHouseId];
       if (h.id === state.crownHouseId) return 'You ARE the crown. The mirror is flattered.';
       const lord = state.characters[h.lordId];
-      const bonus = (lord ? lord.skills.dip : 6) + councilBonus(state, h, 'envoy');
+      const bonus = (lord ? lord.skills.dip : 6) + councilBonus(state, h, 'envoy') + (h.heirloom && h.heirloom.kind === 'ring' ? 4 : 0);
       const gain = rng.int(6, 12) + Math.floor(bonus / 3);
       relMod(state, h.id, state.crownHouseId, gain);
       h.prestige += 2;
@@ -982,6 +1076,7 @@ export function arrangeMarriage(state, myCharId, targetHouseId) {
   const lord = state.characters[h.lordId];
   if (lord) p += lord.skills.dip * 0.015;
   p += councilBonus(state, h, 'envoy') * 0.01;
+  if (h.heirloom && (h.heirloom.kind === 'cloak' || h.heirloom.kind === 'ring')) p += 0.08; // old names open doors
   state.actionsLeft -= 1;
   if (!rng.chance(Math.max(0.1, Math.min(0.95, p)))) {
     relMod(state, h.id, T.id, -3);

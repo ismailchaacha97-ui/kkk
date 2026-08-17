@@ -10,6 +10,7 @@ import {
 import { CHEATS, runCheat } from './cheats.js';
 import { saveGame, loadGame, hasSave, clearSave } from './save.js';
 import { renderMapSVG, ensureMapPositions } from './map.js';
+import { ensureLore, houseAncestors, foundingBlurb } from './lore.js';
 import { buildChronicle, chroniclePlainText } from './chronicle.js';
 import { makeRng } from './rng.js';
 
@@ -44,6 +45,7 @@ export function boot() {
     const loaded = loadGame();
     if (loaded && loaded.playerHouseId && loaded.houses[loaded.playerHouseId]) {
       state = loaded;
+      ensureLore(state);
       renderGame();
       toast(`Save restored — ${SEASONS[state.season]}, Year ${state.year}. The chronicle continues.`);
       return;
@@ -100,7 +102,7 @@ function regenSetup(seed) {
   wrap.appendChild(reroll);
   if (hasSave()) {
     const cont = el('button', 'btn btn-ghost', '📜 Return to the saved chronicle');
-    cont.onclick = () => { const l = loadGame(); if (l) { state = l; renderGame(); } else toast('The saved chronicle is illegible.'); };
+    cont.onclick = () => { const l = loadGame(); if (l) { state = l; ensureLore(state); renderGame(); } else toast('The saved chronicle is illegible.'); };
     wrap.appendChild(cont);
   }
   app.appendChild(wrap);
@@ -110,6 +112,7 @@ function startGame(houseId) {
   state.playerHouseId = houseId;
   state.startYear = state.year;
   state.startTier = state.houses[houseId].tier;
+  ensureLore(state);
   state.annals.push({ year: state.year, entries: [{ season: SEASONS[state.season], kind: 'crown', text: `The chronicle of House ${state.houses[houseId].name} begins. ${SEASONS[state.season]} of Year ${state.year}.` }] });
   state.log = [{ text: `You are ${lordTitle()} of ${state.houses[houseId].seat}. The realm watches, mostly with indifference. Change that.`, kind: 'crown' }];
   renderGame();
@@ -383,6 +386,12 @@ function renderFamily(main) {
   const panel = el('div', 'panel');
   panel.appendChild(el('div', 'panel-title', `⚘ The Blood of House ${esc(P.name)}`));
   panel.appendChild(el('p', 'dim panel-note', `&ldquo;${esc(P.motto)}&rdquo; — ${esc(sigilBlazon(P.sigil))}. Seat: ${esc(P.seat)}, ${esc(regionName(state, P.regionId))}.`));
+  if (P.lore) {
+    panel.appendChild(el('p', 'lore-founding', `📜 ${esc(foundingBlurb(state, P))} The house is ${state.year - P.lore.foundingYear} years old.`));
+  }
+  if (P.heirloom) {
+    panel.appendChild(el('div', 'heirloom-card', `<span class="heirloom-name">✦ ${esc(P.heirloom.name)}</span> — ${esc(P.heirloom.desc)}. <em class="dim">(${P.heirloom.kind === 'blade' ? '+war power' : P.heirloom.kind === 'horn' ? '+war power, levies rally' : P.heirloom.kind === 'shield' ? 'kin safer in battle' : P.heirloom.kind === 'ring' ? '+diplomacy, crown favor' : P.heirloom.kind === 'cloak' ? 'marriages accepted more readily' : 'an old wonder'})</em>`));
+  }
 
   // Dragons of the house
   const myDragons = houseDragons(state, P.id);
@@ -453,13 +462,22 @@ function renderFamily(main) {
   }
   panel.appendChild(grid);
 
-  // The dead
-  const dead = Object.values(state.characters).filter((c) => !c.alive && (c.houseId === P.id || c.birthHouseId === P.id)).sort((a, b) => b.deathYear - a.deathYear);
-  if (dead.length) {
+  // The dead — your era's fallen, then the ancestors beneath them
+  const startYr = state.startYear || state.year;
+  const allDead = Object.values(state.characters).filter((c) => !c.alive && (c.houseId === P.id || c.birthHouseId === P.id));
+  const recentDead = allDead.filter((c) => c.deathYear >= startYr).sort((a, b) => b.deathYear - a.deathYear);
+  const ancestors = allDead.filter((c) => c.deathYear < startYr).sort((a, b) => b.deathYear - a.deathYear);
+  if (recentDead.length || ancestors.length) {
     panel.appendChild(el('div', 'panel-title dead-title', '✝ The Crypts'));
     const dl = el('div', 'dead-list');
-    for (const c of dead.slice(0, 20)) {
+    for (const c of recentDead.slice(0, 20)) {
       dl.appendChild(el('div', 'dead-entry', `<strong>${esc(fullName(state, c))}</strong> (${c.birthYear}–${c.deathYear}) — ${esc(c.causeOfDeath || '')}`));
+    }
+    if (ancestors.length) {
+      dl.appendChild(el('div', 'dead-sub dim', '— the deeper vaults: those who came before your rule —'));
+      for (const c of ancestors) {
+        dl.appendChild(el('div', 'dead-entry ancestor', `<strong>${esc(fullName(state, c))}</strong> (${c.birthYear}–${c.deathYear}) — ${esc(c.causeOfDeath || '')}`));
+      }
     }
     panel.appendChild(dl);
   }
@@ -645,7 +663,9 @@ function openHouseInfo(houseId) {
       <strong>Strength:</strong> ⚔ ${h.alive ? h.troops : 0} &nbsp; ★ ${Math.round(h.prestige)} prestige<br>
       ${rel !== null ? `<strong>Relations with you:</strong> <span class="${rel < 0 ? 'neg' : 'pos'}">${rel >= 0 ? '+' : ''}${rel}</span><br>` : ''}
       ${drs.length ? `<strong>Dragons:</strong> ${drs.map((d) => esc(d.name) + ' (' + esc(dragonStageName(state, d)) + ')').join(', ')}<br>` : ''}
+      ${h.heirloom ? `<strong>Heirloom:</strong> ${esc(h.heirloom.name)}, ${esc(h.heirloom.desc)}<br>` : ''}
       ${h.alive ? `<strong>Blood of the house:</strong> ${livingMembers(state, h).length} living</p>` : '</p>'}
+      ${h.lore ? `<p class="lore-founding">📜 ${esc(foundingBlurb(state, h))}</p>` : ''}
     `;
   });
 }
