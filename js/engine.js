@@ -863,21 +863,28 @@ function maybePlayerDecision(state, rng) {
     });
   }
 
+  // A grounded matter of the land instead: a border dispute among your own villages
   decisions.push({
-    id: 'bastard',
-    title: 'A Bastard Rumor',
-    text: `A whisper runs through the taverns of ${regionName(state, P.regionId)}: a baseborn child of your line lives in a fishing village, the very image of ${lord ? lord.name : 'your lord'}.`,
+    id: 'border_dispute',
+    title: 'The Millstream Quarrel',
+    text: `Two of your villages come to blows over a mill and the stream that turns it. Three men are in the stocks, one barn is ash, and both headmen swear the other started it. They stand in your hall awaiting judgment.`,
     options: [
-      { label: 'Acknowledge the child', effect: (st, r) => {
+      { label: 'Split the mill\u2019s use by season', effect: (st, r) => {
           const h = st.houses[st.playerHouseId];
-          const kid = makeCharacter(st, r, { houseId: h.id, birthYear: st.year - r.int(6, 14) });
-          h.memberIds.push(kid.id);
-          kid.traits.push('Baseborn');
-          h.prestige = Math.max(0, h.prestige - 3);
-          return `${kid.name} is brought to ${h.seat} and given your name. The septons frown; your line grows stronger. (-3 prestige, +1 family member)`;
+          if (r.chance(0.7)) { h.prestige += 3; return 'Summer grinding to one village, winter to the other, tolls shared. Grumbling, then nodding. A fair lord is a rare thing, and word of one travels. (+3 prestige)'; }
+          return 'Both villages leave equally unhappy, which the septon insists is what justice feels like.';
         } },
-      { label: 'Pay for silence (25 gold)', effect: (st) => { const h = st.houses[st.playerHouseId]; if (h.gold < 25) { h.prestige = Math.max(0, h.prestige - 5); return 'You cannot pay. The song writes itself. (-5 prestige)'; } h.gold -= 25; return 'Coin changes hands. The whisper fades — for now.'; } },
-      { label: 'Ignore it', effect: (st, r) => (r.chance(0.4) ? (st.houses[st.playerHouseId].prestige = Math.max(0, st.houses[st.playerHouseId].prestige - 4), 'The rumor hardens into a ballad with seventeen verses. (-4 prestige)') : 'The rumor dies of neglect, as most do.') },
+      { label: 'Side with the richer village', effect: (st, r) => {
+          const h = st.houses[st.playerHouseId];
+          h.gold += 15;
+          if (r.chance(0.35)) { h.prestige = Math.max(0, h.prestige - 3); return 'Their headman\u2019s gratitude arrives in coin. The other village remembers it in the way villages do — quietly, and for a generation. (+15 gold, -3 prestige)'; }
+          return 'Their headman\u2019s gratitude arrives in coin. (+15 gold)';
+        } },
+      { label: 'Let them settle it with a wrestling match', effect: (st, r) => {
+          const h = st.houses[st.playerHouseId];
+          h.prestige += r.chance(0.5) ? 4 : 1;
+          return 'The whole region turns out. The miller\u2019s son wins by treachery so entertaining that even the losers buy him ale. The quarrel dissolves into an annual tradition. (+prestige)';
+        } },
     ],
   });
 
