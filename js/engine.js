@@ -335,6 +335,25 @@ export function startWar(state, rng, attackerId, defenderId, cause) {
     if (h.liegeId === defenderId || (h.relations[defenderId] || 0) > 45) { if (rng.chance(0.6)) defenders.push(h.id); }
     else if (h.liegeId === attackerId || (h.relations[attackerId] || 0) > 45) { if (rng.chance(0.5)) attackers.push(h.id); }
   }
+  // Sworn pacts with the player are honored (near-always) when the player is involved
+  if (state.pacts) {
+    const side = attackerId === state.playerHouseId ? attackers : defenderId === state.playerHouseId ? defenders : null;
+    if (side) {
+      for (const [pid, p] of Object.entries(state.pacts)) {
+        if (p.until < state.year) continue;
+        const ph = state.houses[pid];
+        if (!ph || !ph.alive || attackers.includes(pid) || defenders.includes(pid)) continue;
+        if (rng.chance(0.85)) {
+          side.push(pid);
+          log(state, `House ${ph.name} honors its pact: their banners ride ${side === attackers ? 'with' : 'to'} House ${state.houses[state.playerHouseId].name}.`, 'war');
+        } else {
+          delete state.pacts[pid];
+          relMod(state, state.playerHouseId, pid, -30);
+          log(state, `House ${ph.name} BREAKS its sworn pact and stays home. The realm takes note of what their word is worth.`, 'war');
+        }
+      }
+    }
+  }
   state.war = {
     name: `The ${rng.pick(['War of', 'Rising of', 'Strife of', 'Reaving of'])} ${rng.pick([A.name + ' Pride', 'the ' + regionName(state, D.regionId).replace('The ', ''), D.seat, 'Broken Oaths', 'the ' + rng.pick(['Red', 'Grey', 'Salt', 'Winter']) + ' Banners'])}`,
     attackers, defenders, cause,

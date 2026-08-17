@@ -94,6 +94,7 @@ export function ensureLore(state) {
       h.ancestorsGenerated = true;
       const span = state.year - h.lore.foundingYear;
       const nGen = Math.min(4, Math.max(2, Math.floor(span / 45)));
+      let prev = null;
       for (let i = 0; i < nGen; i++) {
         const frac = i / nGen;
         const birthYear = Math.round(h.lore.foundingYear + frac * (span - 60)) - rng.int(0, 15);
@@ -102,7 +103,10 @@ export function ensureLore(state) {
           houseId: h.id, birthHouseId: h.id,
           gender: isFounder ? h.lore.founderGender : (rng.chance(0.75) ? 'm' : 'f'),
           birthYear,
+          fatherId: prev && prev.gender === 'm' ? prev.id : null,
+          motherId: prev && prev.gender === 'f' ? prev.id : null,
         });
+        if (prev) prev.childrenIds.push(ch.id);
         if (isFounder) ch.name = h.lore.founderName;
         ch.alive = false;
         ch.deathYear = birthYear + rng.int(35, 78);
@@ -117,6 +121,22 @@ export function ensureLore(state) {
           const ep = epithetFor(rng, ch);
           if (ep) ch.epithet = ep;
           else if (isFounder) ch.epithet = rng.pick(['the Founder', 'the First', 'Firstlord']);
+        }
+        prev = ch;
+      }
+      // Link the ancestral chain to the living line: the current lord descends from the last ancestor
+      const lord = state.characters[h.lordId];
+      if (prev && lord && !lord.fatherId && !lord.motherId) {
+        if (prev.gender === 'm') lord.fatherId = prev.id; else lord.motherId = prev.id;
+        prev.childrenIds.push(lord.id);
+        // lord's siblings hang off the same ancestor
+        for (const mid of h.memberIds) {
+          const sib = state.characters[mid];
+          if (sib && sib.id !== lord.id && sib.alive && !sib.fatherId && !sib.motherId &&
+              sib.birthHouseId === h.id && Math.abs(sib.birthYear - lord.birthYear) <= 12 && !sib.spouseId) {
+            if (prev.gender === 'm') sib.fatherId = prev.id; else sib.motherId = prev.id;
+            prev.childrenIds.push(sib.id);
+          }
         }
       }
     }

@@ -11,6 +11,8 @@ import { CHEATS, runCheat } from './cheats.js';
 import { saveGame, loadGame, hasSave, clearSave } from './save.js';
 import { renderMapSVG, ensureMapPositions } from './map.js';
 import { ensureLore, houseAncestors, foundingBlurb } from './lore.js';
+import { renderTreeHTML } from './tree.js';
+import { sendGift, proposePact, demandTribute, sendInsult, inviteHunt, hasPact, getPacts } from './diplomacy.js';
 import { buildChronicle, chroniclePlainText } from './chronicle.js';
 import { makeRng } from './rng.js';
 
@@ -154,7 +156,7 @@ function renderGame() {
 
   // Tabs
   const tabs = el('div', 'tabs');
-  const tabDefs = [['court', 'Court'], ['family', 'Family'], ['realm', 'The Realm'], ['chronicle', 'Chronicle']];
+  const tabDefs = [['court', 'Court'], ['family', 'Family'], ['tree', 'Lineage'], ['realm', 'The Realm'], ['chronicle', 'Chronicle']];
   for (const [key, label] of tabDefs) {
     const b = el('button', 'tab' + (currentTab === key ? ' active' : ''), label);
     b.onclick = () => { currentTab = key; renderGame(); };
@@ -172,6 +174,7 @@ function renderGame() {
 
   if (currentTab === 'court') renderCourt(main);
   else if (currentTab === 'family') renderFamily(main);
+  else if (currentTab === 'tree') renderTree(main);
   else if (currentTab === 'realm') renderRealm(main);
   else renderChronicle(main);
 
@@ -556,6 +559,49 @@ function pickCouncil(post) {
   });
 }
 
+// ---------- Lineage (family tree) tab ----------
+let treeHouseId = null;
+function renderTree(main) {
+  const P = state.houses[state.playerHouseId];
+  const hid = treeHouseId && state.houses[treeHouseId] ? treeHouseId : P.id;
+  const H = state.houses[hid];
+  const panel = el('div', 'panel');
+  panel.appendChild(el('div', 'panel-title', `🌳 The Lineage of House ${esc(H.name)}`));
+  if (H.lore) panel.appendChild(el('p', 'lore-founding', `📜 ${esc(foundingBlurb(state, H))}`));
+  panel.appendChild(el('p', 'dim panel-note', '♛ ruling lord · 🩸 dragonblood · 🜂 dragonrider · ⚭ spouse · ✝ dead. Click a living kinsman of your house to interact.'));
+
+  // house selector
+  const sel = el('div', 'tree-selector');
+  sel.appendChild(el('span', 'dim', 'View another lineage: '));
+  const dd = document.createElement('select');
+  dd.className = 'tree-select';
+  for (const h of Object.values(state.houses).sort((a, b) => a.name.localeCompare(b.name))) {
+    const o = document.createElement('option');
+    o.value = h.id;
+    o.textContent = `House ${h.name}${h.id === P.id ? ' (yours)' : ''}${h.alive ? '' : ' ✝'}`;
+    if (h.id === hid) o.selected = true;
+    dd.appendChild(o);
+  }
+  dd.onchange = () => { treeHouseId = dd.value; renderGame(); };
+  sel.appendChild(dd);
+  panel.appendChild(sel);
+
+  const wrap = el('div', 'tree-wrap');
+  wrap.innerHTML = renderTreeHTML(state, hid);
+  // click-to-interact for player's own living members
+  if (hid === P.id) {
+    wrap.querySelectorAll('.tree-node[data-char]').forEach((n) => {
+      const c = state.characters[n.getAttribute('data-char')];
+      if (c && c.alive && c.houseId === P.id) {
+        n.classList.add('clickable');
+        n.addEventListener('click', () => openCharacter(c.id));
+      }
+    });
+  }
+  panel.appendChild(wrap);
+  main.appendChild(panel);
+}
+
 // ---------- Realm tab ----------
 function renderRealm(main) {
   const P = state.houses[state.playerHouseId];
@@ -607,7 +653,8 @@ function renderRealm(main) {
     const list = el('div', 'realm-list');
     for (const h of rHouses.sort((a, b) => (a.tier === 'great' ? -1 : 1) - (b.tier === 'great' ? -1 : 1) || b.prestige - a.prestige)) {
       const rel = P.relations[h.id] || 0;
-      const row = el('div', 'realm-row' + (h.alive ? '' : ' extinct') + (h.id === P.id ? ' mine' : ''));
+      const row = el('div', 'realm-row' + (h.alive ? ' clickable-row' : ' extinct') + (h.id === P.id ? ' mine' : ''));
+      if (h.alive) row.onclick = () => openHouseInfo(h.id);
       const lord = h.alive ? state.characters[h.lordId] : null;
       row.innerHTML = `
         <span class="tr-sigil">${sigilSVG(h.sigil, 30)}</span>
@@ -626,7 +673,8 @@ function renderRealm(main) {
   const sec = el('div', 'region-sec');
   sec.appendChild(el('div', 'region-name', 'The Crownlands'));
   const rel = P.relations[crown.id] || 0;
-  const row = el('div', 'realm-row royal-row' + (crown.id === P.id ? ' mine' : ''));
+  const row = el('div', 'realm-row royal-row clickable-row' + (crown.id === P.id ? ' mine' : ''));
+  row.onclick = () => openHouseInfo(crown.id);
   const clord = state.characters[crown.lordId];
   row.innerHTML = `<span class="tr-sigil">${sigilSVG(crown.sigil, 30)}</span>
     <span class="rr-name">House ${esc(crown.name)} ♛${crown.id === P.id ? ' ✦ (yours)' : ''}</span>
@@ -667,6 +715,25 @@ function openHouseInfo(houseId) {
       ${h.alive ? `<strong>Blood of the house:</strong> ${livingMembers(state, h).length} living</p>` : '</p>'}
       ${h.lore ? `<p class="lore-founding">📜 ${esc(foundingBlurb(state, h))}</p>` : ''}
     `;
+    // Diplomacy with other living houses
+    if (h.alive && h.id !== P.id) {
+      const pact = hasPact(state, h.id);
+      const dipTitle = el('div', 'panel-title', `✉ Dealings with House ${esc(h.name)}${pact ? ` <span class="pact-tag">PACT until Year ${getPacts(state)[h.id].until}</span>` : ''}`);
+      body.appendChild(dipTitle);
+      body.appendChild(el('p', 'dim', `${state.actionsLeft} action${state.actionsLeft === 1 ? '' : 's'} remaining this season.`));
+      const noActs = state.actionsLeft <= 0;
+      const dipBtn = (label, note, fn, disabled = false, danger = false) => {
+        const b = el('button', 'btn btn-option' + (danger ? ' btn-danger' : ''), `${label} <em class="dim opt-note">${note}</em>`);
+        b.disabled = noActs || disabled;
+        b.onclick = () => { const r = fn(); toast(r.msg); renderGame(); };
+        body.appendChild(b);
+      };
+      dipBtn('🎁 Send a lavish gift', '1 action · 50 gold · +relations', () => sendGift(state, h.id), P.gold < 50);
+      dipBtn('🕊 Invite them to a hunt', '1 action · 25 gold · +relations, stories', () => inviteHunt(state, h.id), P.gold < 25);
+      dipBtn(pact ? '🤝 A pact already binds you' : '🤝 Propose a pact of friendship', '1 action · they join your wars if sworn', () => proposePact(state, h.id), pact);
+      dipBtn('🜚 Demand tribute', '1 action · gold if they fear you · -relations', () => demandTribute(state, h.id), false, true);
+      dipBtn('🗯 Send a calculated insult', '1 action · +2 prestige · relations ruined', () => sendInsult(state, h.id), false, true);
+    }
   });
 }
 

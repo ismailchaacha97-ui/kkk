@@ -335,6 +335,57 @@ body {
 .hinfo-top { display: flex; gap: 14px; align-items: center; }
 .hinfo-motto { font-family: 'Cinzel', serif; font-weight: 700; color: var(--seal); }
 
+/* ---------- family tree ---------- */
+.tree-selector { margin-bottom: 12px; }
+.tree-select {
+  font-family: 'IM Fell English', serif; font-size: 15px;
+  background: #fff6; border: 1px solid var(--line); border-radius: 3px;
+  padding: 4px 8px; color: var(--ink);
+}
+.tree-wrap { overflow-x: auto; padding: 6px 2px 14px; }
+.tree-branch { position: relative; padding-left: 26px; margin: 4px 0; }
+.tree-branch::before {
+  content: ''; position: absolute; left: 8px; top: 18px; bottom: 8px;
+  border-left: 2px solid var(--line);
+}
+.tree-branch::after {
+  content: ''; position: absolute; left: 8px; top: 18px; width: 14px;
+  border-top: 2px solid var(--line);
+}
+.tree-wrap > .tree-branch { padding-left: 0; }
+.tree-wrap > .tree-branch::before, .tree-wrap > .tree-branch::after { display: none; }
+.tree-children { margin-left: 14px; }
+.tree-node {
+  display: inline-block; min-width: 190px;
+  border: 1px solid var(--line); border-radius: 3px;
+  background: #fff5; padding: 5px 10px; margin: 2px 0;
+}
+.tree-node.dead { opacity: 0.62; background: #00000008; }
+.tree-node.lord { border-color: var(--gold); background: #8a6d1a14; }
+.tree-node.blooded { border-left: 3px solid #8c3a12; }
+.tree-node.clickable { cursor: pointer; }
+.tree-node.clickable:hover { box-shadow: 0 2px 8px #0004; }
+.tree-name { font-family: 'Cinzel', serif; font-weight: 700; font-size: 13.5px; }
+.tree-name em { font-family: 'IM Fell English', serif; font-weight: normal; color: var(--ink-dim); }
+.tree-years { font-size: 12px; color: var(--ink-dim); }
+.tree-spouse { font-size: 12.5px; color: var(--seal); }
+.tree-heir {
+  font-size: 10px; letter-spacing: .1em; color: #fff;
+  background: var(--gold); border-radius: 3px; padding: 0 5px;
+}
+.tree-blood { font-size: 11px; }
+.tree-strays { margin-top: 16px; border-top: 1px dashed var(--line); padding-top: 8px; }
+.tree-strays-label { font-style: italic; color: var(--ink-dim); font-size: 13.5px; margin-bottom: 4px; }
+.tree-strays .tree-node { margin-right: 6px; }
+
+/* ---------- diplomacy ---------- */
+.pact-tag {
+  font-size: 11px; letter-spacing: .06em; color: #fff;
+  background: #2c5a2e; border-radius: 3px; padding: 1px 7px; vertical-align: 2px;
+}
+.clickable-row { cursor: pointer; }
+.clickable-row:hover { background: #8a6d1a12; }
+
 /* ---------- chronicle ---------- */
 .chronicle-panel { }
 .chron-tools { display: flex; justify-content: flex-end; margin-bottom: 8px; }
