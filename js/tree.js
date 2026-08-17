@@ -1,5 +1,5 @@
 // Family tree: builds generation rows from the founder down and renders HTML.
-import { age, fullName } from './world.js';
+import { age, fullName, lawfulHeir } from './world.js';
 
 // Collect the bloodline of a house: roots are members (dead or alive) with no
 // parents recorded inside the house lineage.
@@ -20,7 +20,8 @@ function nodeHTML(state, c, opts) {
   const h = state.houses[c.houseId] || state.houses[c.birthHouseId];
   const P = state.houses[state.playerHouseId];
   const isLord = h && h.lordId === c.id && c.alive;
-  const isHeir = P && P.designatedHeirId === c.id;
+  const heirNow = P && c.houseId === P.id && c.alive ? lawfulHeir(state, P) : null;
+  const isHeir = heirNow && heirNow.id === c.id;
   const dragon = c.dragonId ? state.dragons[c.dragonId] : null;
   const blood = c.traits && c.traits.includes('Dragonblood');
   const cls = ['tree-node'];

@@ -1,5 +1,5 @@
 // UI rendering and interaction.
-import { generateWorld, livingMembers, age, fullName, shortName, regionName } from './world.js';
+import { generateWorld, livingMembers, age, fullName, shortName, regionName, lawfulHeir } from './world.js';
 import { advanceSeason, runAction, resolveDecision, arrangeMarriage, isUnwed, autoGovern, ACTIONS, SEASONS } from './engine.js';
 import { sigilSVG, sigilBlazon } from './sigil.js';
 import { houseDragons, wildDragons, livingDragons, describeDragon, dragonStageName, dragonMark, hasDragonblood } from './dragons.js';
@@ -487,18 +487,20 @@ function renderFamily(main) {
 
   panel.appendChild(el('p', 'dim panel-note interact-hint', '❖ Click any kinsman below to interact: tutor, reward, send adventuring, name heir, or worse.'));
 
+  const heirNow = lawfulHeir(state, P);
   const members = livingMembers(state, P).sort((a, b) => (P.lordId === a.id ? -1 : P.lordId === b.id ? 1 : a.birthYear - b.birthYear));
   const grid = el('div', 'family-grid');
   for (const c of members) {
     const isLord = P.lordId === c.id;
-    const isHeir = P.designatedHeirId === c.id;
+    const isHeir = heirNow && heirNow.id === c.id;
+    const isDesignated = P.designatedHeirId === c.id;
     const away = isAway(state, c);
     const card = el('div', 'char-card clickable' + (isLord ? ' lord' : '') + (c.dragonId ? ' rider' : '') + (away ? ' away' : ''));
     const sp = c.spouseId ? state.characters[c.spouseId] : null;
     const mount = c.dragonId ? state.dragons[c.dragonId] : null;
     const post = Object.entries(P.council).find(([, id]) => id === c.id);
     card.innerHTML = `
-      <div class="char-name">${isLord ? (c.gender === 'f' ? '♛ Lady ' : '♛ Lord ') : ''}${esc(fullName(state, c))}${mount ? ' ' + dragonMark(mount, 15) : ''}${isHeir ? ' <span class="heir-tag">HEIR</span>' : ''}</div>
+      <div class="char-name">${isLord ? (c.gender === 'f' ? '♛ Lady ' : '♛ Lord ') : ''}${esc(fullName(state, c))}${mount ? ' ' + dragonMark(mount, 15) : ''}${isHeir ? ` <span class="heir-tag" title="${isDesignated ? 'Named heir (overrides the law)' : 'Lawful heir: eldest son first, his line before the second son; daughters only when no sons remain'}">HEIR${isDesignated ? ' ✍' : ''}</span>` : ''}</div>
       <div class="char-sub">${c.gender === 'f' ? 'Female' : 'Male'}, aged ${age(state, c)}${c.wounded ? ' · <span class="neg">wounded</span>' : ''}${c.glory ? ` · glory ${'✦'.repeat(Math.min(5, c.glory))}` : ''}${mount ? ` · <span class="dragon-tag">rides ${esc(mount.name)}</span>` : ''}${post ? ` · <span class="council-tag">${esc(COUNCIL_POSTS[post[0]].label)}</span>` : ''}${away ? ` · <span class="away-tag">away: ${esc(c.awayReason || 'on the road')}</span>` : ''}</div>
       <div class="char-traits">${c.traits.map((t) => `<span class="trait${t === 'Dragonblood' ? ' trait-blood' : ''}${t === 'Resentful' ? ' trait-bad' : ''}">${esc(t)}</span>`).join('')}</div>
       <div class="char-skills">

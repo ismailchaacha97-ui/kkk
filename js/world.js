@@ -265,7 +265,33 @@ export function shortName(state, ch) {
   return ch.name + (h ? ' ' + h.name : '');
 }
 
-// Succession: designated heir -> eldest son -> eldest daughter -> eldest blood member -> anyone
+// Succession: male-preference primogeniture.
+// Sons (eldest first) and each son's own line before the next son;
+// only when no sons or their descendants remain do daughters (and their lines) inherit.
+// A designated heir overrides the law.
+function lineHeir(state, person, house, excludeId, depth = 0) {
+  if (depth > 10) return null;
+  const kids = (person.childrenIds || [])
+    .map((i) => state.characters[i])
+    .filter((c) => c && c.id !== excludeId);
+  const byAge = (a, b) => a.birthYear - b.birthYear;
+  const eligible = (c) => c.alive && c.houseId === house.id;
+  const sons = kids.filter((c) => c.gender === 'm').sort(byAge);
+  for (const son of sons) {
+    if (eligible(son)) return son;
+    // dead or departed son: his line inherits in his place
+    const sub = lineHeir(state, son, house, excludeId, depth + 1);
+    if (sub) return sub;
+  }
+  const daughters = kids.filter((c) => c.gender === 'f').sort(byAge);
+  for (const d of daughters) {
+    if (eligible(d)) return d;
+    const sub = lineHeir(state, d, house, excludeId, depth + 1);
+    if (sub) return sub;
+  }
+  return null;
+}
+
 export function findHeir(state, house, excludeId) {
   const living = livingMembers(state, house).filter((c) => c.id !== excludeId);
   if (house.designatedHeirId) {
@@ -274,18 +300,45 @@ export function findHeir(state, house, excludeId) {
   }
   if (living.length === 0) return null;
   const lord = state.characters[house.lordId];
-  const kids = (lord ? lord.childrenIds : [])
-    .map((i) => state.characters[i])
-    .filter((c) => c && c.alive && c.houseId === house.id && c.id !== excludeId);
   const byAge = (a, b) => a.birthYear - b.birthYear;
-  const sons = kids.filter((c) => c.gender === 'm').sort(byAge);
-  if (sons.length) return sons[0];
-  const daughters = kids.filter((c) => c.gender === 'f').sort(byAge);
-  if (daughters.length) return daughters[0];
-  // grandchildren via dead children? keep simple: any blood member (not a married-in consort)
+
+  // 1) The lord's line: sons and their lines, then daughters and theirs
+  if (lord) {
+    const h = lineHeir(state, lord, house, excludeId);
+    if (h) return h;
+    // 2) The lord's siblings by the same law (brothers first, then their lines, then sisters)
+    const parent = state.characters[lord.fatherId] || state.characters[lord.motherId];
+    if (parent) {
+      const sibs = (parent.childrenIds || [])
+        .map((i) => state.characters[i])
+        .filter((c) => c && c.id !== lord.id && c.id !== excludeId)
+        .sort(byAge);
+      const bros = sibs.filter((c) => c.gender === 'm');
+      for (const b of bros) {
+        if (b.alive && b.houseId === house.id) return b;
+        const sub = lineHeir(state, b, house, excludeId);
+        if (sub) return sub;
+      }
+      const sis = sibs.filter((c) => c.gender === 'f');
+      for (const sIt of sis) {
+        if (sIt.alive && sIt.houseId === house.id) return sIt;
+        const sub = lineHeir(state, sIt, house, excludeId);
+        if (sub) return sub;
+      }
+    }
+  }
+  // 3) Any blood of the house: males eldest-first, then females
   const blood = living.filter((c) => c.birthHouseId === house.id).sort(byAge);
+  const bloodM = blood.filter((c) => c.gender === 'm');
+  if (bloodM.length) return bloodM[0];
   if (blood.length) return blood[0];
+  // 4) Anyone left (married-in), rather than extinction
   return living.sort(byAge)[0];
+}
+
+// The lawful heir under current law (for display) — designated or computed.
+export function lawfulHeir(state, house) {
+  return findHeir(state, house, house.lordId);
 }
 
 export function regionName(state, id) {
