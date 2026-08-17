@@ -20,6 +20,36 @@ let state = null;
 let currentTab = 'court';
 let cheatsUnlocked = false;
 let cheatBuffer = '';
+let observer = { on: false, timer: null, speed: 1 }; // speeds: 1, 2, 4
+
+const OBS_DELAYS = { 1: 1600, 2: 800, 4: 350 };
+
+function stopObserver() {
+  observer.on = false;
+  if (observer.timer) { clearTimeout(observer.timer); observer.timer = null; }
+}
+
+function observerTick() {
+  if (!observer.on || !state || !state.playerHouseId) return;
+  if (state.gameOver) { stopObserver(); renderGame(); return; }
+  // The house governs itself: resolve any pending decision at random
+  const rng = () => Math.random();
+  while (state.pendingDecisions.length) {
+    const d = state.pendingDecisions[0];
+    resolveDecision(state, 0, Math.floor(rng() * d.options.length));
+  }
+  advanceSeason(state);
+  saveGame(state);
+  renderGame();
+  if (state.gameOver) { stopObserver(); renderGame(); return; }
+  observer.timer = setTimeout(observerTick, OBS_DELAYS[observer.speed] || 1600);
+}
+
+function startObserver() {
+  if (observer.on) return;
+  observer.on = true;
+  observerTick();
+}
 
 // Type "valar" anywhere to unlock the Forbidden Shelf
 document.addEventListener('keydown', (e) => {
@@ -178,18 +208,36 @@ function renderGame() {
   else if (currentTab === 'realm') renderRealm(main);
   else renderChronicle(main);
 
-  // Bottom: end turn
+  // Bottom: end turn + observer controls
   const bottom = el('div', 'bottombar');
   const warNote = state.war ? `<span class="war-flag">⚔ ${esc(state.war.name)} rages</span>` : '';
   bottom.innerHTML = warNote;
-  const endBtn = el('button', 'btn btn-endturn', `Let the season pass ➤`);
-  endBtn.onclick = () => {
-    advanceSeason(state);
-    saveGame(state);
-    currentTab = 'court';
-    renderGame();
-  };
-  bottom.appendChild(endBtn);
+
+  if (observer.on) {
+    const obsBadge = el('span', 'obs-badge', `👁 The maesters watch… <em>(house governs itself)</em>`);
+    bottom.appendChild(obsBadge);
+    const pauseBtn = el('button', 'btn btn-endturn', '⏸ Take back the reins');
+    pauseBtn.onclick = () => { stopObserver(); renderGame(); };
+    bottom.appendChild(pauseBtn);
+    for (const sp of [1, 2, 4]) {
+      const b = el('button', 'btn btn-ghost btn-small obs-speed' + (observer.speed === sp ? ' active' : ''), `${sp}×`);
+      b.onclick = () => { observer.speed = sp; renderGame(); };
+      bottom.appendChild(b);
+    }
+  } else {
+    const endBtn = el('button', 'btn btn-endturn', `Let the season pass ➤`);
+    endBtn.onclick = () => {
+      advanceSeason(state);
+      saveGame(state);
+      currentTab = 'court';
+      renderGame();
+    };
+    bottom.appendChild(endBtn);
+    const obsBtn = el('button', 'btn btn-ghost', '👁 Observe');
+    obsBtn.title = 'Let the game run itself — the house makes its own choices while you watch history unfold.';
+    obsBtn.onclick = () => { startObserver(); };
+    bottom.appendChild(obsBtn);
+  }
 
   const menuBtn = el('button', 'btn btn-ghost btn-small', '☰');
   menuBtn.title = 'Menu';
@@ -198,7 +246,7 @@ function renderGame() {
     s.onclick = () => { saveGame(state) ? toast('Saved. The ink dries.') : toast('The ink refuses to dry (save failed).'); close(); };
     body.appendChild(s);
     const n = el('button', 'btn btn-option', '🗡 Abandon this dynasty (new game)');
-    n.onclick = () => { if (confirm('Abandon House ' + state.houses[state.playerHouseId].name + ' and its whole chronicle?')) { clearSave(); close(); showSetup(); } };
+    n.onclick = () => { if (confirm('Abandon House ' + state.houses[state.playerHouseId].name + ' and its whole chronicle?')) { stopObserver(); clearSave(); close(); showSetup(); } };
     body.appendChild(n);
     const c = el('button', 'btn btn-option', cheatsUnlocked ? '🕯 The Forbidden Shelf is open (see the Court page)' : '🕯 A locked shelf (speak the word that all men must)');
     c.onclick = () => {

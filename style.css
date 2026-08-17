@@ -421,6 +421,16 @@ body {
   color: #e8b8a8; background: #7a1f1fd0; border: 1px solid #4c1212;
   padding: 6px 14px; border-radius: 3px; font-size: 15px;
 }
+.obs-badge {
+  pointer-events: auto;
+  color: #cfc2a0; background: #2f2416e8; border: 1px solid #55432a;
+  padding: 6px 14px; border-radius: 3px; font-size: 15px;
+  animation: obs-pulse 2.4s ease-in-out infinite;
+}
+.obs-badge em { color: #8f8368; font-size: 13px; }
+@keyframes obs-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.65; } }
+.obs-speed { min-width: 44px; }
+.obs-speed.active { background: #8a6d1a; color: #fff; border-color: #6b5514; }
 
 /* ---------- modal ---------- */
 .modal-back {
