@@ -3,7 +3,7 @@ import { makeRng } from './rng.js';
 import { epithetFor } from './names.js';
 import {
   makeCharacter, age, livingMembers, fullName, shortName,
-  findHeir, regionName,
+  findHeir, regionName, foundNewHouse,
 } from './world.js';
 import {
   makeDragon, dragonAge, dragonStage, dragonStageName, dragonPower,
@@ -124,6 +124,8 @@ function tickBirths(state, rng) {
       if (a < 16 || a > 45) continue;
       let p = 0.10;
       if (ch.childrenIds.length >= 5) p *= 0.4;
+      const hh = livingMembers(state, house).length;
+      if (hh > 30) p *= 0.25; else if (hh > 18) p *= 0.55; // great halls only hold so many cradles
       if (rng.chance(p)) {
         // child belongs to the father's house by convention; if mother is the ruling line, hers
         const mHouse = state.houses[ch.houseId];
@@ -585,6 +587,18 @@ function tickEvents(state, rng) {
         }
         break;
       }
+    }
+  }
+
+  // New houses rise as old ones fall — the realm abhors an empty seat.
+  {
+    const living = Object.values(state.houses).filter((h) => h.alive).length;
+    const dead = Object.values(state.houses).filter((h) => !h.alive).length;
+    const p = Math.min(0.10, 0.015 + dead * 0.02) * (living < 40 ? 1 : 0.3);
+    if (rng.chance(p)) {
+      const nh = foundNewHouse(state, rng);
+      const lord = state.characters[nh.lordId];
+      log(state, `A NEW HOUSE RISES: ${lord ? shortName(state, lord) : 'A new lord'} ${nh.lore.deed}. House ${nh.name} of ${nh.seat} takes its place among the banners of ${regionName(state, nh.regionId)}.`, 'crown');
     }
   }
 
@@ -1125,6 +1139,62 @@ function archiveTail(state) {
   if (!yearEntry) { yearEntry = { year: state.year, entries: [] }; state.annals.push(yearEntry); }
   const last = state.log[state.log.length - 1];
   if (last) yearEntry.entries.push({ season: SEASONS[state.season], ...last });
+}
+
+// ---------- Observer auto-governance ----------
+// While observing, the player house acts as an AI: it weds its kin, fills its
+// council, names heirs, and spends its seasonal actions sensibly.
+export function autoGovern(state) {
+  const rng = rngFor(state);
+  const h = state.houses[state.playerHouseId];
+  if (!h || !h.alive) return;
+  const lord = state.characters[h.lordId];
+
+  // Name an heir if none stands
+  if (!h.designatedHeirId || !state.characters[h.designatedHeirId] || !state.characters[h.designatedHeirId].alive) {
+    const heir = findHeir(state, h, h.lordId);
+    if (heir) h.designatedHeirId = heir.id;
+  }
+
+  // Fill vacant council seats with the best available
+  const POSTS = { castellan: 'stew', marshal: 'war', envoy: 'dip', spymaster: 'intr' };
+  const taken = new Set(Object.values(h.council).filter(Boolean));
+  for (const [post, skill] of Object.entries(POSTS)) {
+    const cur = h.council[post] ? state.characters[h.council[post]] : null;
+    if (cur && cur.alive && cur.houseId === h.id && cur.id !== h.lordId) continue;
+    h.council[post] = null;
+    const cand = livingMembers(state, h)
+      .filter((c) => c.id !== h.lordId && age(state, c) >= 16 && !taken.has(c.id) && !(c.awayUntil != null && state.turnCount < c.awayUntil))
+      .sort((a, b) => b.skills[skill] - a.skills[skill])[0];
+    if (cand) { h.council[post] = cand.id; taken.add(cand.id); }
+  }
+
+  // Marry the unwed (lord first, then eldest kin) — one proposal a season,
+  // and only while the hall has room; sprawling households stop courting.
+  const hallSize = livingMembers(state, h).length;
+  if (state.actionsLeft > 0 && hallSize < 22 && rng.chance(0.7)) {
+    const unwedKin = livingMembers(state, h)
+      .filter((c) => isUnwed(state, c) && age(state, c) >= 16 && age(state, c) <= 45)
+      .sort((a, b) => (a.id === h.lordId ? -1 : b.id === h.lordId ? 1 : a.birthYear - b.birthYear));
+    if (unwedKin.length) {
+      const me = unwedKin[0];
+      const targets = Object.values(state.houses)
+        .filter((T) => T.alive && T.id !== h.id &&
+          livingMembers(state, T).some((x) => isUnwed(state, x) && x.gender !== me.gender && age(state, x) >= 16 && age(state, x) <= 50 && T.lordId !== x.id))
+        .sort((a, b) => ((h.relations[b.id] || 0) + b.prestige * 0.3) - ((h.relations[a.id] || 0) + a.prestige * 0.3));
+      if (targets.length) arrangeMarriage(state, me.id, targets[0].id);
+    }
+  }
+
+  // Spend remaining actions with a steward's judgment
+  let guard = 4;
+  while (state.actionsLeft > 0 && guard-- > 0) {
+    if (h.gold > 400 && rng.chance(0.4)) { runAction(state, 'improve'); continue; }
+    if (h.gold > 250 && h.prestige < 70 && rng.chance(0.4)) { runAction(state, 'tourney'); continue; }
+    if (h.gold > 200 && h.troops < 1500 && rng.chance(0.4)) { runAction(state, 'levies'); continue; }
+    if (h.gold > 150 && rng.chance(0.3)) { runAction(state, 'court_crown'); continue; }
+    break; // hoard the rest
+  }
 }
 
 export function resolveDecision(state, decisionIdx, optionIdx) {

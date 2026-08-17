@@ -1,6 +1,6 @@
 // UI rendering and interaction.
 import { generateWorld, livingMembers, age, fullName, shortName, regionName } from './world.js';
-import { advanceSeason, runAction, resolveDecision, arrangeMarriage, isUnwed, ACTIONS, SEASONS } from './engine.js';
+import { advanceSeason, runAction, resolveDecision, arrangeMarriage, isUnwed, autoGovern, ACTIONS, SEASONS } from './engine.js';
 import { sigilSVG, sigilBlazon } from './sigil.js';
 import { houseDragons, wildDragons, livingDragons, describeDragon, dragonStageName, dragonMark, hasDragonblood } from './dragons.js';
 import {
@@ -38,6 +38,7 @@ function observerTick() {
     const d = state.pendingDecisions[0];
     resolveDecision(state, 0, Math.floor(rng() * d.options.length));
   }
+  autoGovern(state); // the house weds, appoints, names heirs, spends wisely
   advanceSeason(state);
   saveGame(state);
   renderGame();

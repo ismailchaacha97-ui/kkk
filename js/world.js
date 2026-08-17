@@ -170,9 +170,9 @@ export function generateWorld(seed) {
     greats.push(g);
   }
 
-  // Minor houses, 3-5 per region sworn to that region's great house
+  // Minor houses, 4-6 per region sworn to that region's great house
   for (const g of greats) {
-    const n = rng.int(3, 5);
+    const n = rng.int(4, 6);
     for (let i = 0; i < n; i++) makeHouse(state, rng, 'minor', g.regionId, g.id);
   }
 
@@ -291,4 +291,55 @@ export function findHeir(state, house, excludeId) {
 export function regionName(state, id) {
   const r = state.regions.find((x) => x.id === id);
   return r ? r.name : 'the realm';
+}
+
+// A new house rises mid-game: cadet branch, upjumped knight, or a merchant buying a ruin.
+export function foundNewHouse(state, rng) {
+  const region = rng.pick(state.regions);
+  const liege = Object.values(state.houses).find((h) => h.alive && h.tier === 'great' && h.regionId === region.id)
+    || state.houses[state.crownHouseId];
+  const house = makeHouse(state, rng, 'minor', region.id, liege ? liege.id : null);
+  // young houses start leaner
+  house.gold = rng.int(60, 140);
+  house.troops = rng.int(300, 800);
+  house.prestige = rng.int(5, 18);
+  // relations with everyone
+  for (const other of Object.values(state.houses)) {
+    if (other.id === house.id) continue;
+    const base = rng.int(-10, 15);
+    house.relations[other.id] = base;
+    other.relations[house.id] = base + rng.int(-5, 5);
+  }
+  if (liege) { house.relations[liege.id] = 25; liege.relations[house.id] = 20; }
+  // founding lore, written now
+  const lord = state.characters[house.lordId];
+  house.ancestorsGenerated = true;
+  house.heirloom = null;
+
+  // Founding story — sometimes they claim an extinct house's empty seat
+  const ruins = Object.values(state.houses).filter((h) => !h.alive && h.extinctYear && h.seat !== house.seat);
+  let story;
+  const kind = rng.pick(ruins.length ? ['cadet', 'knight', 'ruin', 'ruin'] : ['cadet', 'knight', 'knight']);
+  if (kind === 'ruin') {
+    const ruin = rng.pick(ruins);
+    house.seat = ruin.seat;
+    story = `was granted the empty seat of ${ruin.seat}, silent since House ${ruin.name} died in Year ${ruin.extinctYear}, and swore to fill its halls with living voices`;
+  } else if (kind === 'cadet') {
+    const parents = Object.values(state.houses).filter((h) => h.alive && h.id !== house.id && h.tier !== 'royal' && h.memberIds.length >= 5);
+    const parent = parents.length ? rng.pick(parents) : liege;
+    story = `led the second sons of House ${parent ? parent.name : 'a crowded hall'} out to raw land, a cadet branch determined to be no one's second anything`;
+    if (parent) { house.relations[parent.id] = 40; parent.relations[house.id] = 35; }
+  } else {
+    story = rng.pick([
+      `was a landless knight who ${rng.pick(['won a royal mêlée and asked for land instead of gold', 'held a bridge alone against reavers until the levies came', 'caught the eye of the crown at a moment history declines to specify'])}`,
+      `made a fortune in ${rng.pick(['salt', 'wool', 'timber', 'other people\u2019s wars'])} and bought what older blood pretends cannot be bought`,
+    ]);
+  }
+  house.lore = {
+    foundingYear: state.year,
+    founderName: lord ? lord.name : state.namer.firstName('m'),
+    founderGender: lord ? lord.gender : 'm',
+    deed: story,
+  };
+  return house;
 }
