@@ -1,0 +1,384 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+//@version=6
+// =============================================================================
+//  Auto Trend Lines — Support & Resistance (90-day rolling lookback)
+// -----------------------------------------------------------------------------
+//  WHAT IT DOES
+//    * Finds swing highs (resistance points) and swing lows (support points)
+//      with ta.pivothigh() / ta.pivotlow().
+//    * Keeps only the pivots that fall inside a rolling lookback window
+//      (90 calendar days by default) and caps how many are stored.
+//    * Connects two pivot highs into a RESISTANCE line and two pivot lows into
+//      a SUPPORT line, choosing the longest pair that no pivot in between
+//      violates (the classic "valid trend line" test).
+//    * Colors each line by its slope: falling = downtrend, rising = uptrend.
+//
+//  WHY IT DOES NOT LAG THE CHART
+//    1. Only TWO line objects and TWO label objects exist for the whole chart.
+//       They are *updated* (line.set_xy1 / line.set_xy2) instead of being
+//       re-created bar after bar. Re-creating drawings on every historical bar
+//       is what makes most auto-trendline scripts crawl.
+//    2. All drawing happens inside `if barstate.islast`, i.e. once, on the most
+//       recent bar, and never on thousands of historical bars.
+//    3. The pivot store is a bounded ring buffer (10 per side by default), so
+//       the pair search is at most ~10x10 comparisons, and it is only re-run
+//       when the pivot set actually changed (a "dirty" flag) or on the last bar.
+//    4. No request.security() calls, no loops over the full bar history, and
+//       max_lines_count / max_labels_count are kept at the minimum.
+// =============================================================================
+
+indicator(title            = "Auto Trend Lines - S/R (90-Day Lookback)",
+      shorttitle       = "AutoTrend 90D",
+      overlay          = true,
+      max_lines_count  = 10,
+      max_labels_count = 10)
+
+// =============================================================================
+//  1. CONSTANTS
+// =============================================================================
+// Declared as `const` so they can be used for `group`, which requires a
+// "const string". A `var string` would be qualified "simple" and fail here.
+const string GRP_DET = "Detection"
+const string GRP_STY = "Style"
+const string GRP_ALR = "Alerts & Extras"
+
+const int MS_IN_DAY = 86400000          // milliseconds in one calendar day
+const int ATR_LEN   = 14                // ATR length used for the tolerance
+
+// =============================================================================
+//  2. INPUTS
+// =============================================================================
+int lookbackDays = input.int(90, "Lookback window (calendar days)",
+      minval = 1, maxval = 3650, group = GRP_DET,
+      tooltip = "Pivots older than this many calendar days are dropped, so the trend lines always describe recent price action. It is measured in TIME (not bars), so it behaves the same on any timeframe.")
+
+int pivotLeft = input.int(5, "Pivot left bars", minval = 1, maxval = 50,
+      group = GRP_DET,
+      tooltip = "Bars to the LEFT that must be lower (for a high) / higher (for a low).")
+
+int pivotRight = input.int(5, "Pivot right bars", minval = 1, maxval = 50,
+      group = GRP_DET,
+      tooltip = "Bars to the RIGHT needed to CONFIRM a pivot. Bigger = fewer but more significant pivots, at the cost of later confirmation.")
+
+int maxPivots = input.int(10, "Max pivots kept per side", minval = 2, maxval = 30,
+      group = GRP_DET,
+      tooltip = "Hard cap on the pivot buffer. Keeps the pair search O(n^2) with a very small n - this is what keeps the script light.")
+
+float tolMult = input.float(0.25, "Break tolerance (ATR multiple)",
+      minval = 0.0, maxval = 5.0, step = 0.05, group = GRP_DET,
+      tooltip = "How far an in-between pivot may poke through the line before the line is rejected. 0 = perfectly strict.")
+
+bool strictDir = input.bool(false, "Only draw direction-consistent lines",
+      group = GRP_DET,
+      tooltip = "ON = resistance must be falling (lower highs) and support must be rising (higher lows). OFF = always connect the pivots and color the line according to its slope.")
+
+color colUp    = input.color(#26a69a, "Up-trend (support) color", group = GRP_STY)
+color colDown  = input.color(#ef5350, "Down-trend (resistance) color", group = GRP_STY)
+int   lineWid  = input.int(2, "Line width", minval = 1, maxval = 5, group = GRP_STY)
+string lineSty = input.string("Solid", "Line style",
+      options = ["Solid", "Dashed", "Dotted"], group = GRP_STY)
+bool extRight  = input.bool(true,  "Project lines to the right", group = GRP_STY)
+bool showLbls  = input.bool(true,  "Show line labels",           group = GRP_STY)
+bool showPvts  = input.bool(true,  "Mark detected pivots",       group = GRP_STY)
+bool showWin   = input.bool(false, "Shade the lookback window",  group = GRP_STY)
+
+bool alertsOn = input.bool(true, "Enable break alerts", group = GRP_ALR,
+      tooltip = "Fires when a bar CLOSES beyond the projected trend line.")
+
+// Translate the style dropdown into a Pine line-style constant a single time.
+string lineStyleConst = lineSty == "Dashed" ? line.style_dashed :
+      lineSty == "Dotted" ? line.style_dotted : line.style_solid
+
+// =============================================================================
+//  3. HELPER FUNCTIONS
+// =============================================================================
+
+// Value of the straight line through (x1,y1)-(x2,y2), evaluated at x.
+// Used for the "is the line violated?" test, for the labels and for alerts.
+f_lineY(int x1, float y1, int x2, float y2, int x) =>
+    float slope = x2 == x1 ? 0.0 : (y2 - y1) / (x2 - x1)
+    y1 + slope * (x - x1)
+
+// Drops pivots that fell out of the lookback window and trims the buffer down
+// to `maxKeep` entries. Index 0 is always the oldest entry.
+// Returns true if anything was removed; that acts as a "dirty" flag so the
+// trend-line search only re-runs when the pivot set really changed.
+f_prune(array<int> xs, array<float> ys, array<int> ts, int cutoffTime, int maxKeep) =>
+    int sz      = array.size(ts)
+    int removeN = 0
+    // (a) time filter: count how many of the OLDEST entries are out of window
+    if sz > 0
+        for i = 0 to sz - 1
+            if array.get(ts, i) < cutoffTime
+                removeN += 1
+            else
+                break
+    // (b) size cap: ring-buffer behaviour
+    if sz - removeN > maxKeep
+        removeN := sz - maxKeep
+    // (c) drop them from the front of all three parallel arrays
+    if removeN > 0
+        for i = 1 to removeN
+            array.shift(xs)
+            array.shift(ys)
+            array.shift(ts)
+    removeN > 0
+
+// Picks the best pair of pivots for a trend line.
+//   isRes = true  -> resistance: connect highs; no pivot high may sit above it
+//   isRes = false -> support   : connect lows;  no pivot low  may sit below it
+// The newest pivot is always the right-hand anchor. We then walk from the
+// OLDEST candidate forward and take the first anchor that yields a
+// non-violated line, which produces the longest - and therefore most
+// meaningful - trend line.
+// Returns [x1, y1, x2, y2]; x1 is na when no valid line exists.
+f_pickLine(array<int> xs, array<float> ys, bool isRes, float tol, bool strict) =>
+    int   rx1 = na
+    float ry1 = na
+    int   rx2 = na
+    float ry2 = na
+    int   n   = array.size(xs)
+
+    if n >= 2
+        int   j  = n - 1                    // newest pivot = right-hand anchor
+        int   xj = array.get(xs, j)
+        float yj = array.get(ys, j)
+
+        for i = 0 to j - 1                  // oldest -> newest
+            int   xi = array.get(xs, i)
+            float yi = array.get(ys, i)
+            bool  ok = true
+
+            // Optional direction filter: lower highs / higher lows only.
+            if strict
+                ok := isRes ? yj < yi : yj > yi
+
+            // Validity test: every pivot BETWEEN the two anchors must stay on
+            // the correct side of the line (within the ATR tolerance).
+            // The range guard matters because a Pine `for` counts DOWN when
+            // the start value is greater than the end value.
+            if ok and (j - 1) >= (i + 1)
+                for k = i + 1 to j - 1
+                    float yk = array.get(ys, k)
+                    float ly = f_lineY(xi, yi, xj, yj, array.get(xs, k))
+                    bool violated = isRes ? yk > ly + tol : yk < ly - tol
+                    if violated
+                        ok := false
+                        break
+
+            if ok
+                rx1 := xi
+                ry1 := yi
+                rx2 := xj
+                ry2 := yj
+                break                       // first valid pair = longest line
+
+    [rx1, ry1, rx2, ry2]
+
+// =============================================================================
+//  4. PIVOT DETECTION & STORAGE   (runs every bar, but it is only a few ops)
+// =============================================================================
+
+// Persistent, bounded buffers: bar index, price and timestamp of each pivot.
+var array<int>   phX = array.new<int>()     // resistance points (swing highs)
+var array<float> phY = array.new<float>()
+var array<int>   phT = array.new<int>()
+var array<int>   plX = array.new<int>()     // support points (swing lows)
+var array<float> plY = array.new<float>()
+var array<int>   plT = array.new<int>()
+
+// ta.pivothigh / ta.pivotlow report a pivot `pivotRight` bars AFTER it printed,
+// so the pivot's real location is bar_index - pivotRight.
+float ph     = ta.pivothigh(high, pivotLeft, pivotRight)
+float pl     = ta.pivotlow(low,   pivotLeft, pivotRight)
+int   pivotX = bar_index - pivotRight
+int   pivotT = time[pivotRight]
+
+// Rolling lookback cutoff, in milliseconds.
+int lookbackMs = lookbackDays * MS_IN_DAY
+int cutoffTime = time - lookbackMs
+
+bool newHigh = not na(ph)
+bool newLow  = not na(pl)
+
+// Store freshly confirmed pivots.
+if newHigh
+    array.push(phX, pivotX)
+    array.push(phY, ph)
+    array.push(phT, pivotT)
+
+if newLow
+    array.push(plX, pivotX)
+    array.push(plY, pl)
+    array.push(plT, pivotT)
+
+// Keep both buffers inside the time window and under the size cap.
+bool prunedH = f_prune(phX, phY, phT, cutoffTime, maxPivots)
+bool prunedL = f_prune(plX, plY, plT, cutoffTime, maxPivots)
+
+// "Dirty" flags: the pivot set changed, so the cached trend line is stale.
+bool dirtyH = newHigh or prunedH
+bool dirtyL = newLow  or prunedL
+
+// =============================================================================
+//  5. TREND-LINE SELECTION   (cached - recomputed only when needed)
+// =============================================================================
+float tol = nz(ta.atr(ATR_LEN)) * tolMult   // ta.atr must be called every bar
+
+var int   resX1 = na
+var float resY1 = na
+var int   resX2 = na
+var float resY2 = na
+var int   supX1 = na
+var float supY1 = na
+var int   supX2 = na
+var float supY2 = na
+
+if dirtyH or barstate.islast
+    [rA, rB, rC, rD] = f_pickLine(phX, phY, true, tol, strictDir)
+    resX1 := rA
+    resY1 := rB
+    resX2 := rC
+    resY2 := rD
+
+if dirtyL or barstate.islast
+    [sA, sB, sC, sD] = f_pickLine(plX, plY, false, tol, strictDir)
+    supX1 := sA
+    supY1 := sB
+    supX2 := sC
+    supY2 := sD
+
+// Projected line values at the current bar (labels, data window and alerts).
+float resNow = na(resX1) ? na : f_lineY(resX1, resY1, resX2, resY2, bar_index)
+float supNow = na(supX1) ? na : f_lineY(supX1, supY1, supX2, supY2, bar_index)
+
+// Slope direction: a falling resistance = downtrend, a rising support = uptrend.
+bool resFalling = not na(resX1) and resY2 < resY1
+bool supRising  = not na(supX1) and supY2 > supY1
+
+// =============================================================================
+//  6. DRAWING   (executed ONLY on the last bar - this is the anti-lag core)
+// =============================================================================
+var line  resLine = na
+var line  supLine = na
+var label resLbl  = na
+var label supLbl  = na
+
+if barstate.islast
+    // ----------------------------------------------------------- RESISTANCE --
+    if not na(resX1)
+        color rc = resFalling ? colDown : colUp
+        if na(resLine)
+            // Create the object once...
+            resLine := line.new(resX1, resY1, resX2, resY2,
+                  xloc = xloc.bar_index, color = rc, width = lineWid,
+                  style = lineStyleConst)
+        else
+            // ...then only move the existing one on later bars/ticks.
+            line.set_xy1(resLine, resX1, resY1)
+            line.set_xy2(resLine, resX2, resY2)
+        line.set_color(resLine, rc)
+        line.set_width(resLine, lineWid)
+        line.set_style(resLine, lineStyleConst)
+        line.set_extend(resLine, extRight ? extend.right : extend.none)
+
+        if showLbls
+            string rtxt = (resFalling ? "Downtrend " : "Rising ") +
+                  "resistance " + str.tostring(resNow, format.mintick)
+            if na(resLbl)
+                resLbl := label.new(bar_index, resNow, rtxt,
+                      xloc = xloc.bar_index, style = label.style_label_left,
+                      color = color.new(rc, 80), textcolor = rc,
+                      size = size.small)
+            else
+                label.set_xy(resLbl, bar_index, resNow)
+                label.set_text(resLbl, rtxt)
+                label.set_color(resLbl, color.new(rc, 80))
+                label.set_textcolor(resLbl, rc)
+    else
+        // No valid line right now: delete the objects instead of leaving
+        // stale artwork on the chart.
+        if not na(resLine)
+            line.delete(resLine)
+            resLine := na
+        if not na(resLbl)
+            label.delete(resLbl)
+            resLbl := na
+
+    // -------------------------------------------------------------- SUPPORT --
+    if not na(supX1)
+        color sc = supRising ? colUp : colDown
+        if na(supLine)
+            supLine := line.new(supX1, supY1, supX2, supY2,
+                  xloc = xloc.bar_index, color = sc, width = lineWid,
+                  style = lineStyleConst)
+        else
+            line.set_xy1(supLine, supX1, supY1)
+            line.set_xy2(supLine, supX2, supY2)
+        line.set_color(supLine, sc)
+        line.set_width(supLine, lineWid)
+        line.set_style(supLine, lineStyleConst)
+        line.set_extend(supLine, extRight ? extend.right : extend.none)
+
+        if showLbls
+            string stxt = (supRising ? "Uptrend " : "Falling ") +
+                  "support " + str.tostring(supNow, format.mintick)
+            if na(supLbl)
+                supLbl := label.new(bar_index, supNow, stxt,
+                      xloc = xloc.bar_index, style = label.style_label_left,
+                      color = color.new(sc, 80), textcolor = sc,
+                      size = size.small)
+            else
+                label.set_xy(supLbl, bar_index, supNow)
+                label.set_text(supLbl, stxt)
+                label.set_color(supLbl, color.new(sc, 80))
+                label.set_textcolor(supLbl, sc)
+    else
+        if not na(supLine)
+            line.delete(supLine)
+            supLine := na
+        if not na(supLbl)
+            label.delete(supLbl)
+            supLbl := na
+
+    // Housekeeping: if the user switches labels off, clear the existing ones.
+    if not showLbls
+        if not na(resLbl)
+            label.delete(resLbl)
+            resLbl := na
+        if not na(supLbl)
+            label.delete(supLbl)
+            supLbl := na
+
+// =============================================================================
+//  7. LIGHTWEIGHT VISUAL EXTRAS   (plot-based = practically free)
+// =============================================================================
+
+// Small triangles on every confirmed pivot, offset back to the pivot's own bar.
+plotshape(showPvts ? ph : na, title = "Pivot High",
+      style = shape.triangledown, location = location.absolute,
+      color = colDown, size = size.tiny, offset = -pivotRight)
+plotshape(showPvts ? pl : na, title = "Pivot Low",
+      style = shape.triangleup, location = location.absolute,
+      color = colUp, size = size.tiny, offset = -pivotRight)
+
+// Optional tint over the bars that belong to the lookback window.
+bgcolor(showWin and time >= last_bar_time - lookbackMs ?
+      color.new(color.gray, 93) : na, title = "Lookback window")
+
+// Trend-line levels exposed in the Data Window (no extra rendering cost).
+plot(resNow, "Resistance level", color = colDown, display = display.data_window)
+plot(supNow, "Support level",    color = colUp,   display = display.data_window)
+
+// =============================================================================
+//  8. ALERTS - fire when a bar CLOSES beyond the projected trend line
+// =============================================================================
+bool resBreakUp = alertsOn and not na(resNow) and not na(resNow[1]) and
+      close > resNow and close[1] <= resNow[1]
+bool supBreakDn = alertsOn and not na(supNow) and not na(supNow[1]) and
+      close < supNow and close[1] >= supNow[1]
+
+alertcondition(resBreakUp, title = "Resistance trend line broken",
+      message = "Price closed ABOVE the resistance trend line ({{ticker}}, {{interval}})")
+alertcondition(supBreakDn, title = "Support trend line broken",
+      message = "Price closed BELOW the support trend line ({{ticker}}, {{interval}})")
