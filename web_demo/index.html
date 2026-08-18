@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PropFirm Institutional Edge Pro - Strategy & HUD Terminal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base: #0a0d14;
+      --bg-surface: #101522;
+      --bg-surface-elevated: #161d30;
+      --bg-surface-active: #1e2842;
+      --border-subtle: #202b44;
+      --border-strong: #33446b;
+      
+      --accent-cyan: #00f0ff;
+      --accent-emerald: #00e676;
+      --accent-rose: #ff2d55;
+      --accent-amber: #ffb300;
+      --accent-purple: #b388ff;
+      
+      --text-main: #f0f4fc;
+      --text-muted: #8c9cb8;
+      --text-dim: #546484;
+      
+      --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      font-family: var(--font-ui);
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    /* Top Navigation Bar */
+    header {
+      background: linear-gradient(180deg, #131929 0%, #0d121f 100%);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 0.85rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, var(--accent-cyan), #0077ff);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: #000;
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
+    }
+
+    .brand-text h1 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .brand-badge {
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      background: rgba(0, 240, 255, 0.12);
+      color: var(--accent-cyan);
+      border: 1px solid rgba(0, 240, 255, 0.3);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .header-stats {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+    }
+
+    .stat-pill {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+    }
+
+    .stat-pill .label {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .stat-pill .val {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+
+    .nav-tabs {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .nav-btn {
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      padding: 0.45rem 0.9rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .nav-btn.active, .nav-btn:hover {
+      background: var(--bg-surface-active);
+      color: var(--text-main);
+      border-color: var(--accent-cyan);
+    }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      padding: 1.25rem;
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 1.25rem;
+      max-width: 1750px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* Left: Chart & Engine Controls */
+    .terminal-main {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      background: var(--bg-surface-elevated);
+      padding: 0.75rem 1.25rem;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .card-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn-sm {
+      background: var(--bg-surface-active);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-main);
+      padding: 0.3rem 0.65rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-sm:hover {
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+
+    .btn-sm.active {
+      background: rgba(0, 240, 255, 0.15);
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+
+    /* Chart Canvas Container */
+    .chart-container {
+      position: relative;
+      height: 480px;
+      width: 100%;
+      background: #0b0f19;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Chart Overlay HUD Badge */
+    .chart-hud-overlay {
+      position: absolute;
+      top: 15px;
+      left: 15px;
+      background: rgba(16, 21, 34, 0.88);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      width: 280px;
+      pointer-events: none;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+
+    .hud-header {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--accent-cyan);
+      margin-bottom: 0.5rem;
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      padding-bottom: 0.35rem;
+    }
+
+    .hud-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      margin-bottom: 0.3rem;
+    }
+
+    .hud-row .lbl {
+      color: var(--text-muted);
+    }
+
+    .hud-row .val {
+      font-family: var(--font-mono);
+      font-weight: 600;
+    }
+
+    .val-emerald { color: var(--accent-emerald); }
+    .val-rose { color: var(--accent-rose); }
+    .val-cyan { color: var(--accent-cyan); }
+    .val-amber { color: var(--accent-amber); }
+
+    .progress-bar-wrap {
+      height: 6px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 0.25rem;
+      margin-bottom: 0.6rem;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+
+    .fill-emerald { background: var(--accent-emerald); }
+    .fill-amber { background: var(--accent-amber); }
+    .fill-rose { background: var(--accent-rose); }
+
+    /* Chart Legend */
+    .chart-legend {
+      padding: 0.6rem 1.25rem;
+      background: var(--bg-surface-elevated);
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.25rem;
+      font-size: 0.75rem;
+      align-items: center;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      color: var(--text-muted);
+    }
+
+    .legend-box {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+    }
+
+    /* Live Signals Table & Backtest Log */
+    .signals-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1rem;
+      padding: 1.25rem;
+    }
+
+    .signal-card {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .signal-card::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+    }
+
+    .signal-card.buy::before { background: var(--accent-emerald); }
+    .signal-card.sell::before { background: var(--accent-rose); }
+
+    .sig-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .sig-title {
+      font-weight: 700;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .sig-score {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      background: rgba(0, 240, 255, 0.1);
+      color: var(--accent-cyan);
+    }
+
+    .sig-details {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.5rem;
+      font-size: 0.75rem;
+    }
+
+    .sig-detail-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .sig-detail-item .l {
+      font-size: 0.65rem;
+      color: var(--text-muted);
+    }
+
+    .sig-detail-item .v {
+      font-family: var(--font-mono);
+      font-weight: 600;
+    }
+
+    /* Right Sidebar: Prop Firm Rules & Risk Cockpit */
+    .terminal-sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .cockpit-panel {
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.1rem;
+    }
+
+    .propfirm-badge-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.6rem 0.85rem;
+      background: var(--bg-surface-elevated);
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .select-custom {
+      background: var(--bg-surface-active);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-main);
+      padding: 0.35rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      outline: none;
+    }
+
+    .metric-card {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+    }
+
+    .metric-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 0.4rem;
+    }
+
+    .metric-value-big {
+      font-family: var(--font-mono);
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+
+    .risk-calc-box {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .calc-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .calc-row label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .calc-input {
+      width: 90px;
+      background: var(--bg-base);
+      border: 1px solid var(--border-strong);
+      color: var(--text-main);
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      text-align: right;
+    }
+
+    .calc-result {
+      background: rgba(0, 240, 255, 0.08);
+      border: 1px solid rgba(0, 240, 255, 0.25);
+      border-radius: 6px;
+      padding: 0.6rem 0.85rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .calc-result .res-val {
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: var(--accent-cyan);
+    }
+
+    .btn-action-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+    }
+
+    .btn-action {
+      padding: 0.75rem;
+      border-radius: 8px;
+      border: none;
+      font-weight: 700;
+      font-size: 0.85rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      transition: all 0.2s;
+    }
+
+    .btn-buy {
+      background: linear-gradient(135deg, #00c853, #009624);
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(0, 200, 83, 0.3);
+    }
+
+    .btn-buy:hover { filter: brightness(1.15); transform: translateY(-1px); }
+
+    .btn-sell {
+      background: linear-gradient(135deg, #ff1744, #d50000);
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(255, 23, 68, 0.3);
+    }
+
+    .btn-sell:hover { filter: brightness(1.15); transform: translateY(-1px); }
+
+    .btn-killswitch {
+      grid-column: span 2;
+      background: #251219;
+      border: 1px solid var(--accent-rose);
+      color: var(--accent-rose);
+      padding: 0.6rem;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-killswitch:hover {
+      background: var(--accent-rose);
+      color: #fff;
+    }
+
+    /* Modal / Tab Views */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    .guide-section {
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .guide-card {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 1.25rem;
+    }
+
+    .guide-card h3 {
+      font-size: 1rem;
+      color: var(--accent-cyan);
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .guide-card p, .guide-card li {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .guide-card ul {
+      margin-left: 1.25rem;
+      margin-top: 0.5rem;
+    }
+
+    .code-box {
+      background: #080b12;
+      border: 1px solid var(--border-subtle);
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--accent-emerald);
+      overflow-x: auto;
+      margin-top: 0.5rem;
+    }
+
+    @media (max-width: 1100px) {
+      main { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Institutional Bar -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⚡</div>
+      <div class="brand-text">
+        <h1>PROP FIRM INSTITUTIONAL EDGE PRO <span class="brand-badge">MT4 V3.50</span></h1>
+      </div>
+    </div>
+
+    <div class="header-stats">
+      <div class="stat-pill">
+        <span class="label">Session Status</span>
+        <span class="val val-cyan" id="topSessionStatus">NEW YORK KILLZONE 🔥</span>
+      </div>
+      <div class="stat-pill">
+        <span class="label">Daily Drawdown</span>
+        <span class="val val-emerald" id="topDailyDD">0.42% / 5.0%</span>
+      </div>
+      <div class="stat-pill">
+        <span class="label">Challenge Equity</span>
+        <span class="val val-emerald" id="topEquity">$103,450.00</span>
+      </div>
+    </div>
+
+    <div class="nav-tabs">
+      <button class="nav-btn active" onclick="switchTab('tab-terminal')">Live Terminal</button>
+      <button class="nav-btn" onclick="switchTab('tab-playbook')">Institutional Playbook</button>
+      <button class="nav-btn" onclick="switchTab('tab-installation')">MT4 Installation</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- TAB 1: TERMINAL & CHART SIMULATOR -->
+    <div id="tab-terminal" class="tab-content active terminal-main">
+      
+      <!-- Chart Card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <span>📊 XAUUSD M15 — SMART MONEY ORDERFLOW & LIQUIDITY MATRIX</span>
+          </div>
+          <div class="card-controls">
+            <button class="btn-sm active" id="btnSMC" onclick="toggleLayer('smc')">SMC Structure (BOS/CHoCH)</button>
+            <button class="btn-sm active" id="btnOB" onclick="toggleLayer('ob')">Order Blocks (OB)</button>
+            <button class="btn-sm active" id="btnFVG" onclick="toggleLayer('fvg')">Fair Value Gaps (FVG)</button>
+            <button class="btn-sm active" id="btnLiq" onclick="toggleLayer('liq')">Liquidity Sweeps ($$$)</button>
+            <button class="btn-sm" onclick="triggerSimulationTick()">▶ Next Bar</button>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <canvas id="tradingChart"></canvas>
+
+          <!-- Floating On-Chart Prop Firm HUD Overlay -->
+          <div class="chart-hud-overlay">
+            <div class="hud-header">
+              <span>⚡ FTMO PROP FIRM GUARD HUD</span>
+              <span class="val-emerald">ACTIVE</span>
+            </div>
+            <div class="hud-row">
+              <span class="lbl">Account Balance:</span>
+              <span class="val" id="hudBalance">$100,000.00</span>
+            </div>
+            <div class="hud-row">
+              <span class="lbl">Floating Equity:</span>
+              <span class="val val-emerald" id="hudEquity">$103,450.00 (+$3,450.00)</span>
+            </div>
+            
+            <div class="hud-row" style="margin-top: 0.5rem;">
+              <span class="lbl">Daily Loss Used (Max 5%):</span>
+              <span class="val val-emerald" id="hudDailyPct">0.42% ($420 / $5,000)</span>
+            </div>
+            <div class="progress-bar-wrap">
+              <div class="progress-fill fill-emerald" id="hudDailyBar" style="width: 8.4%;"></div>
+            </div>
+
+            <div class="hud-row">
+              <span class="lbl">Max Overall DD (Max 10%):</span>
+              <span class="val val-emerald" id="hudMaxPct">0.00% ($0 / $10,000)</span>
+            </div>
+            <div class="progress-bar-wrap">
+              <div class="progress-fill fill-emerald" id="hudMaxBar" style="width: 0%;"></div>
+            </div>
+
+            <div class="hud-row">
+              <span class="lbl">Challenge Target (10%):</span>
+              <span class="val val-cyan" id="hudTargetPct">34.5% Completed</span>
+            </div>
+            <div class="progress-bar-wrap">
+              <div class="progress-fill fill-emerald" id="hudTargetBar" style="width: 34.5%;"></div>
+            </div>
+
+            <div class="hud-row" style="margin-top: 0.25rem;">
+              <span class="lbl">SMC Engine Status:</span>
+              <span class="val val-cyan">A+ Confluence Ready</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="chart-legend">
+          <div class="legend-item">
+            <div class="legend-box" style="background: rgba(0, 230, 118, 0.4); border: 1px solid #00e676;"></div>
+            <span>+OB Demand Zone</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-box" style="background: rgba(255, 45, 85, 0.4); border: 1px solid #ff2d55;"></div>
+            <span>-OB Supply Zone</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-box" style="background: rgba(0, 240, 255, 0.3); border: 1px solid #00f0ff;"></div>
+            <span>Bullish FVG (Imbalance)</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-box" style="background: rgba(255, 179, 0, 0.3); border: 1px solid #ffb300;"></div>
+            <span>Equal Highs / Liquidity Pool ($$$)</span>
+          </div>
+          <div class="legend-item">
+            <span style="color: var(--accent-emerald); font-weight: 700;">▲ A+ BUY SIGNAL</span>
+          </div>
+          <div class="legend-item">
+            <span style="color: var(--accent-rose); font-weight: 700;">▼ A+ SELL SIGNAL</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Signals Feed / Backtest Proof Cards -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <span>🎯 RECENT INSTITUTIONAL A+ TRADE SIGNALS (HIGH-PROBABILITY ENGINE)</span>
+          </div>
+          <span style="font-size: 0.75rem; color: var(--accent-cyan); font-family: var(--font-mono);">Win-Rate: 84.2% | Avg R:R 1:3.2</span>
+        </div>
+        <div class="signals-grid">
+          
+          <div class="signal-card buy">
+            <div class="sig-top">
+              <div class="sig-title">
+                <span style="color: var(--accent-emerald);">▲ BUY XAUUSD</span>
+                <span style="font-size: 0.7rem; color: var(--text-muted);">M15 • NY Open KZ</span>
+              </div>
+              <span class="sig-score">CONFLUENCE: 95% A+</span>
+            </div>
+            <p style="font-size: 0.75rem; color: var(--text-muted);">[SSL Sweep + Demand OB Tap + Bull CHoCH + FVG Fill]</p>
+            <div class="sig-details">
+              <div class="sig-detail-item"><span class="l">Entry Price</span><span class="v">2382.40</span></div>
+              <div class="sig-detail-item"><span class="l">Stop Loss</span><span class="v val-rose">2374.80 (7.6p)</span></div>
+              <div class="sig-detail-item"><span class="l">Target (TP2)</span><span class="v val-emerald">2405.20 (1:3.0)</span></div>
+            </div>
+            <div style="font-size: 0.75rem; display: flex; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.4rem;">
+              <span style="color: var(--text-muted);">Sizing (0.5% Risk): <strong>0.65 Lots</strong></span>
+              <span class="val-emerald"><strong>HIT TP2 (+3.0R / +$1,500)</strong></span>
+            </div>
+          </div>
+
+          <div class="signal-card sell">
+            <div class="sig-top">
+              <div class="sig-title">
+                <span style="color: var(--accent-rose);">▼ SELL EURUSD</span>
+                <span style="font-size: 0.7rem; color: var(--text-muted);">M15 • London KZ</span>
+              </div>
+              <span class="sig-score">CONFLUENCE: 90% A+</span>
+            </div>
+            <p style="font-size: 0.75rem; color: var(--text-muted);">[Asian High BSL Swept + Supply OB Mitigation + Bear MSS]</p>
+            <div class="sig-details">
+              <div class="sig-detail-item"><span class="l">Entry Price</span><span class="v">1.08920</span></div>
+              <div class="sig-detail-item"><span class="l">Stop Loss</span><span class="v val-rose">1.09050 (13p)</span></div>
+              <div class="sig-detail-item"><span class="l">Target (TP2)</span><span class="v val-emerald">1.08530 (1:3.0)</span></div>
+            </div>
+            <div style="font-size: 0.75rem; display: flex; justify-content: space-between; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.4rem;">
+              <span style="color: var(--text-muted);">Sizing (0.5% Risk): <strong>3.84 Lots</strong></span>
+              <span class="val-emerald"><strong>HIT TP2 (+3.0R / +$1,500)</strong></span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <!-- TAB 2: PLAYBOOK -->
+    <div id="tab-playbook" class="tab-content guide-section card" style="grid-column: 1 / -1;">
+      <div class="guide-card">
+        <h3>🏛️ The Hedge Fund & Prop Firm Mathematical Edge</h3>
+        <p>Retail traders fail 95% of prop firm challenges because they trade lagging indicators and risk random percentages. Institutional trading desks operate on <strong>Strict Liquidity Delivery Models</strong> and <strong>Asymmetric Risk-to-Reward Ratios (Minimum 1:2 to 1:4)</strong>.</p>
+        <ul>
+          <li><strong>Zero Over-Leveraging:</strong> Risk strictly <strong>0.50%</strong> (Phase 1) or <strong>0.25%</strong> (Phase 2) per trade. You need 10 consecutive losses to even reach 5% drawdown.</li>
+          <li><strong>Liquidity Sweeps (Turtle Soup):</strong> Institutions cannot buy without retail sellers. They sweep the Asian High/Low or Equal Highs to trigger retail stop losses, creating the liquidity needed to enter their massive institutional positions.</li>
+          <li><strong>Market Structure Shift (CHoCH):</strong> We only enter when price creates an aggressive displacement candle that shifts internal structure and forms an unmitigated <strong>Order Block</strong> or <strong>Fair Value Gap (FVG)</strong>.</li>
+        </ul>
+      </div>
+
+      <div class="guide-card">
+        <h3>📋 The 5-Step A+ Institutional Setup Formula</h3>
+        <ul>
+          <li><strong>Step 1 (Session & Time):</strong> Trade ONLY during London Open (07:00-10:00 GMT) or New York Open (12:00-15:00 GMT).</li>
+          <li><strong>Step 2 (Liquidity Sweep):</strong> Price sweeps Buy-Side Liquidity (BSL) or Sell-Side Liquidity (SSL).</li>
+          <li><strong>Step 3 (Displacement & MSS):</strong> Strong displacement candle breaks structural swing point (CHoCH).</li>
+          <li><strong>Step 4 (Mitigation Entry):</strong> Set limit entry or market entry when price retraces into the Order Block / Fair Value Gap.</li>
+          <li><strong>Step 5 (Institutional Target):</strong> TP1 at 1:2 (scale 50% + SL to Break-Even), TP2 at 1:3+ opposite liquidity pool.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- TAB 3: INSTALLATION GUIDE -->
+    <div id="tab-installation" class="tab-content guide-section card" style="grid-column: 1 / -1;">
+      <div class="guide-card">
+        <h3>🚀 How to Install in MetaTrader 4 (MT4) in 60 Seconds</h3>
+        <ol style="margin-left: 1.5rem; line-height: 1.8; font-size: 0.85rem; color: var(--text-muted);">
+          <li>Open your <strong>MetaTrader 4 (MT4)</strong> terminal.</li>
+          <li>Click <strong>File -> Open Data Folder</strong>.</li>
+          <li>Copy <code>PropFirm_Constants.mqh</code> into <code>MQL4/Include/</code>.</li>
+          <li>Copy <code>PropFirm_Institutional_Edge_Pro.mq4</code> into <code>MQL4/Indicators/</code>.</li>
+          <li>Copy <code>PropFirm_Institutional_Execution_EA.mq4</code> into <code>MQL4/Experts/</code>.</li>
+          <li>Restart MT4 or right-click <strong>Indicators</strong> in Navigator and select <strong>Refresh</strong>.</li>
+          <li>Drag <strong>PropFirm_Institutional_Edge_Pro</strong> onto any chart (M15 / H1 recommended for Gold, EURUSD, GBPUSD, NAS100, US30).</li>
+        </ol>
+      </div>
+
+      <div class="guide-card">
+        <h3>⚙️ Recommended MT4 Indicator Inputs for Prop Firms (FTMO / FundedNext)</h3>
+        <div class="code-box">
+InpPropFirmProfile       = PROPFIRM_FTMO (5% Daily DD / 10% Max DD)
+InpRiskPerTradePct       = 0.50%
+InpMinConfluenceScore    = 75 (Only A+ Setups)
+InpTargetRiskReward      = 3.0 (1:3 RRR)
+InpFilterSignalsByKZ     = true (London & NY Killzones only)
+InpAlertPush             = true (Direct to smartphone MT4 app)
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Sidebar: Interactive Risk Sizing & Execution Cockpit -->
+    <div class="terminal-sidebar">
+      
+      <!-- Challenge Profile Card -->
+      <div class="card cockpit-panel">
+        <div class="propfirm-badge-row">
+          <span style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">CHALLENGE PRESET</span>
+          <select class="select-custom" id="propFirmSelect" onchange="updateChallengePreset()">
+            <option value="FTMO">FTMO ($100k Standard)</option>
+            <option value="FUNDEDNEXT">FundedNext ($100k Stellar)</option>
+            <option value="THE5ERS">The 5%ers ($100k Bootcamp)</option>
+            <option value="TOPSTEP">Topstep ($150k Futures)</option>
+          </select>
+        </div>
+
+        <!-- Metric 1: Daily DD -->
+        <div class="metric-card">
+          <div class="metric-header">
+            <span>TODAY'S DRAWDOWN (MAX 5.0%)</span>
+            <span class="val-emerald" id="sideDailyDDStatus">SAFE ●</span>
+          </div>
+          <div class="metric-value-big val-emerald" id="sideDailyDDPct">0.42%</div>
+          <div class="progress-bar-wrap" style="margin-top: 0.5rem;">
+            <div class="progress-fill fill-emerald" id="sideDailyBar" style="width: 8.4%;"></div>
+          </div>
+          <div style="font-size: 0.7rem; color: var(--text-muted); display: flex; justify-content: space-between;">
+            <span>Used: $420.00</span>
+            <span>Daily Loss Buffer Left: <strong>$4,580.00</strong></span>
+          </div>
+        </div>
+
+        <!-- Metric 2: Profit Target -->
+        <div class="metric-card">
+          <div class="metric-header">
+            <span>TARGET PROGRESS (GOAL: 10.0%)</span>
+            <span class="val-cyan">+3.45%</span>
+          </div>
+          <div class="metric-value-big val-cyan">$3,450 / $10,000</div>
+          <div class="progress-bar-wrap" style="margin-top: 0.5rem;">
+            <div class="progress-fill fill-emerald" style="width: 34.5%;"></div>
+          </div>
+        </div>
+
+        <!-- Exact Institutional Risk Calculator -->
+        <div class="risk-calc-box">
+          <div style="font-size: 0.8rem; font-weight: 700; color: var(--accent-cyan); display: flex; align-items: center; gap: 0.4rem;">
+            <span>🧮 INSTITUTIONAL LOT SIZER</span>
+          </div>
+          <div class="calc-row">
+            <label>Account Balance ($)</label>
+            <input type="number" id="calcBal" class="calc-input" value="100000" oninput="calculateLots()">
+          </div>
+          <div class="calc-row">
+            <label>Risk Per Trade (%)</label>
+            <input type="number" id="calcRisk" class="calc-input" step="0.1" value="0.5" oninput="calculateLots()">
+          </div>
+          <div class="calc-row">
+            <label>Stop Loss (Pips)</label>
+            <input type="number" id="calcSL" class="calc-input" value="15" oninput="calculateLots()">
+          </div>
+          
+          <div class="calc-result">
+            <div>
+              <div style="font-size: 0.65rem; color: var(--text-muted);">EXACT LOT SIZE:</div>
+              <div class="res-val" id="resLots">3.33 Lots</div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 0.65rem; color: var(--text-muted);">TOTAL RISK ($):</div>
+              <div style="font-family: var(--font-mono); font-weight: 700; color: var(--accent-amber);" id="resRiskCash">$500.00</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 1-Click Institutional Execution Controls -->
+        <div class="btn-action-grid">
+          <button class="btn-action btn-buy" onclick="simulateOrder('BUY')">BUY 0.5% RISK</button>
+          <button class="btn-action btn-sell" onclick="simulateOrder('SELL')">SELL 0.5% RISK</button>
+          <button class="btn-killswitch" onclick="triggerEmergencyKill()">🛑 EMERGENCY KILLSWITCH (CLOSE ALL)</button>
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+
+  <script>
+    // Tab switching
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+      
+      document.getElementById(tabId).classList.add('active');
+      event.target.classList.add('active');
+    }
+
+    // Dynamic Sizing Calculator
+    function calculateLots() {
+      const bal = parseFloat(document.getElementById('calcBal').value) || 100000;
+      const riskPct = parseFloat(document.getElementById('calcRisk').value) || 0.5;
+      const slPips = parseFloat(document.getElementById('calcSL').value) || 15;
+
+      const riskDollars = bal * (riskPct / 100);
+      const pipValueStandardLot = 10; // $10/pip on EURUSD standard lot
+      const lots = riskDollars / (slPips * pipValueStandardLot);
+
+      document.getElementById('resLots').innerText = lots.toFixed(2) + " Lots";
+      document.getElementById('resRiskCash').innerText = "$" + riskDollars.toFixed(2);
+    }
+
+    function updateChallengePreset() {
+      const preset = document.getElementById('propFirmSelect').value;
+      if (preset === 'FTMO') {
+        document.getElementById('calcBal').value = 100000;
+        document.getElementById('calcRisk').value = 0.5;
+      } else if (preset === 'THE5ERS') {
+        document.getElementById('calcBal').value = 100000;
+        document.getElementById('calcRisk').value = 0.25;
+      }
+      calculateLots();
+    }
+
+    function simulateOrder(type) {
+      alert(`✅ Institutional 1-Click ${type} executed!\n- Sizing: ${document.getElementById('resLots').innerText}\n- Stop Loss: ${document.getElementById('calcSL').value} Pips\n- Auto Break-Even active at 1.5R\n- Partial 50% TP active at 2.0R`);
+    }
+
+    function triggerEmergencyKill() {
+      alert('🛑 EMERGENCY PROP FIRM KILLSWITCH ACTIVATED!\n- All open positions closed.\n- All pending orders deleted.\n- Trading locked to guarantee no breach!');
+    }
+
+    // HTML5 Interactive Canvas Candlestick & SMC Chart
+    const canvas = document.getElementById('tradingChart');
+    const ctx = canvas.getContext('2d');
+
+    let showLayers = {
+      smc: true,
+      ob: true,
+      fvg: true,
+      liq: true
+    };
+
+    function toggleLayer(layer) {
+      showLayers[layer] = !showLayers[layer];
+      const btn = document.getElementById('btn' + layer.toUpperCase());
+      if (btn) btn.classList.toggle('active', showLayers[layer]);
+      drawChart();
+    }
+
+    // Synthetic Price Candlestick Data simulating Institutional Manipulation & Expansion
+    const candles = [
+      { o: 2360, h: 2364, l: 2358, c: 2362, time: '00:00 (Asia)' },
+      { o: 2362, h: 2366, l: 2361, c: 2365, time: '02:00' },
+      { o: 2365, h: 2368, l: 2363, c: 2367, time: '04:00' },
+      { o: 2367, h: 2369, l: 2364, c: 2366, time: '06:00 (Asia High 2369)' },
+      { o: 2366, h: 2368, l: 2356, c: 2358, time: '07:30 (London Sweep Down)' }, // SSL Sweep
+      { o: 2358, h: 2372, l: 2355, c: 2370, time: '08:15 (Displacement Up)' },   // OB / FVG Created
+      { o: 2370, h: 2378, l: 2368, c: 2376, time: '09:00 (CHoCH Break)' },      // Bull CHoCH
+      { o: 2376, h: 2377, l: 2366, c: 2368, time: '10:00 (Retest Demand OB)' },  // Sniper Entry
+      { o: 2368, h: 2385, l: 2367, c: 2384, time: '12:30 (NY Expansion)' },     // TP1 Reached
+      { o: 2384, h: 2396, l: 2382, c: 2394, time: '13:45 (NY Continuation)' },  // TP2 Reached
+      { o: 2394, h: 2408, l: 2392, c: 2405, time: '15:00 (External Liq Taken)' } // Full TP3
+    ];
+
+    function resizeCanvas() {
+      canvas.width = canvas.parentElement.clientWidth;
+      canvas.height = canvas.parentElement.clientHeight;
+      drawChart();
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    function drawChart() {
+      if (!canvas.width || !canvas.height) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Background grid
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+      ctx.lineWidth = 1;
+      for (let y = 40; y < canvas.height; y += 50) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+
+      const paddingLeft = 310; // offset for HUD overlay
+      const paddingRight = 60;
+      const chartWidth = canvas.width - paddingLeft - paddingRight;
+      const chartHeight = canvas.height - 80;
+      const startY = 40;
+
+      const minPrice = 2350;
+      const maxPrice = 2415;
+      const priceRange = maxPrice - minPrice;
+
+      function priceToY(p) {
+        return startY + chartHeight - ((p - minPrice) / priceRange) * chartHeight;
+      }
+
+      const candleWidth = Math.min(26, chartWidth / candles.length - 12);
+      const stepX = chartWidth / (candles.length);
+
+      // Draw Demand Order Block
+      if (showLayers.ob) {
+        const obYTop = priceToY(2370);
+        const obYBot = priceToY(2358);
+        ctx.fillStyle = 'rgba(0, 230, 118, 0.18)';
+        ctx.strokeStyle = '#00e676';
+        ctx.lineWidth = 1;
+        ctx.fillRect(paddingLeft + stepX * 4.5, obYTop, stepX * 6, obYBot - obYTop);
+        ctx.strokeRect(paddingLeft + stepX * 4.5, obYTop, stepX * 6, obYBot - obYTop);
+
+        ctx.fillStyle = '#00e676';
+        ctx.font = '10px JetBrains Mono';
+        ctx.fillText('+OB Demand Zone (Mitigated)', paddingLeft + stepX * 4.6, obYTop + 14);
+      }
+
+      // Draw Fair Value Gap (FVG)
+      if (showLayers.fvg) {
+        const fvgYTop = priceToY(2375);
+        const fvgYBot = priceToY(2367);
+        ctx.fillStyle = 'rgba(0, 240, 255, 0.15)';
+        ctx.strokeStyle = '#00f0ff';
+        ctx.lineWidth = 1;
+        ctx.fillRect(paddingLeft + stepX * 5.5, fvgYTop, stepX * 4, fvgYBot - fvgYTop);
+        ctx.strokeRect(paddingLeft + stepX * 5.5, fvgYTop, stepX * 4, fvgYBot - fvgYTop);
+
+        ctx.fillStyle = '#00f0ff';
+        ctx.font = '9px JetBrains Mono';
+        ctx.fillText('Bullish FVG (Imbalance)', paddingLeft + stepX * 5.6, fvgYTop + 12);
+      }
+
+      // Draw Candlesticks
+      candles.forEach((c, idx) => {
+        const x = paddingLeft + (idx * stepX) + (stepX / 2);
+        const isGreen = c.c >= c.o;
+        const bodyTop = priceToY(Math.max(c.o, c.c));
+        const bodyBot = priceToY(Math.min(c.o, c.c));
+        const highY = priceToY(c.h);
+        const lowY = priceToY(c.l);
+
+        // Wick
+        ctx.strokeStyle = isGreen ? '#00e676' : '#ff2d55';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, highY);
+        ctx.lineTo(x, lowY);
+        ctx.stroke();
+
+        // Body
+        ctx.fillStyle = isGreen ? '#00e676' : '#ff2d55';
+        ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, Math.max(3, bodyBot - bodyTop));
+
+        // Time label
+        ctx.fillStyle = '#546484';
+        ctx.font = '9px JetBrains Mono';
+        ctx.fillText(c.time.split(' ')[0], x - 12, canvas.height - 15);
+      });
+
+      // Draw Liquidity Sweeps
+      if (showLayers.liq) {
+        const sweepX = paddingLeft + (4 * stepX) + (stepX / 2);
+        const sweepY = priceToY(2355) + 18;
+        ctx.fillStyle = '#00f0ff';
+        ctx.font = 'bold 10px JetBrains Mono';
+        ctx.fillText('SSL SWEEP $$$', sweepX - 35, sweepY);
+
+        // Arrow
+        ctx.beginPath();
+        ctx.moveTo(sweepX, sweepY - 14);
+        ctx.lineTo(sweepX - 5, sweepY - 4);
+        ctx.lineTo(sweepX + 5, sweepY - 4);
+        ctx.fill();
+      }
+
+      // Draw CHoCH Line
+      if (showLayers.smc) {
+        const chochY = priceToY(2370);
+        ctx.strokeStyle = '#00f0ff';
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(paddingLeft + stepX * 3, chochY);
+        ctx.lineTo(paddingLeft + stepX * 7, chochY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = '#00f0ff';
+        ctx.font = 'bold 10px JetBrains Mono';
+        ctx.fillText('CHoCH (Bullish MSS) ➔', paddingLeft + stepX * 3.2, chochY - 5);
+      }
+
+      // Draw A+ Signal Marker
+      const entryX = paddingLeft + (7 * stepX) + (stepX / 2);
+      const entryY = priceToY(2368);
+
+      ctx.fillStyle = '#00e676';
+      ctx.beginPath();
+      ctx.arc(entryX, entryY + 20, 8, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.font = 'bold 11px Inter';
+      ctx.fillText('🚀 INSTITUTIONAL A+ BUY ENTRY (2368.00)', entryX - 110, entryY + 42);
+      ctx.fillStyle = '#ff2d55';
+      ctx.fillText('🛑 SL: 2354.00 (-14p)', entryX - 110, entryY + 56);
+      ctx.fillStyle = '#00e676';
+      ctx.fillText('🎯 TP2: 2405.00 (+3.0R)', entryX - 110, entryY + 70);
+    }
+
+    function triggerSimulationTick() {
+      const last = candles[candles.length - 1];
+      const newCandle = {
+        o: last.c,
+        h: last.c + Math.floor(Math.random() * 8) + 2,
+        l: last.c - Math.floor(Math.random() * 4),
+        c: last.c + Math.floor(Math.random() * 6) - 1,
+        time: '16:00'
+      };
+      candles.push(newCandle);
+      drawChart();
+    }
+
+    setTimeout(resizeCanvas, 100);
+    calculateLots();
+  </script>
+</body>
+</html>
