@@ -3,11 +3,11 @@
 //|                     Institutional Prop Firm & Hedge Fund Strategy |
 //|                 Smart Money Concepts (SMC) + Drawdown Engine Pro |
 //|                                   Copyright 2026, Institutional  |
-//|                     100% Standalone - Ultra-Stable Non-Disappearing|
+//|                     100% Rock-Solid HUD & Non-Disappearing Engine|
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Institutional Edge Systems"
 #property link      "https://github.com/ismailchaacha97-ui/kkk"
-#property version   "3.60"
+#property version   "3.70"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 6
@@ -58,9 +58,9 @@ enum ENUM_PROPFIRM_PROFILE
 enum ENUM_HUD_THEME
 {
    THEME_DARK_INSTITUTIONAL, // Sleek Obsidian & Cyan/Emerald
-   THEME_BLOOMBERG_TERMINAL, // Amber & Slate Dark
+   THEME_BLOOMBERG_TERMINAL, // Amber & Dark Slate
    THEME_CYBER_MATRIX,       // Neon Cyan & Hot Magenta
-   THEME_CLEAN_LIGHT         // Crisp Light Grey & Royal Blue
+   THEME_CLEAN_LIGHT         // Crisp White & Royal Blue
 };
 
 enum ENUM_OB_DISPLAY
@@ -151,9 +151,9 @@ input string               InpHeaderOB              = "=== INSTITUTIONAL ORDER B
 input bool                 InpShowOrderBlocks       = true;          // Show Institutional Order Blocks
 input ENUM_OB_DISPLAY      InpOBDisplayMode         = OB_DISPLAY_ALL;// Order Block Display Mode
 input int                  InpMaxOrderBlocks        = 8;             // Max Active Order Blocks on Chart
-input color                InpColorBullishOB        = C'15,75,50';   // Bullish Demand OB
-input color                InpColorBearishOB        = C'85,25,35';   // Bearish Supply OB
-input color                InpColorMitigatedOB      = C'40,45,55';   // Faded Mitigated OB Color
+input color                InpColorBullishOB        = clrDarkGreen;  // Bullish Demand OB
+input color                InpColorBearishOB        = clrMaroon;     // Bearish Supply OB
+input color                InpColorMitigatedOB      = clrDarkSlateGray;// Faded Mitigated OB Color
 
 //--- 3. FAIR VALUE GAPS (FVG / IMBALANCE)
 input string               InpHeaderFVG             = "=== FAIR VALUE GAPS (IMBALANCE) ===";
@@ -161,8 +161,8 @@ input bool                 InpShowFVG               = true;          // Show Fai
 input double               InpMinFVGPips            = 1.5;           // Minimum FVG Size (Pips)
 input int                  InpMaxFVGToDraw          = 8;             // Max Active FVGs
 input bool                 InpShowFVG_CE            = true;          // Show 50% Consequent Encroachment Line
-input color                InpColorBullishFVG       = C'10,65,85';   // Bullish FVG Color
-input color                InpColorBearishFVG       = C'85,45,20';   // Bearish FVG Color
+input color                InpColorBullishFVG       = clrTeal;       // Bullish FVG Color
+input color                InpColorBearishFVG       = clrBrown;      // Bearish FVG Color
 
 //--- 4. LIQUIDITY POOLS & STOP HUNTS
 input string               InpHeaderLiquidity       = "=== LIQUIDITY POOLS & STOP HUNTS ===";
@@ -198,8 +198,9 @@ input double               InpMaxDailyDrawdownPct   = 5.0;           // Max Dail
 input double               InpMaxOverallDrawdownPct = 10.0;          // Max Overall Drawdown % (10%)
 input double               InpProfitTargetPct       = 10.0;          // Target % (10%)
 input ENUM_HUD_THEME       InpDashboardTheme        = THEME_DARK_INSTITUTIONAL;
-input int                  InpDashboardX            = 20;
-input int                  InpDashboardY            = 30;
+input ENUM_BASE_CORNER     InpDashboardCorner       = CORNER_LEFT_UPPER; // Dashboard Corner
+input int                  InpDashboardX            = 20;            // X Offset (Pixels)
+input int                  InpDashboardY            = 35;            // Y Offset (Pixels)
 
 //--- 8. ALERTS & NOTIFICATIONS
 input string               InpHeaderAlerts          = "=== INSTITUTIONAL ALERTS ===";
@@ -219,8 +220,9 @@ double BufferBearSweep[];
 double BufferCHoCHBull[];
 double BufferCHoCHBear[];
 
-// Prefix for chart graphical objects
+// Prefixes for chart objects
 const string PREFIX = "PFE_";
+const string HUD_PREFIX = "PFE_HUD_";
 
 // Dynamic storage arrays
 SwingPoint    g_swings[];
@@ -255,6 +257,7 @@ void InitializeDailyDrawdownState();
 void UpdateDailyDrawdownAnchor();
 double CalculateDayStartEquity();
 void CleanAllIndicatorObjects();
+void CleanHUDObjects();
 void RegisterSwingPoint(datetime t, double price, int barIdx, int type);
 void CheckStructureBreaks(int currentBar, const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[]);
 bool IsBearishTrendPrior(int swingIdx);
@@ -282,7 +285,6 @@ string PeriodToStr();
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // Determine pip multiplier
    if(Digits == 3 || Digits == 5)
    {
       g_pipValue = Point * 10;
@@ -294,7 +296,6 @@ int OnInit()
       g_pointFactor = 1;
    }
 
-   // Initialize Indicator Buffers
    SetIndexBuffer(0, BufferBuySignal);
    SetIndexBuffer(1, BufferSellSignal);
    SetIndexBuffer(2, BufferBullSweep);
@@ -302,7 +303,6 @@ int OnInit()
    SetIndexBuffer(4, BufferCHoCHBull);
    SetIndexBuffer(5, BufferCHoCHBear);
 
-   // CRITICAL: Set all buffers as series to match MT4 Timeseries indexing (0 = latest candle)
    ArraySetAsSeries(BufferBuySignal, true);
    ArraySetAsSeries(BufferSellSignal, true);
    ArraySetAsSeries(BufferBullSweep, true);
@@ -310,7 +310,6 @@ int OnInit()
    ArraySetAsSeries(BufferCHoCHBull, true);
    ArraySetAsSeries(BufferCHoCHBear, true);
 
-   // Set Empty Values
    SetIndexEmptyValue(0, 0.0);
    SetIndexEmptyValue(1, 0.0);
    SetIndexEmptyValue(2, 0.0);
@@ -318,29 +317,33 @@ int OnInit()
    SetIndexEmptyValue(4, 0.0);
    SetIndexEmptyValue(5, 0.0);
 
-   // Styling
    SetIndexStyle(0, DRAW_ARROW, EMPTY, 2, clrLimeGreen);
-   SetIndexArrow(0, 233); // Up Arrow
+   SetIndexArrow(0, 233);
    SetIndexStyle(1, DRAW_ARROW, EMPTY, 2, clrDeepPink);
-   SetIndexArrow(1, 234); // Down Arrow
+   SetIndexArrow(1, 234);
 
    SetIndexStyle(2, DRAW_ARROW, EMPTY, 1, clrCyan);
-   SetIndexArrow(2, 217); // Bullish Sweep Diamond
+   SetIndexArrow(2, 217);
    SetIndexStyle(3, DRAW_ARROW, EMPTY, 1, clrMagenta);
-   SetIndexArrow(3, 218); // Bearish Sweep Diamond
+   SetIndexArrow(3, 218);
 
    SetIndexStyle(4, DRAW_ARROW, EMPTY, 1, clrMediumSpringGreen);
-   SetIndexArrow(4, 159); // Bullish CHoCH Dot
+   SetIndexArrow(4, 159);
    SetIndexStyle(5, DRAW_ARROW, EMPTY, 1, clrTomato);
-   SetIndexArrow(5, 159); // Bearish CHoCH Dot
+   SetIndexArrow(5, 159);
 
    IndicatorDigits(Digits);
    IndicatorShortName("PropFirm Institutional Edge Pro");
 
    g_dashboardVisible = InpShowDashboard;
 
-   // Initialize Day Start Equity
    InitializeDailyDrawdownState();
+
+   // IMMEDIATELY DRAW HUD ON INIT SO IT NEVER STARTS INVISIBLE
+   if(g_dashboardVisible)
+   {
+      RenderPropFirmHUD();
+   }
 
    return(INIT_SUCCEEDED);
 }
@@ -350,25 +353,32 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   // Clean up all graphical objects created by this indicator
    ObjectsDeleteAll(0, PREFIX);
    Comment("");
 }
 
 //+------------------------------------------------------------------+
-//| Chart Event Handler (Hotkeys)                                    |
+//| Chart Event Handler (Window Resize, Redraw, Hotkeys)             |
 //+------------------------------------------------------------------+
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
-   if(id == CHARTEVENT_KEYDOWN)
+   if(id == CHARTEVENT_CHART_CHANGE)
    {
-      // Press 'D' to toggle Dashboard HUD
-      if(lparam == 'D' || lparam == 'd')
+      // Redraw HUD whenever user resizes window, scrolls or zooms
+      if(g_dashboardVisible)
+      {
+         RenderPropFirmHUD();
+      }
+   }
+   else if(id == CHARTEVENT_KEYDOWN)
+   {
+      // Press 'D' (keyCode 68 or 'd') to toggle Dashboard HUD
+      if(lparam == 68 || lparam == 'D' || lparam == 'd')
       {
          g_dashboardVisible = !g_dashboardVisible;
          if(!g_dashboardVisible)
          {
-            ObjectsDeleteAll(0, PREFIX + "HUD_");
+            CleanHUDObjects();
          }
          else
          {
@@ -395,20 +405,15 @@ int OnCalculate(const int rates_total,
 {
    if(rates_total < InpSwingLookback * 3 + 10) return(0);
 
-   // Update daily drawdown anchor at start of day
    UpdateDailyDrawdownAnchor();
 
-   // Determine calculation range
    int limit;
    if(prev_calculated == 0)
    {
-      // Full recalculation on load/timeframe change
-      CleanAllIndicatorObjects();
       limit = MathMin(rates_total - InpSwingLookback * 2 - 2, InpMaxHistoryBars);
    }
    else
    {
-      // Incremental calculation on live ticks
       limit = rates_total - prev_calculated + 5;
       if(limit > InpMaxHistoryBars) limit = InpMaxHistoryBars;
    }
@@ -432,7 +437,7 @@ int OnCalculate(const int rates_total,
       EvaluateInstitutionalSignals(time, open, high, low, close, tick_volume, rates_total);
    }
 
-   // 6. Render Prop Firm Dashboard HUD
+   // 6. Render Prop Firm Dashboard HUD on every tick
    if(g_dashboardVisible)
    {
       RenderPropFirmHUD();
@@ -510,7 +515,7 @@ double CalculateDayStartEquity()
 }
 
 //+------------------------------------------------------------------+
-//| Clean indicator-specific objects                                 |
+//| Clean all indicator objects                                      |
 //+------------------------------------------------------------------+
 void CleanAllIndicatorObjects()
 {
@@ -521,6 +526,14 @@ void CleanAllIndicatorObjects()
    g_totalSwings = 0;
    g_totalOBs = 0;
    g_totalFVGs = 0;
+}
+
+//+------------------------------------------------------------------+
+//| Clean HUD objects only                                           |
+//+------------------------------------------------------------------+
+void CleanHUDObjects()
+{
+   ObjectsDeleteAll(0, HUD_PREFIX);
 }
 
 //+------------------------------------------------------------------+
@@ -536,7 +549,6 @@ void ScanMarketStructure(const int rates_total, const int limit,
 
    for(int i = startBar; i >= 1; i--)
    {
-      // Check Swing High
       bool isSwingHigh = true;
       for(int k = 1; k <= lookback; k++)
       {
@@ -547,7 +559,6 @@ void ScanMarketStructure(const int rates_total, const int limit,
          }
       }
 
-      // Check Swing Low
       bool isSwingLow = true;
       for(int k = 1; k <= lookback; k++)
       {
@@ -567,7 +578,6 @@ void ScanMarketStructure(const int rates_total, const int limit,
          RegisterSwingPoint(time[i], low[i], i, -1);
       }
 
-      // Structure Break Analysis (BOS / CHoCH)
       CheckStructureBreaks(i, time, open, high, low, close);
    }
 }
@@ -592,7 +602,6 @@ void RegisterSwingPoint(datetime t, double price, int barIdx, int type)
    g_swings[g_totalSwings].label = (type == 1) ? "SH" : "SL";
    g_totalSwings++;
 
-   // Draw swing marker
    if(InpShowStructure)
    {
       string name = PREFIX + "SWING_" + TimeToString(t) + "_" + IntegerToString(type);
@@ -604,6 +613,7 @@ void RegisterSwingPoint(datetime t, double price, int barIdx, int type)
          ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 7);
          ObjectSetInteger(0, name, OBJPROP_COLOR, clrDimGray);
          ObjectSetInteger(0, name, OBJPROP_ANCHOR, (type == 1) ? ANCHOR_LOWER : ANCHOR_UPPER);
+         ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
       }
    }
 }
@@ -621,7 +631,6 @@ void CheckStructureBreaks(int currentBar, const datetime &time[], const double &
       if(g_swings[s].isBroken) continue;
       if(time[currentBar] <= g_swings[s].time) continue;
 
-      // Bullish Break above Swing High
       if(g_swings[s].type == 1 && close[currentBar] > g_swings[s].price && close[currentBar + 1] <= g_swings[s].price)
       {
          g_swings[s].isBroken = true;
@@ -643,7 +652,6 @@ void CheckStructureBreaks(int currentBar, const datetime &time[], const double &
          }
       }
 
-      // Bearish Break below Swing Low
       if(g_swings[s].type == -1 && close[currentBar] < g_swings[s].price && close[currentBar + 1] >= g_swings[s].price)
       {
          g_swings[s].isBroken = true;
@@ -668,7 +676,7 @@ void CheckStructureBreaks(int currentBar, const datetime &time[], const double &
 }
 
 //+------------------------------------------------------------------+
-//| Check if trend prior to swing was Bearish (for CHoCH determination)
+//| Check if trend prior to swing was Bearish                        |
 //+------------------------------------------------------------------+
 bool IsBearishTrendPrior(int swingIdx)
 {
@@ -693,7 +701,7 @@ bool IsBearishTrendPrior(int swingIdx)
 }
 
 //+------------------------------------------------------------------+
-//| Check if trend prior to swing was Bullish (for CHoCH determination)
+//| Check if trend prior to swing was Bullish                        |
 //+------------------------------------------------------------------+
 bool IsBullishTrendPrior(int swingIdx)
 {
@@ -733,6 +741,7 @@ void DrawStructureLine(datetime t1, double p1, datetime t2, double p2, string la
       ObjectSetInteger(0, lineName, OBJPROP_WIDTH, width);
       ObjectSetInteger(0, lineName, OBJPROP_RAY, false);
       ObjectSetInteger(0, lineName, OBJPROP_BACK, true);
+      ObjectSetInteger(0, lineName, OBJPROP_SELECTABLE, false);
 
       datetime midTime = t1 + (t2 - t1) / 2;
       ObjectCreate(0, textName, OBJ_TEXT, 0, midTime, p1);
@@ -740,6 +749,7 @@ void DrawStructureLine(datetime t1, double p1, datetime t2, double p2, string la
       ObjectSetString(0, textName, OBJPROP_FONT, "Segoe UI Bold");
       ObjectSetInteger(0, textName, OBJPROP_FONTSIZE, 8);
       ObjectSetInteger(0, textName, OBJPROP_COLOR, clr);
+      ObjectSetInteger(0, textName, OBJPROP_SELECTABLE, false);
    }
    else
    {
@@ -826,7 +836,6 @@ void UpdateOrderBlocksMitigation(const datetime &time[], const double &high[], c
    {
       int bar = iBarShift(NULL, 0, g_orderBlocks[i].time);
       
-      // Check mitigation if not already mitigated
       if(!g_orderBlocks[i].isMitigated)
       {
          for(int b = bar - 1; b >= 0; b--)
@@ -858,14 +867,12 @@ void UpdateOrderBlocksMitigation(const datetime &time[], const double &high[], c
          }
          else
          {
-            // Keep mitigated OB faded so trader sees past institutional reaction
             ObjectSetInteger(0, name, OBJPROP_COLOR, InpColorMitigatedOB);
             ObjectSetInteger(0, name, OBJPROP_TIME2, (g_orderBlocks[i].mitigationTime > 0) ? g_orderBlocks[i].mitigationTime : extendTime);
          }
       }
       else
       {
-         // Active unmitigated OB: CONTINUOUSLY EXTEND FORWARD SO IT NEVER DISAPPEARS!
          if(ObjectFind(0, name) >= 0)
          {
             ObjectSetInteger(0, name, OBJPROP_TIME2, extendTime);
@@ -923,7 +930,6 @@ void ScanFairValueGaps(const int rates_total, const int limit,
 
    for(int i = start; i >= 2; i--)
    {
-      // Bullish FVG: Low of candle [i] > High of candle [i+2]
       if(low[i] > high[i + 2] + minGap)
       {
          double top = low[i];
@@ -931,7 +937,6 @@ void ScanFairValueGaps(const int rates_total, const int limit,
          RegisterFVG(time[i + 1], top, bot, 1);
       }
 
-      // Bearish FVG: High of candle [i] < Low of candle [i+2]
       if(high[i] < low[i + 2] - minGap)
       {
          double top = low[i + 2];
@@ -1008,7 +1013,6 @@ void UpdateFVGMitigation(const datetime &time[], const double &high[], const dou
       }
       else
       {
-         // Active FVG: Extend forward
          if(ObjectFind(0, name) >= 0)
          {
             ObjectSetInteger(0, name, OBJPROP_TIME2, extendTime);
@@ -1077,7 +1081,6 @@ void ScanLiquiditySweeps(const int rates_total, const int limit,
       double upperWick = high[i] - MathMax(open[i], close[i]);
       double lowerWick = MathMin(open[i], close[i]) - low[i];
 
-      // Buy-Side Liquidity (BSL) Sweep
       if((upperWick / candleRange) >= (InpSweepWickPercent / 100.0))
       {
          for(int s = g_totalSwings - 1; s >= MathMax(0, g_totalSwings - 8); s--)
@@ -1096,7 +1099,6 @@ void ScanLiquiditySweeps(const int rates_total, const int limit,
          }
       }
 
-      // Sell-Side Liquidity (SSL) Sweep
       if((lowerWick / candleRange) >= (InpSweepWickPercent / 100.0))
       {
          for(int s = g_totalSwings - 1; s >= MathMax(0, g_totalSwings - 8); s--)
@@ -1156,7 +1158,7 @@ void ScanEqualHighsAndLows(const datetime &time[])
                string name = PREFIX + "EQH_" + TimeToString(g_swings[j].time);
                if(ObjectFind(0, name) < 0)
                {
-                  ObjectCreate(0, name, OBJ_TREND, 0, g_swings[j].time, g_swings[j].price, g_swings[i].time + (PeriodSeconds() * 15), g_swings[i].price);
+                  ObjectCreate(0, name, OBJ_TREND, 0, g_swings[j].time, g_swings[j].price, g_swings[i].time + (PeriodSeconds() * 15), g_swings[j].price);
                   ObjectSetInteger(0, name, OBJPROP_COLOR, InpColorLiquidity);
                   ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DASH);
                   ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
@@ -1180,7 +1182,7 @@ void ScanEqualHighsAndLows(const datetime &time[])
                string name = PREFIX + "EQL_" + TimeToString(g_swings[j].time);
                if(ObjectFind(0, name) < 0)
                {
-                  ObjectCreate(0, name, OBJ_TREND, 0, g_swings[j].time, g_swings[j].price, g_swings[i].time + (PeriodSeconds() * 15), g_swings[i].price);
+                  ObjectCreate(0, name, OBJ_TREND, 0, g_swings[j].time, g_swings[j].price, g_swings[i].time + (PeriodSeconds() * 15), g_swings[j].price);
                   ObjectSetInteger(0, name, OBJPROP_COLOR, InpColorLiquidity);
                   ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_DASH);
                   ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
@@ -1286,7 +1288,6 @@ void EvaluateInstitutionalSignals(const datetime &time[], const double &open[],
    string bullReasons = "";
    string bearReasons = "";
 
-   // Factor 1: Liquidity Sweep (+25 pts)
    bool recentSSL = false;
    bool recentBSL = false;
    for(int k = 1; k <= 5; k++)
@@ -1297,7 +1298,6 @@ void EvaluateInstitutionalSignals(const datetime &time[], const double &open[],
    if(recentSSL) { bullScore += 25; bullReasons += "[SSL Swept +25] "; }
    if(recentBSL) { bearScore += 25; bearReasons += "[BSL Swept +25] "; }
 
-   // Factor 2: CHoCH (+25 pts)
    bool recentBullCHoCH = false;
    bool recentBearCHoCH = false;
    for(int k = 1; k <= 8; k++)
@@ -1308,7 +1308,6 @@ void EvaluateInstitutionalSignals(const datetime &time[], const double &open[],
    if(recentBullCHoCH) { bullScore += 25; bullReasons += "[Bull CHoCH +25] "; }
    if(recentBearCHoCH) { bearScore += 25; bearReasons += "[Bear CHoCH +25] "; }
 
-   // Factor 3: OB Retest (+20 pts)
    bool atBullishOB = false;
    bool atBearishOB = false;
    for(int ob = 0; ob < g_totalOBs; ob++)
@@ -1330,14 +1329,12 @@ void EvaluateInstitutionalSignals(const datetime &time[], const double &open[],
    if(atBullishOB) { bullScore += 20; bullReasons += "[Demand OB Tap +20] "; }
    if(atBearishOB) { bearScore += 20; bearReasons += "[Supply OB Tap +20] "; }
 
-   // Factor 4: Kill Zone (+15 pts)
    if(IsInInstitutionalKillzone())
    {
       bullScore += 15; bullReasons += "[KZ Active +15] ";
       bearScore += 15; bearReasons += "[KZ Active +15] ";
    }
 
-   // Factor 5: EMA Alignment (+15 pts)
    double fastEMA = iMA(NULL, 0, 20, 0, MODE_EMA, PRICE_CLOSE, bar);
    double slowEMA = iMA(NULL, 0, 50, 0, MODE_EMA, PRICE_CLOSE, bar);
    if(close[bar] > fastEMA && fastEMA > slowEMA)
@@ -1351,7 +1348,6 @@ void EvaluateInstitutionalSignals(const datetime &time[], const double &open[],
 
    double entryPrice = close[bar];
 
-   // BULLISH SIGNAL
    if(bullScore >= InpMinConfluenceScore && bullScore > bearScore)
    {
       g_lastSignalBar = time[bar];
@@ -1376,7 +1372,6 @@ void EvaluateInstitutionalSignals(const datetime &time[], const double &open[],
       EmitSignalAlert(1, bullScore, entryPrice, slPrice, tp1Price, tp2Price, recommendedLots, bullReasons);
    }
 
-   // BEARISH SIGNAL
    if(bearScore >= InpMinConfluenceScore && bearScore > bullScore)
    {
       g_lastSignalBar = time[bar];
@@ -1439,7 +1434,6 @@ void DrawTradeSignalVisuals(datetime t, double entry, double sl, double tp1, dou
    string prefix = PREFIX + "SIG_" + TimeToString(t) + "_";
    datetime expTime = t + (PeriodSeconds() * 30);
 
-   // Entry line
    ObjectDelete(0, prefix + "ENTRY");
    ObjectCreate(0, prefix + "ENTRY", OBJ_TREND, 0, t, entry, expTime, entry);
    ObjectSetInteger(0, prefix + "ENTRY", OBJPROP_COLOR, clrWhite);
@@ -1448,7 +1442,6 @@ void DrawTradeSignalVisuals(datetime t, double entry, double sl, double tp1, dou
    ObjectSetInteger(0, prefix + "ENTRY", OBJPROP_RAY, false);
    ObjectSetInteger(0, prefix + "ENTRY", OBJPROP_SELECTABLE, false);
 
-   // SL line
    ObjectDelete(0, prefix + "SL");
    ObjectCreate(0, prefix + "SL", OBJ_TREND, 0, t, sl, expTime, sl);
    ObjectSetInteger(0, prefix + "SL", OBJPROP_COLOR, clrRed);
@@ -1457,7 +1450,6 @@ void DrawTradeSignalVisuals(datetime t, double entry, double sl, double tp1, dou
    ObjectSetInteger(0, prefix + "SL", OBJPROP_RAY, false);
    ObjectSetInteger(0, prefix + "SL", OBJPROP_SELECTABLE, false);
 
-   // TP2 line
    ObjectDelete(0, prefix + "TP");
    ObjectCreate(0, prefix + "TP", OBJ_TREND, 0, t, tp2, expTime, tp2);
    ObjectSetInteger(0, prefix + "TP", OBJPROP_COLOR, clrLime);
@@ -1466,7 +1458,6 @@ void DrawTradeSignalVisuals(datetime t, double entry, double sl, double tp1, dou
    ObjectSetInteger(0, prefix + "TP", OBJPROP_RAY, false);
    ObjectSetInteger(0, prefix + "TP", OBJPROP_SELECTABLE, false);
 
-   // Text Tag
    string txt = (dir == 1) ? "🚀 BUY (A+ " : "🔻 SELL (A+ ";
    txt += DoubleToString(score, 0) + "%) | SL: " + DoubleToString(sl, Digits) + " | TP: " + DoubleToString(tp2, Digits);
    ObjectDelete(0, prefix + "TAG");
@@ -1551,30 +1542,40 @@ void RenderPropFirmHUD()
       SendNotification(warn);
    }
 
-   color bgBox = C'15,20,28';
-   color borderBox = C'40,55,75';
+   color bgBox = clrBlack;
+   color borderBox = clrDarkSlateGray;
    color textPrimary = clrWhite;
-   color textSecondary = clrLightSteelBlue;
-   color colGreen = C'0,230,120';
-   color colRed = C'255,75,90';
-   color colOrange = C'255,170,0';
-   color colCyan = C'0,220,255';
+   color textSecondary = clrLightGray;
+   color colGreen = clrLime;
+   color colRed = clrRed;
+   color colOrange = clrOrange;
+   color colCyan = clrCyan;
 
    if(InpDashboardTheme == THEME_BLOOMBERG_TERMINAL)
    {
-      bgBox = C'18,18,18';
-      borderBox = C'200,130,0';
+      bgBox = clrBlack;
+      borderBox = clrGoldenrod;
       textPrimary = clrGold;
       textSecondary = clrOrange;
       colCyan = clrYellow;
    }
    else if(InpDashboardTheme == THEME_CYBER_MATRIX)
    {
-      bgBox = C'10,12,20';
+      bgBox = clrBlack;
       borderBox = clrDarkViolet;
       textPrimary = clrAqua;
       textSecondary = clrMagenta;
       colCyan = clrMagenta;
+   }
+   else if(InpDashboardTheme == THEME_CLEAN_LIGHT)
+   {
+      bgBox = clrWhite;
+      borderBox = clrSteelBlue;
+      textPrimary = clrBlack;
+      textSecondary = clrDarkSlateGray;
+      colGreen = clrForestGreen;
+      colRed = clrCrimson;
+      colCyan = clrNavy;
    }
 
    int x = InpDashboardX;
@@ -1582,6 +1583,7 @@ void RenderPropFirmHUD()
    int width = 310;
    int height = 295;
 
+   // Draw HUD Background Container
    CreateHUDPanel("BG", x, y, width, height, bgBox, borderBox);
 
    string propFirmName = "FTMO";
@@ -1646,7 +1648,7 @@ void RenderPropFirmHUD()
       statusColor = colRed;
    }
 
-   CreateHUDPanel("STATUS_BG", x + 10, y + 250, width - 20, 30, C'25,32,45', borderBox);
+   CreateHUDPanel("STATUS_BG", x + 10, y + 250, width - 20, 30, clrNavy, borderBox);
    CreateHUDLabel("STATUS_TXT", x + 18, y + 258, statusText, "Segoe UI Bold", 8, statusColor);
 }
 
@@ -1655,15 +1657,16 @@ void RenderPropFirmHUD()
 //+------------------------------------------------------------------+
 void CreateHUDLabel(string subName, int x, int y, string text, string font, int fontSize, color clr)
 {
-   string name = PREFIX + "HUD_" + subName;
+   string name = HUD_PREFIX + subName;
    if(ObjectFind(0, name) < 0)
    {
       ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, name, OBJPROP_CORNER, InpDashboardCorner);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
-      ObjectSetInteger(0, name, OBJPROP_BACK, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, false); // CRITICAL: NEVER HIDE
+      ObjectSetInteger(0, name, OBJPROP_BACK, false);   // Always on top
    }
+   ObjectSetInteger(0, name, OBJPROP_CORNER, InpDashboardCorner);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
    ObjectSetString(0, name, OBJPROP_TEXT, text);
@@ -1677,15 +1680,16 @@ void CreateHUDLabel(string subName, int x, int y, string text, string font, int 
 //+------------------------------------------------------------------+
 void CreateHUDPanel(string subName, int x, int y, int w, int h, color bgColor, color borderColor)
 {
-   string name = PREFIX + "HUD_PNL_" + subName;
+   string name = HUD_PREFIX + "PNL_" + subName;
    if(ObjectFind(0, name) < 0)
    {
       ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, name, OBJPROP_CORNER, InpDashboardCorner);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
-      ObjectSetInteger(0, name, OBJPROP_BACK, true);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, false); // CRITICAL: NEVER HIDE
+      ObjectSetInteger(0, name, OBJPROP_BACK, false);
    }
+   ObjectSetInteger(0, name, OBJPROP_CORNER, InpDashboardCorner);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
    ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
