@@ -3,6 +3,7 @@
 //|                     Institutional Prop Firm & Hedge Fund Strategy |
 //|                 Smart Money Concepts (SMC) + Drawdown Engine Pro |
 //|                                   Copyright 2026, Institutional  |
+//|                                    100% Standalone - Zero Include|
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Institutional Edge Systems"
 #property link      "https://github.com/ismailchaacha97-ui/kkk"
@@ -41,7 +42,145 @@
 #property indicator_width6  1
 #property indicator_label6  "Bearish Structure Shift (CHoCH)"
 
-#include <PropFirm_Constants.mqh>
+//+------------------------------------------------------------------+
+//| ENUMS & STRUCTURE DEFINITIONS (SELF-CONTAINED)                   |
+//+------------------------------------------------------------------+
+//--- Prop Firm Challenge Rule Profiles
+enum ENUM_PROPFIRM_PROFILE
+{
+   PROPFIRM_FTMO,          // FTMO (5% Daily DD, 10% Max DD, 10% Target)
+   PROPFIRM_FUNDEDNEXT,    // FundedNext (5% Daily DD, 10% Max DD, 8% Target)
+   PROPFIRM_THE5ERS,       // The 5%ers (4% Daily DD, 8% Max DD, 8% Target)
+   PROPFIRM_TOPSTEP,       // Topstep (Daily Loss Limit, Max Loss Limit)
+   PROPFIRM_ALPHA_CAPITAL, // Alpha Capital (5% Daily DD, 10% Max DD)
+   PROPFIRM_CUSTOM         // Custom User Defined Rules
+};
+
+//--- Market Structure Types
+enum ENUM_STRUCTURE_TYPE
+{
+   STRUCT_NONE,
+   STRUCT_BOS_BULL,        // Bullish Break of Structure (Continuation)
+   STRUCT_BOS_BEAR,        // Bearish Break of Structure (Continuation)
+   STRUCT_CHOCH_BULL,      // Bullish Change of Character / MSS (Reversal)
+   STRUCT_CHOCH_BEAR       // Bearish Change of Character / MSS (Reversal)
+};
+
+//--- Liquidity Pool Types
+enum ENUM_LIQUIDITY_TYPE
+{
+   LIQ_NONE,
+   LIQ_BSL_SWEEP,          // Buy-Side Liquidity Sweep (Turtle Soup Bearish Reversal)
+   LIQ_SSL_SWEEP,          // Sell-Side Liquidity Sweep (Turtle Soup Bullish Reversal)
+   LIQ_EQH,                // Equal Highs (Untapped Buy-Side Pool)
+   LIQ_EQL,                // Equal Lows (Untapped Sell-Side Pool)
+   LIQ_SESSION_HIGH_SWEEP, // Asian/London High Sweep
+   LIQ_SESSION_LOW_SWEEP   // Asian/London Low Sweep
+};
+
+//--- Signal Quality Rating
+enum ENUM_SIGNAL_GRADE
+{
+   GRADE_NONE,
+   GRADE_C,                // < 65% Confluence (Filtered Retail Noise)
+   GRADE_B,                // 65% - 79% Confluence (Standard Setup)
+   GRADE_A_PLUS            // 80% - 100% Confluence (Institutional A+ High Prob)
+};
+
+//--- Dashboard UI Themes
+enum ENUM_HUD_THEME
+{
+   THEME_DARK_INSTITUTIONAL, // Sleek Obsidian & Cyan/Emerald
+   THEME_BLOOMBERG_TERMINAL, // Amber & Slate Dark
+   THEME_CYBER_MATRIX,       // Neon Cyan & Hot Magenta
+   THEME_CLEAN_LIGHT         // Crisp Light Grey & Royal Blue
+};
+
+//--- Structure point record
+struct SwingPoint
+{
+   datetime time;
+   double   price;
+   int      barIndex;
+   int      type;            // +1 = Swing High, -1 = Swing Low
+   bool     isBroken;        // Has price broken past this swing?
+   bool     isSwept;         // Was this swing swept by wick only?
+   string   label;
+};
+
+//--- Institutional Order Block Record
+struct OrderBlock
+{
+   datetime time;
+   double   high;
+   double   low;
+   double   open;
+   double   close;
+   int      direction;       // +1 = Bullish OB (Demand), -1 = Bearish OB (Supply)
+   bool     isMitigated;     // Has price retested and filled this OB?
+   datetime mitigationTime;
+   double   volume;
+   double   strength;        // 0-100 score based on displacement & FVG creation
+   string   objName;
+};
+
+//--- Fair Value Gap (Imbalance) Record
+struct FairValueGap
+{
+   datetime time;
+   double   top;
+   double   bottom;
+   double   consequentEncroachment; // Midpoint (50% level)
+   int      direction;       // +1 = Bullish FVG, -1 = Bearish FVG
+   bool     isMitigated;
+   datetime mitigationTime;
+   string   objName;
+};
+
+//--- Trade Signal Record
+struct InstitutionalSignal
+{
+   datetime time;
+   int      barIndex;
+   int      type;            // +1 = BUY, -1 = SELL
+   double   entryPrice;
+   double   stopLoss;
+   double   takeProfit1;     // 1:2 RRR
+   double   takeProfit2;     // 1:3.5 RRR
+   double   takeProfit3;     // 1:5+ RRR / Liquidity Target
+   double   riskReward;
+   double   confluenceScore; // 0 - 100%
+   ENUM_SIGNAL_GRADE grade;
+   string   setupReason;
+   double   recommendedLots;
+};
+
+//--- Prop Firm Risk State
+struct PropFirmRiskState
+{
+   double initialBalance;
+   double dayStartEquity;
+   double currentBalance;
+   double currentEquity;
+   double floatingPnL;
+   double todayClosedPnL;
+   double todayTotalPnL;
+   double todayDrawdownPct;
+   double maxDailyDrawdownPct;
+   double remainingDailyLossPct;
+   double remainingDailyLossCash;
+   double peakEquity;
+   double overallDrawdownPct;
+   double maxOverallDrawdownPct;
+   double remainingOverallLossPct;
+   double remainingOverallLossCash;
+   double profitTargetPct;
+   double profitTargetCash;
+   double currentProfitPct;
+   bool   isDailyDDBreached;
+   bool   isOverallDDBreached;
+   bool   isDailyDDWarning;  // Triggered at 70% of max daily DD
+};
 
 //+------------------------------------------------------------------+
 //| INPUT PARAMETERS                                                 |
@@ -150,6 +289,40 @@ bool          g_dailyWarningSent = false;
 // Pip multiplier
 double        g_pipValue = 0.0001;
 double        g_pointFactor = 1.0;
+
+// Forward declarations
+void ScanMarketStructure(const int rates_total, const int limit, const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[], const long &tick_volume[]);
+void ScanOrderBlocks(const int rates_total, const int limit, const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[], const long &tick_volume[]);
+void ScanFairValueGaps(const int rates_total, const int limit, const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[]);
+void ScanLiquiditySweeps(const int rates_total, const int limit, const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[]);
+void DrawKillzones(const datetime &time[], const double &high[], const double &low[], int rates_total);
+void EvaluateInstitutionalSignals(const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[], const long &tick_volume[], int rates_total);
+void RenderPropFirmHUD();
+void InitializeDailyDrawdownState();
+void UpdateDailyDrawdownAnchor();
+double CalculateDayStartEquity();
+void CleanAllIndicatorObjects();
+void RegisterSwingPoint(datetime t, double price, int barIdx, int type);
+void CheckStructureBreaks(int currentBar, const datetime &time[], const double &open[], const double &high[], const double &low[], const double &close[]);
+bool IsBearishTrendPrior(int swingIdx);
+bool IsBullishTrendPrior(int swingIdx);
+void DrawStructureLine(datetime t1, double p1, datetime t2, double p2, string label, color clr, int style, int width);
+void RegisterOrderBlock(datetime t, double h, double l, double o, double c, int dir, double vol);
+void UpdateOrderBlocksMitigation(const datetime &time[], const double &high[], const double &low[], const double &close[]);
+void DrawOBRectangle(OrderBlock &ob);
+void RegisterFVG(datetime t, double top, double bot, int dir);
+void UpdateFVGMitigation(const datetime &time[], const double &high[], const double &low[]);
+void DrawFVGRectangle(FairValueGap &gap);
+void DrawSweepMarker(datetime t, double price, string text, color clr, bool isTop);
+void ScanEqualHighsAndLows(const datetime &time[]);
+bool IsInInstitutionalKillzone();
+double CalculatePropFirmLotSize(double stopLossPips, double riskPct);
+void DrawTradeSignalVisuals(datetime t, double entry, double sl, double tp1, double tp2, int dir, double score);
+void EmitSignalAlert(int dir, double score, double entry, double sl, double tp1, double tp2, double lots, string reasons);
+void TriggerAlert(string text);
+void CreateHUDLabel(string subName, int x, int y, string text, string font, int fontSize, color clr);
+void CreateHUDPanel(string subName, int x, int y, int w, int h, color bgColor, color borderColor);
+string PeriodToStr();
 
 //+------------------------------------------------------------------+
 //| Custom indicator initialization function                         |
@@ -426,7 +599,7 @@ void RegisterSwingPoint(datetime t, double price, int barIdx, int type)
       ObjectSetString(0, name, OBJPROP_TEXT, (type == 1) ? "● SH" : "● SL");
       ObjectSetString(0, name, OBJPROP_FONT, "Segoe UI");
       ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 7);
-      ObjectSetInteger(0, name, OBJPROP_COLOR, (type == 1) ? clrDimGray : clrDimGray);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, clrDimGray);
       ObjectSetInteger(0, name, OBJPROP_ANCHOR, (type == 1) ? ANCHOR_LOWER : ANCHOR_UPPER);
    }
 }
@@ -1009,7 +1182,6 @@ void DrawKillzones(const datetime &time[], const double &high[], const double &l
 
    // London KZ: 07:00 - 10:00 GMT
    // NY KZ: 12:00 - 15:00 GMT
-   // Check if active session banner should be displayed
    string activeSession = "OFF-HOURS";
    color sessColor = clrDimGray;
 
@@ -1150,7 +1322,6 @@ void EvaluateInstitutionalSignals(const datetime &time[], const double &open[],
 
    // --- Signal Trigger Evaluation ---
    double slPips = 0.0;
-   double tpPips = 0.0;
    double entryPrice = close[bar];
 
    // BULLISH INSTITUTIONAL SIGNAL
@@ -1172,7 +1343,6 @@ void EvaluateInstitutionalSignals(const datetime &time[], const double &open[],
 
       double tp1Price = entryPrice + (slPips * 2.0 * g_pipValue);
       double tp2Price = entryPrice + (slPips * InpTargetRiskReward * g_pipValue);
-      double tp3Price = entryPrice + (slPips * 5.0 * g_pipValue);
 
       // Lot size calculation for Prop Firm risk
       double recommendedLots = CalculatePropFirmLotSize(slPips, InpRiskPerTradePct);
@@ -1200,7 +1370,6 @@ void EvaluateInstitutionalSignals(const datetime &time[], const double &open[],
 
       double tp1Price = entryPrice - (slPips * 2.0 * g_pipValue);
       double tp2Price = entryPrice - (slPips * InpTargetRiskReward * g_pipValue);
-      double tp3Price = entryPrice - (slPips * 5.0 * g_pipValue);
 
       double recommendedLots = CalculatePropFirmLotSize(slPips, InpRiskPerTradePct);
 
@@ -1289,8 +1458,8 @@ void EmitSignalAlert(int dir, double score, double entry, double sl, double tp1,
    string signalType = (dir == 1) ? "BUY (LONG)" : "SELL (SHORT)";
    string gradeStr = (score >= 80) ? "INSTITUTIONAL A+ GRADE 🔥" : "GRADE B SETUP";
 
-   string msg = StringFormat("[PROP FIRM EDGE] %s %s\nPair: %s [%s]\nConfluence: %.0f%% (%s)\nEntry: %s\nStopLoss: %s\nTP1 (1:2): %s\nTP2 (1:3): %s\nSizing (0.5%% Risk): %s Lots\nRules: %s",
-                             gradeStr, signalType, Symbol(), PeriodToStr(), score, gradeStr,
+   string msg = StringFormat("[PROP FIRM EDGE] %s %s\nPair: %s [%s]\nConfluence: %.0f%%\nEntry: %s\nStopLoss: %s\nTP1: %s\nTP2: %s\nSizing (0.5%% Risk): %s Lots\nRules: %s",
+                             gradeStr, signalType, Symbol(), PeriodToStr(), score,
                              DoubleToString(entry, Digits), DoubleToString(sl, Digits),
                              DoubleToString(tp1, Digits), DoubleToString(tp2, Digits),
                              DoubleToString(lots, 2), reasons);

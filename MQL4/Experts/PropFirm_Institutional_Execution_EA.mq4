@@ -3,13 +3,23 @@
 //|               Institutional Trade Manager & Capital Guard EA     |
 //|               1-Click Execution + Hard Daily Drawdown Killswitch |
 //|                                   Copyright 2026, Institutional  |
+//|                                    100% Standalone - Zero Include|
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2026, Institutional Edge Systems"
 #property link      "https://github.com/ismailchaacha97-ui/kkk"
 #property version   "3.50"
 #property strict
 
-#include <PropFirm_Constants.mqh>
+//--- Prop Firm Challenge Rule Profiles
+enum ENUM_PROPFIRM_PROFILE
+{
+   PROPFIRM_FTMO,          // FTMO (5% Daily DD, 10% Max DD, 10% Target)
+   PROPFIRM_FUNDEDNEXT,    // FundedNext (5% Daily DD, 10% Max DD, 8% Target)
+   PROPFIRM_THE5ERS,       // The 5%ers (4% Daily DD, 8% Max DD, 8% Target)
+   PROPFIRM_TOPSTEP,       // Topstep (Daily Loss Limit, Max Loss Limit)
+   PROPFIRM_ALPHA_CAPITAL, // Alpha Capital (5% Daily DD, 10% Max DD)
+   PROPFIRM_CUSTOM         // Custom User Defined Rules
+};
 
 //+------------------------------------------------------------------+
 //| INPUT PARAMETERS                                                 |
@@ -82,6 +92,24 @@ struct PositionState
 };
 PositionState g_trackedPositions[];
 int           g_totalTracked = 0;
+
+// Forward Declarations
+void InitializeEADrawdown();
+void UpdateEADrawdownAnchor();
+double CalculateEADayStartEquity();
+bool CheckPropFirmDrawdownGuard();
+void ExecuteManualOrder(int type);
+double CalculatePositionLotSize(double stopLossPips, double riskPct);
+void RegisterPositionState(int ticket, double openPrice, double sl, double riskPips);
+void ManageActivePositions();
+int FindTrackedIndex(int ticket);
+void ScanIndicatorSignals();
+void ApplyManualBreakEvenToAll();
+void CloseAllPositions(string reason);
+void DeleteAllPendingOrders();
+void Create1ClickCockpit();
+void CreateButton(string name, int x, int y, int w, int h, string text, color bg, color fg);
+void UpdateCockpitDisplay();
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
