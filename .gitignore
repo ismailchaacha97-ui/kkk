@@ -1,0 +1,15 @@
+# MetaTrader compiled binaries / artifacts
+*.ex4
+*.ex5
+
+# MetaEditor / MetaTrader working files
+*.log
+*.bak
+*.tmp
+MQL4/Logs/
+MQL4/Files/
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
