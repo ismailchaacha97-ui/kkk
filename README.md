@@ -16,6 +16,7 @@
 - Labels are not deleted on every tick.
 - Closed-bar mode skips unnecessary recalculation between candles.
 - Optional trend-change and VWAP-cross alerts.
+- Buy and sell arrows using higher-timeframe EMA trend agreement, a lower-timeframe VWAP pullback, and a closed-candle break of the previous swing structure.
 
 Copy the `.mq4` file into the MT4 `MQL4/Indicators` directory, compile it in MetaEditor, and attach it to a chart.
 

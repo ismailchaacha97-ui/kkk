@@ -5,11 +5,15 @@
 //+------------------------------------------------------------------+
 #property strict
 #property indicator_chart_window
-#property indicator_buffers 2
+#property indicator_buffers 4
 #property indicator_color1 clrLime
 #property indicator_color2 clrRed
+#property indicator_color3 clrDodgerBlue
+#property indicator_color4 clrOrangeRed
 #property indicator_width1 2
 #property indicator_width2 2
+#property indicator_width3 1
+#property indicator_width4 1
 
 //--- volume source
 // Real volume is frequently unavailable in MT4 Forex feeds. When selected,
@@ -45,9 +49,19 @@ extern bool   AlertOnVWAPCross       = false;
 extern bool   AlertPushNotification  = false;
 extern bool   AlertEmail             = false;
 
+//--- Entry setup: higher-timeframe trend + pullback + continuation
+extern bool   EnableEntryArrows      = true;
+extern ENUM_TIMEFRAMES HigherTimeframe = PERIOD_H1;
+extern int    HigherTimeframeEMAPeriod = 50;
+extern int    PullbackLookback       = 3;
+extern double PullbackMaxDistanceATR = 0.50;
+extern double ArrowOffsetATR         = 0.25;
+
 //--- indicator buffers
 double VWAPUp[];
 double VWAPDown[];
+double BuyArrow[];
+double SellArrow[];
 
 string PREFIX = "DSAV_Lbl_";
 static datetime g_lastBar = 0;
@@ -109,10 +123,34 @@ void SendSignal(const string message)
 }
 
 //+------------------------------------------------------------------+
+// Returns the higher-timeframe direction using a closed HTF candle,
+// its EMA, and EMA slope. This prevents the still-forming HTF candle
+// from changing the entry filter intrabar.
+int HigherTimeframeTrend(const datetime barTime)
+{
+   int tf = HigherTimeframe == PERIOD_CURRENT ? Period() : (int)HigherTimeframe;
+   int hs = iBarShift(NULL, tf, barTime, false) + 1;
+   if(hs < 1) return(0);
+
+   double emaNow  = iMA(NULL, tf, HigherTimeframeEMAPeriod, 0, MODE_EMA, PRICE_CLOSE, hs);
+   double emaPrev = iMA(NULL, tf, HigherTimeframeEMAPeriod, 0, MODE_EMA, PRICE_CLOSE, hs + 1);
+   double htfClose = iClose(NULL, tf, hs);
+   if(emaNow <= 0.0 || emaPrev <= 0.0 || htfClose <= 0.0) return(0);
+
+   if(htfClose > emaNow && emaNow > emaPrev) return(1);
+   if(htfClose < emaNow && emaNow < emaPrev) return(-1);
+   return(0);
+}
+
+//+------------------------------------------------------------------+
 int OnInit()
 {
    if(SwingPeriod < 2) SwingPeriod = 2;
    if(ATRPeriod < 2) ATRPeriod = 2;
+   if(HigherTimeframeEMAPeriod < 2) HigherTimeframeEMAPeriod = 2;
+   if(PullbackLookback < 1) PullbackLookback = 1;
+   if(PullbackMaxDistanceATR < 0.0) PullbackMaxDistanceATR = 0.0;
+   if(ArrowOffsetATR < 0.0) ArrowOffsetATR = 0.0;
    if(MinimumAPT < 1.0) MinimumAPT = 1.0;
    if(MaximumAPT < MinimumAPT) MaximumAPT = MinimumAPT;
 
@@ -127,8 +165,22 @@ int OnInit()
    SetIndexLabel(1, "VWAP (Down)");
    SetIndexEmptyValue(1, EMPTY_VALUE);
 
+   SetIndexBuffer(2, BuyArrow);
+   SetIndexStyle(2, DRAW_ARROW, STYLE_SOLID, 1, clrDodgerBlue);
+   SetIndexArrow(2, 233);
+   SetIndexLabel(2, "Buy entry");
+   SetIndexEmptyValue(2, EMPTY_VALUE);
+
+   SetIndexBuffer(3, SellArrow);
+   SetIndexStyle(3, DRAW_ARROW, STYLE_SOLID, 1, clrOrangeRed);
+   SetIndexArrow(3, 234);
+   SetIndexLabel(3, "Sell entry");
+   SetIndexEmptyValue(3, EMPTY_VALUE);
+
    ArraySetAsSeries(VWAPUp, true);
    ArraySetAsSeries(VWAPDown, true);
+   ArraySetAsSeries(BuyArrow, true);
+   ArraySetAsSeries(SellArrow, true);
    IndicatorShortName("Dynamic Swing Anchored VWAP");
    IndicatorDigits(Digits);
    return(INIT_SUCCEEDED);
@@ -184,6 +236,8 @@ int OnCalculate(const int rates_total,
 
    ArrayInitialize(VWAPUp, EMPTY_VALUE);
    ArrayInitialize(VWAPDown, EMPTY_VALUE);
+   ArrayInitialize(BuyArrow, EMPTY_VALUE);
+   ArrayInitialize(SellArrow, EMPTY_VALUE);
 
    // Build ATR and source arrays from old to new. The RMA is seeded with an
    // SMA of ATR values, rather than with an arbitrary first value.
@@ -231,6 +285,8 @@ int OnCalculate(const int rates_total,
    for(int s = oldest; s >= first; s--)
    {
       int g = (rates_total - 1) - s;
+      double previousSwingHigh = ph;
+      double previousSwingLow  = pl;
       bool newHigh = true, newLow = true;
       int look = MathMin(SwingPeriod, rates_total - s);
 
@@ -313,6 +369,49 @@ int OnCalculate(const int rates_total,
          double value = volState > 0.0 ? pState / volState : EMPTY_VALUE;
          if(direction > 0) VWAPUp[s] = value;
          else              VWAPDown[s] = value;
+      }
+
+      // Entry arrow logic:
+      // 1) closed candle is in the local VWAP trend;
+      // 2) one of the preceding candles pulled back to the VWAP;
+      // 3) the current candle confirms continuation through the prior bar;
+      // 4) the higher timeframe agrees with the direction.
+      if(EnableEntryArrows && s >= 1 && s + 1 < rates_total)
+      {
+         double currentVWAP = direction > 0 ? VWAPUp[s] : VWAPDown[s];
+         bool pulledBack = false;
+         int pbLook = MathMax(1, PullbackLookback);
+         double maxDistance = atr[s] * MathMax(0.0, PullbackMaxDistanceATR);
+
+         for(int k = 1; k <= pbLook && s + k < rates_total; k++)
+         {
+            double priorVWAP = direction > 0 ? VWAPUp[s + k] : VWAPDown[s + k];
+            if(priorVWAP == EMPTY_VALUE) continue;
+
+            bool nearVWAP = low[s + k] <= priorVWAP + maxDistance &&
+                            high[s + k] >= priorVWAP - maxDistance;
+            if(nearVWAP)
+               pulledBack = true;
+         }
+
+         int htfDirection = HigherTimeframeTrend(time[s]);
+         bool htfAgrees = (htfDirection == direction);
+         bool bullishContinuation = close[s] > open[s] &&
+                                    close[s] > high[s + 1] &&
+                                    previousSwingHigh > 0.0 &&
+                                    close[s] > previousSwingHigh;
+         bool bearishContinuation = close[s] < open[s] &&
+                                    close[s] < low[s + 1] &&
+                                    previousSwingLow > 0.0 &&
+                                    close[s] < previousSwingLow;
+
+         if(currentVWAP != EMPTY_VALUE && pulledBack && htfAgrees)
+         {
+            if(direction > 0 && bullishContinuation)
+               BuyArrow[s] = low[s] - atr[s] * ArrowOffsetATR;
+            if(direction < 0 && bearishContinuation)
+               SellArrow[s] = high[s] + atr[s] * ArrowOffsetATR;
+         }
       }
       previousDirection = direction;
    }
