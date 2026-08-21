@@ -626,7 +626,7 @@ int OnCalculate(const int rates_total,
             {
                double binSize = range / histBins;
                double bins[60];
-               for(int b=0;b<60;b++) bins[b]=0;
+               ArrayInitialize(bins, 0.0);
                double totalVol = 0;
                for(int j=i; j<=sessStart && j < rates_total; j++)
                {
