@@ -1,12 +1,12 @@
 //+------------------------------------------------------------------+
 //|                                   VWAP_SSL_Institutional_v4.mq4  |
 //|   Institutional Grade VWAP SSL — Fixed & Production Ready        |
-//|   v4.00 — Arena 2026-08-21                                         |
+//|   v4.10 — Arena 2026-08-21 — Early-Signal Fix                      |
 //|                                                                   |
 //|   FIXES vs v3 (see REVIEW.md):                                    |
 //|   • Series-safe (0=newest), no repaint, incremental O(N)         |
 //|   • Real anchored sessions: DAILY/WEEKLY/MONTHLY/LONDON/NY/ASIA   |
-//|   • SSL dead-zone 0.25σ to kill chop                              |
+//|   • SSL dead-zone 0.25σ to kill chop (now selectable)             |
 //|   • True σ bands ±1σ ±2σ (variance = E[TP²]-E[TP]²)              |
 //|   • True Volume Profile: 24-bin histogram POC + 70% VA expansion  |
 //|   • Real MTF: HTF SMA20 slope, not single candle color            |
@@ -14,10 +14,11 @@
 //|   • Squeeze detection σ < 0.7·SMA(σ,20) + breakout scoring        |
 //|   • Anchored SL/TP (freeze at flip), one alert per bar-close     |
 //|   • Arrows + strength 0-100 weighted, EA-readable buffers         |
+//|   • v4.10: FLIP modes SAFE/MODERATE/EARLY/VWAP/WICK — fixes late  |
 //+------------------------------------------------------------------+
-#property copyright   "Institutional VWAP SSL v4 — Fixed"
+#property copyright   "Institutional VWAP SSL v4.10 — Early Fix"
 #property link        "https://arena.ai"
-#property version     "4.00"
+#property version     "4.10"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 14
@@ -65,6 +66,15 @@ enum ENUM_VA_MODE
    VA_HISTOGRAM = 1  // True: 70% volume profile histogram
 };
 
+enum ENUM_FLIP_MODE
+{
+   FLIP_SAFE     = 0, // Classic: close beyond VWAP-H/L + buffer (late, 0.25σ) - fewest whipsaws
+   FLIP_MODERATE = 1, // close beyond VWAP-H/L + 0.10σ (balanced)
+   FLIP_EARLY    = 2, // close beyond VWAP-H/L, no buffer (≈1 bar earlier)
+   FLIP_VWAP     = 3, // close beyond VWAP_T itself (≈1-2 bars earlier, aggressive)
+   FLIP_WICK     = 4  // wick beyond VWAP_T (earliest, most false - scalping only)
+};
+
 //== Inputs ==========================================================
 input string            InpSec01          = "===== Core Anchoring =====";
 input ENUM_VWAP_PERIOD  InpPeriod         = VWAP_DAILY;
@@ -75,7 +85,10 @@ input int               InpVolFactor      = 150;            // Volume must excee
 input int               InpVolPeriod      = 20;             // Lookback for volume SMA
 input ENUM_VA_MODE      InpVAMode         = VA_HISTOGRAM;
 input int               InpHistBins       = 24;             // Bins for histogram (12..48)
-input double            InpDeadZoneSigma  = 0.25;           // SSL dead-zone as fraction of σ (kills chop)
+input double            InpDeadZoneSigma  = 0.25;           // SSL dead-zone as fraction of σ (kills chop) — used when FlipMode = SAFE
+input ENUM_FLIP_MODE    InpFlipMode       = FLIP_MODERATE;  // <— FIX FOR "LATE" SIGNALS: use EARLY/VWAP/WICK for 1-2 bars earlier
+input bool              InpConfirmOnClose = true;           // true = wait for bar close (safe), false = intra-bar wick (early but repaints)
+input bool              InpEarlyNoFilter  = false;          // true = early flips ignore Vol/MTF filters (even earlier, more noise)
 input string            InpSec02          = "===== Visuals & Bands =====";
 input color             InpUpColor        = clrLimeGreen;
 input color             InpDnColor        = clrRed;
@@ -507,20 +520,42 @@ int OnCalculate(const int rates_total,
          // we keep smoothed in local var; g_sigma keeps raw for squeeze detection
       }
 
-      // --- SSL trend with dead-zone
+      // --- SSL trend — FIX FOR LATENESS: choose flip sensitivity
       int curT = prevTrend;
-      double buffer = sigma * InpDeadZoneSigma;
+      // effective buffer depends on FlipMode (SAFE uses your input, others override)
+      double effBuffer = sigma * InpDeadZoneSigma;
+      if(InpFlipMode==FLIP_MODERATE) effBuffer = sigma * 0.10;
+      else if(InpFlipMode==FLIP_EARLY) effBuffer = 0;
+      else if(InpFlipMode==FLIP_VWAP) effBuffer = 0;
+      else if(InpFlipMode==FLIP_WICK) effBuffer = 0;
+
+      // price to test: close (confirmed) vs wick (earliest)
+      double priceUpTest   = close[i]; // for flipping short->long
+      double priceDownTest = close[i]; // for flipping long->short
+      // For WICK mode use high/low so flip triggers as soon as wick touches
+      // For live bar (i==0) and InpConfirmOnClose==false, also use wicks for intrabar sensitivity
+      bool useWick = (InpFlipMode==FLIP_WICK) || (!InpConfirmOnClose && i==0 && (InpFlipMode==FLIP_VWAP || InpFlipMode==FLIP_EARLY));
+      if(useWick)
+      {
+         priceUpTest   = high[i];
+         priceDownTest = low[i];
+      }
+
       if(prevTrend==-1)
       {
          curT = (close[i] >= vwapT) ? 0 : 1;
       }
-      else if(prevTrend==0) // up, looking to flip down
+      else if(InpFlipMode==FLIP_VWAP || InpFlipMode==FLIP_WICK)
       {
-         if(close[i] < vwapL - buffer) curT = 1;
+         // EARLIEST: cross the VWAP centre itself — ~1-2 bars before H/L
+         if(prevTrend==0 && priceDownTest < vwapT) curT = 1;
+         else if(prevTrend==1 && priceUpTest > vwapT) curT = 0;
       }
-      else if(prevTrend==1)
+      else
       {
-         if(close[i] > vwapH + buffer) curT = 0;
+         // SAFE / MODERATE / EARLY: cross the SSL band (VWAP-H/L)
+         if(prevTrend==0 && priceDownTest < vwapL - effBuffer) curT = 1;
+         else if(prevTrend==1 && priceUpTest > vwapH + effBuffer) curT = 0;
       }
       g_trend[i] = curT;
       bool flipped = (prevTrend!=-1 && curT!=prevTrend);
@@ -538,6 +573,12 @@ int OnCalculate(const int rates_total,
 
       // --- MTF alignment
       bool mtfAligns = CheckMTFAlignment(curT, time[i]);
+      // Early mode: optionally bypass filters for 1-2 bars earlier signal (more noise)
+      if(InpEarlyNoFilter && flipped && (InpFlipMode==FLIP_EARLY || InpFlipMode==FLIP_VWAP || InpFlipMode==FLIP_WICK))
+      {
+         volConfirms = true;
+         mtfAligns   = true;
+      }
 
       // --- Squeeze detection
       double smaSigma = SigmaSMA(i, InpSqueezePeriod, rates_total);
