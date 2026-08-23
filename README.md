@@ -21,3 +21,22 @@ Every chapter ends with **The Practice** — one or two things to actually do.
 ## Source files
 
 Individual manuscript sections live in [`book/`](book/); `THE-COURAGE-TO-SAY-HELLO.md` is the assembled edition.
+
+## Download
+
+Ready-made editions live in [`dist/`](dist/):
+
+| Format | File | Best for |
+|---|---|---|
+| **PDF** | `dist/The-Courage-To-Say-Hello.pdf` | Reading & printing (A5, 139 pp.) |
+| **EPUB** | `dist/The-Courage-To-Say-Hello.epub` | Kindle, Apple Books, Kobo |
+| **DOCX** | `dist/The-Courage-To-Say-Hello.docx` | Word / Google Docs editing |
+| **HTML** | `dist/The-Courage-To-Say-Hello.html` | Browser reading, print-to-PDF |
+| **MD** | `THE-COURAGE-TO-SAY-HELLO.md` | Plain-text source |
+
+To rebuild after editing the markdown:
+
+```bash
+python3 tools/build_pdf.py          # PDF
+python3 tools/build_epub_html.py    # EPUB + HTML
+```
