@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>London Breakout — Broker Time</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="grain"></div>
+  <header class="top">
+    <div class="brand">
+      <span class="mark">LB</span>
+      <div>
+        <h1>3 Tier London Breakout</h1>
+        <p>Session clock locked to broker server time</p>
+      </div>
+    </div>
+    <div class="live-flag" id="liveFlag">
+      <span class="dot"></span>
+      <span id="phaseLabel">SYNCING</span>
+    </div>
+  </header>
+
+  <section class="clocks">
+    <article>
+      <span class="k">Broker</span>
+      <strong id="clkBroker">--:--:--</strong>
+      <em id="clkBrokerOff">GMT+0</em>
+    </article>
+    <article>
+      <span class="k">London</span>
+      <strong id="clkLondon">--:--:--</strong>
+      <em id="clkLondonOff">GMT+0</em>
+    </article>
+    <article>
+      <span class="k">GMT</span>
+      <strong id="clkGmt">--:--:--</strong>
+      <em>reference</em>
+    </article>
+    <article>
+      <span class="k">Your PC</span>
+      <strong id="clkLocal">--:--:--</strong>
+      <em id="clkLocalOff">local</em>
+    </article>
+  </section>
+
+  <main>
+    <section class="panel settings">
+      <h2>Auto-adjust</h2>
+      <p class="lede">
+        Input times stay in one timezone. The engine shifts the box and session
+        onto the broker chart so they stay accurate when the server offset or DST changes.
+      </p>
+
+      <label>
+        Broker server
+        <select id="brokerPreset"></select>
+      </label>
+
+      <div class="row">
+        <label>
+          Broker DST
+          <select id="brokerDst">
+            <option value="auto">Auto</option>
+            <option value="eet">EET (EU)</option>
+            <option value="est">US (EST/EDT)</option>
+            <option value="off">Off (fixed)</option>
+          </select>
+        </label>
+        <label>
+          Times specified in
+          <select id="timeBase">
+            <option value="london" selected>London</option>
+            <option value="gmt">GMT / UTC</option>
+            <option value="gmt+2">GMT+2 (original calibration)</option>
+            <option value="broker">Broker (no shift)</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="row triple">
+        <label>
+          Box start
+          <input id="startTime" type="time" value="06:00" />
+        </label>
+        <label>
+          Box end
+          <input id="endTime" type="time" value="09:14" />
+        </label>
+        <label>
+          Session end
+          <input id="sessionEnd" type="time" value="04:30" />
+        </label>
+      </div>
+
+      <label class="check">
+        <input id="autoAdjust" type="checkbox" checked />
+        Automatically convert to broker time
+      </label>
+    </section>
+
+    <section class="panel result">
+      <h2>On your chart</h2>
+      <div class="shift-math" id="shiftMath"></div>
+      <div class="big-times">
+        <div>
+          <span>Establishment box</span>
+          <strong id="boxBroker">--:-- – --:--</strong>
+        </div>
+        <div>
+          <span>Breakout session ends</span>
+          <strong id="sessBroker">--:--</strong>
+        </div>
+      </div>
+      <div class="status-grid" id="statusGrid"></div>
+    </section>
+  </main>
+
+  <section class="panel timeline-wrap">
+    <div class="tl-head">
+      <h2>Broker-time session map</h2>
+      <span id="tlDate"></span>
+    </div>
+    <div class="timeline" id="timeline">
+      <div class="track" id="track"></div>
+      <div class="hours" id="hours"></div>
+    </div>
+    <div class="legend">
+      <span><i class="sw box"></i>Range box</span>
+      <span><i class="sw sess"></i>Breakout session</span>
+      <span><i class="sw now"></i>Broker now</span>
+    </div>
+  </section>
+
+  <section class="panel install">
+    <h2>Install on MT4</h2>
+    <ol>
+      <li>Download <code>3_Tier_London_Breakout_V3.3_BrokerTime.mq4</code></li>
+      <li>Copy it into <code>MQL4/Indicators</code> (File → Open Data Folder)</li>
+      <li>Restart MetaTrader or refresh Navigator, then drop it on a chart</li>
+      <li>Leave <code>AutoAdjustToBrokerTime = true</code>. Set <code>TimesAreSpecifiedIn</code> to London, GMT, GMT+2, or Broker</li>
+      <li>Offset is read from the server via <code>TimeCurrent() − TimeGMT()</code> unless you override <code>BrokerGMTOffsetHours</code></li>
+    </ol>
+    <div class="actions">
+      <a class="btn" href="../indicators/3_Tier_London_Breakout_V3.3_BrokerTime.mq4" download>Download indicator</a>
+      <button type="button" class="btn ghost" id="copyInputs">Copy suggested inputs</button>
+    </div>
+    <pre id="inputsPreview"></pre>
+  </section>
+
+  <footer>
+    V.3.3 broker-time engine · same 3-tier breakout logic · session clock follows the book
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
