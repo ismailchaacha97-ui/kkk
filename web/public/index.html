@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MT4 Second Entry Price Action Indicator (21 EMA + S/R)</title>
+  <title>2L / 2S Price Action Strategy - MT4 Indicator (13/50 EMA + Static S/R)</title>
   <link rel="stylesheet" href="style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,17 +20,17 @@
         </div>
         <div>
           <div class="flex items-center space-x-2">
-            <span class="font-extrabold text-base sm:text-lg tracking-tight text-white">Second Entry PA Pro</span>
-            <span class="px-2 py-0.5 text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full">MT4 Indicator v2.10</span>
+            <span class="font-extrabold text-base sm:text-lg tracking-tight text-white">2L / 2S Price Action Pro</span>
+            <span class="px-2 py-0.5 text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full">MT4 Indicator v3.10</span>
           </div>
-          <p class="text-xs text-slate-400">21 EMA Dynamic S/R • Naked Support & Resistance • 2EL & 2ES Price Action</p>
+          <p class="text-xs text-slate-400">Static S/R Mapping &bull; Absorption &bull; Structure &bull; 13/50 EMA Confluence</p>
         </div>
       </div>
 
       <div class="flex items-center space-x-3">
         <nav class="hidden md:flex items-center space-x-1">
-          <button onclick="switchTab('chart')" id="tab-btn-chart" class="tab-btn px-3 py-1.5 rounded-lg text-sm font-medium transition text-emerald-400 bg-slate-800/80 border border-slate-700">Interactive Chart</button>
-          <button onclick="switchTab('strategy')" id="tab-btn-strategy" class="tab-btn px-3 py-1.5 rounded-lg text-sm font-medium transition text-slate-300 hover:text-white hover:bg-slate-800">Strategy Rules</button>
+          <button onclick="switchTab('chart')" id="tab-btn-chart" class="tab-btn px-3 py-1.5 rounded-lg text-sm font-medium transition text-emerald-400 bg-slate-800/80 border border-slate-700">Clean Chart</button>
+          <button onclick="switchTab('strategy')" id="tab-btn-strategy" class="tab-btn px-3 py-1.5 rounded-lg text-sm font-medium transition text-slate-300 hover:text-white hover:bg-slate-800">5-Pillar Strategy</button>
           <button onclick="switchTab('backtest')" id="tab-btn-backtest" class="tab-btn px-3 py-1.5 rounded-lg text-sm font-medium transition text-slate-300 hover:text-white hover:bg-slate-800">Backtest Stats</button>
           <button onclick="switchTab('code')" id="tab-btn-code" class="tab-btn px-3 py-1.5 rounded-lg text-sm font-medium transition text-slate-300 hover:text-white hover:bg-slate-800">MQL4 Code</button>
         </nav>
@@ -51,42 +51,36 @@
     <!-- TAB 1: INTERACTIVE CHART & SIMULATOR -->
     <div id="tab-chart" class="tab-content block space-y-6">
       
-      <!-- Top Overview Banner -->
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div class="bg-slate-900/90 border border-slate-800 p-4 rounded-2xl flex items-center justify-between">
-          <div>
-            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Strategy Core</span>
-            <div class="text-lg font-bold text-white mt-0.5">2-Legged Pullbacks</div>
-            <p class="text-xs text-slate-400 mt-1">Second Entry Long & Short</p>
-          </div>
-          <div class="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center font-mono font-bold">2E</div>
+      <!-- 5-Pillar Badges -->
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div class="bg-slate-900/90 border border-slate-800 p-3.5 rounded-2xl">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">1. Static S/R</div>
+          <div class="text-sm font-bold text-white mt-0.5">Key Trigger Zones</div>
+          <p class="text-[11px] text-slate-400 mt-0.5">Aggressive Reversals</p>
         </div>
 
-        <div class="bg-slate-900/90 border border-slate-800 p-4 rounded-2xl flex items-center justify-between">
-          <div>
-            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Dynamic S/R Filter</span>
-            <div class="text-lg font-bold text-emerald-400 mt-0.5">21 EMA Slope</div>
-            <p class="text-xs text-slate-400 mt-1">Trend Direction & Cushion</p>
-          </div>
-          <div class="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-mono font-bold">EMA</div>
+        <div class="bg-slate-900/90 border border-slate-800 p-3.5 rounded-2xl">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">2. Absorption</div>
+          <div class="text-sm font-bold text-emerald-400 mt-0.5">Rejection Wicks</div>
+          <p class="text-[11px] text-slate-400 mt-0.5">Strong Closing Body</p>
         </div>
 
-        <div class="bg-slate-900/90 border border-slate-800 p-4 rounded-2xl flex items-center justify-between">
-          <div>
-            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Rejection Filter</span>
-            <div class="text-lg font-bold text-amber-400 mt-0.5">&ge; 35% Wick Ratio</div>
-            <p class="text-xs text-slate-400 mt-1">Rejection Pin Bar / Hammer</p>
-          </div>
-          <div class="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center font-mono font-bold">PIN</div>
+        <div class="bg-slate-900/90 border border-slate-800 p-3.5 rounded-2xl">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">3. Pattern</div>
+          <div class="text-sm font-bold text-blue-400 mt-0.5">2L & 2S Failures</div>
+          <p class="text-[11px] text-slate-400 mt-0.5">2-Push Traps</p>
         </div>
 
-        <div class="bg-slate-900/90 border border-slate-800 p-4 rounded-2xl flex items-center justify-between">
-          <div>
-            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Key Naked S/R</span>
-            <div class="text-lg font-bold text-purple-400 mt-0.5">Swing Fractals</div>
-            <p class="text-xs text-slate-400 mt-1">Horizontal Multi-Touch Zones</p>
-          </div>
-          <div class="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center font-mono font-bold">S/R</div>
+        <div class="bg-slate-900/90 border border-slate-800 p-3.5 rounded-2xl">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">4. Structure</div>
+          <div class="text-sm font-bold text-purple-400 mt-0.5">HH/HL vs LH/LL</div>
+          <p class="text-[11px] text-slate-400 mt-0.5">Chop Filtered</p>
+        </div>
+
+        <div class="bg-slate-900/90 border border-slate-800 p-3.5 rounded-2xl col-span-2 md:col-span-1">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">5. Confluence</div>
+          <div class="text-sm font-bold text-amber-400 mt-0.5">13 / 50 EMA Test</div>
+          <p class="text-[11px] text-slate-400 mt-0.5">Dynamic Value Zone</p>
         </div>
       </div>
 
@@ -115,10 +109,10 @@
 
             <!-- Chart Display Toggles -->
             <div class="flex items-center space-x-2 text-xs">
-              <button id="toggle-ema" onclick="toggleEMA()" class="px-2.5 py-1 rounded-md bg-blue-500/20 text-blue-300 border border-blue-500/30 font-medium">21 EMA</button>
-              <button id="toggle-sr" onclick="toggleSR()" class="px-2.5 py-1 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30 font-medium">S/R Levels</button>
-              <button id="toggle-sltp" onclick="toggleSLTP()" class="px-2.5 py-1 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium">SL / TP Targets</button>
-              <button id="toggle-1e" onclick="toggle1E()" class="px-2.5 py-1 rounded-md bg-slate-800 text-slate-400 border border-slate-700 font-medium">1E Markers</button>
+              <button id="toggle-ema" onclick="toggleEMA()" class="px-2.5 py-1 rounded-md bg-blue-500/20 text-blue-300 border border-blue-500/30 font-medium">13/50 EMA</button>
+              <button id="toggle-sr" onclick="toggleSR()" class="px-2.5 py-1 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30 font-medium">Static S/R</button>
+              <button id="toggle-sltp" onclick="toggleSLTP()" class="px-2.5 py-1 rounded-md bg-slate-900 text-slate-500 border border-slate-800 font-medium">SL / TP Targets</button>
+              <button id="toggle-1e" onclick="toggle1E()" class="px-2.5 py-1 rounded-md bg-slate-900 text-slate-500 border border-slate-800 font-medium">1E Markers</button>
             </div>
           </div>
 
@@ -127,29 +121,29 @@
             <canvas id="trading-canvas" class="w-full h-full block"></canvas>
             
             <!-- On-Chart HUD Information Dashboard (Matching MT4 style) -->
-            <div id="chart-hud" class="absolute top-3 right-3 bg-slate-900/90 border border-slate-700/80 backdrop-blur-md rounded-xl p-3 shadow-xl w-60 text-xs font-mono space-y-1.5 pointer-events-none">
+            <div id="chart-hud" class="absolute top-3 right-3 bg-slate-900/90 border border-slate-700/80 backdrop-blur-md rounded-xl p-3 shadow-xl w-64 text-xs font-mono space-y-1.5 pointer-events-none">
               <div class="text-slate-200 font-bold border-b border-slate-800 pb-1 flex items-center justify-between">
-                <span class="text-blue-400 font-sans font-bold">PATs 2nd Entry HUD</span>
+                <span class="text-blue-400 font-sans font-bold">2L/2S Price Action HUD</span>
                 <span class="text-[10px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-400 rounded">LIVE</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-slate-400">Market Trend:</span>
-                <span id="hud-trend" class="text-emerald-400 font-bold">BULLISH</span>
+                <span class="text-slate-400">Market Structure:</span>
+                <span id="hud-trend" class="text-emerald-400 font-bold">BULLISH (HH/HL)</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-slate-400">21 EMA Value:</span>
-                <span id="hud-ema" class="text-blue-300">1.08462</span>
+                <span class="text-slate-400">13 / 50 EMA:</span>
+                <span id="hud-ema" class="text-blue-300">1.0846 / 1.0838</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-slate-400">EMA Slope:</span>
+                <span class="text-slate-400">13 EMA Slope:</span>
                 <span id="hud-slope" class="text-emerald-400">+2.4 pips</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-slate-400">Active S/R Lines:</span>
-                <span id="hud-sr-count" class="text-purple-300">4 Levels</span>
+                <span class="text-slate-400">Static S/R Zones:</span>
+                <span id="hud-sr-count" class="text-purple-300">4 Mapped Levels</span>
               </div>
               <div class="pt-1 border-t border-slate-800/80 text-[11px] text-amber-300" id="hud-state">
-                Scanning for 2EL pullback off 21 EMA...
+                Scanning for 2L pullback testing 13/50 EMA...
               </div>
             </div>
 
@@ -178,11 +172,11 @@
             <div class="flex items-center space-x-4 text-slate-400">
               <div class="flex items-center space-x-1.5">
                 <span class="w-2.5 h-2.5 rounded bg-lime-400 inline-block"></span>
-                <span>2EL Signals: <strong id="stat-2el-count" class="text-white">0</strong></span>
+                <span>2L Signals: <strong id="stat-2el-count" class="text-white">0</strong></span>
               </div>
               <div class="flex items-center space-x-1.5">
                 <span class="w-2.5 h-2.5 rounded bg-rose-500 inline-block"></span>
-                <span>2ES Signals: <strong id="stat-2es-count" class="text-white">0</strong></span>
+                <span>2S Signals: <strong id="stat-2es-count" class="text-white">0</strong></span>
               </div>
               <div class="flex items-center space-x-1.5">
                 <span>Estimated Win Rate: <strong id="stat-winrate" class="text-emerald-400 font-mono">0%</strong></span>
@@ -224,25 +218,30 @@
           <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
             <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">Indicator Parameters</h3>
             
-            <!-- EMA Period -->
             <div class="space-y-1.5">
               <div class="flex justify-between text-xs">
-                <span class="text-slate-300">EMA Period (Dynamic S/R)</span>
-                <span id="val-ema-period" class="font-mono text-emerald-400 font-bold">21</span>
+                <span class="text-slate-300">Fast EMA (Trigger)</span>
+                <span id="val-fast-ema" class="font-mono text-emerald-400 font-bold">13</span>
               </div>
-              <input type="range" id="param-ema-period" min="9" max="50" value="21" oninput="updateParams()" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500">
+              <input type="range" id="param-fast-ema" min="8" max="21" value="13" oninput="updateParams()" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500">
             </div>
 
-            <!-- Min Rejection Wick % -->
             <div class="space-y-1.5">
               <div class="flex justify-between text-xs">
-                <span class="text-slate-300">Min Rejection Wick %</span>
+                <span class="text-slate-300">Slow EMA (Baseline Trend)</span>
+                <span id="val-slow-ema" class="font-mono text-emerald-400 font-bold">50</span>
+              </div>
+              <input type="range" id="param-slow-ema" min="30" max="100" value="50" oninput="updateParams()" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500">
+            </div>
+
+            <div class="space-y-1.5">
+              <div class="flex justify-between text-xs">
+                <span class="text-slate-300">Min Absorption Wick %</span>
                 <span id="val-wick-pct" class="font-mono text-emerald-400 font-bold">35%</span>
               </div>
               <input type="range" id="param-wick-pct" min="15" max="60" value="35" oninput="updateParams()" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500">
             </div>
 
-            <!-- Risk Reward Ratio -->
             <div class="space-y-1.5">
               <div class="flex justify-between text-xs">
                 <span class="text-slate-300">Target Risk:Reward (SL/TP)</span>
@@ -251,18 +250,8 @@
               <input type="range" id="param-rr-ratio" min="10" max="40" value="20" oninput="updateParams()" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500">
             </div>
 
-            <!-- Max Distance from EMA in Pips -->
-            <div class="space-y-1.5">
-              <div class="flex justify-between text-xs">
-                <span class="text-slate-300">Max EMA Proximity (Pips)</span>
-                <span id="val-proximity" class="font-mono text-emerald-400 font-bold">8.0</span>
-              </div>
-              <input type="range" id="param-proximity" min="2" max="20" value="8" oninput="updateParams()" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500">
-            </div>
-
-            <!-- Strict Trend Toggle -->
             <div class="pt-2 border-t border-slate-800 flex items-center justify-between text-xs">
-              <span class="text-slate-300">Strict Slope Filter</span>
+              <span class="text-slate-300">Market Structure (HH/HL)</span>
               <label class="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" id="param-strict-trend" checked onchange="updateParams()" class="sr-only peer">
                 <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -288,150 +277,86 @@
 
     </div>
 
-    <!-- TAB 2: STRATEGY RULES DEEP DIVE -->
+    <!-- TAB 2: 5-PILLAR STRATEGY BREAKDOWN -->
     <div id="tab-strategy" class="tab-content hidden space-y-6">
-      
       <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-8">
-        
         <div class="max-w-3xl">
-          <h2 class="text-2xl font-extrabold text-white tracking-tight">Institutional Second Entry Price Action System</h2>
+          <h2 class="text-2xl font-extrabold text-white tracking-tight">The 5 Core Pillars of the Strategy</h2>
           <p class="text-slate-400 text-sm mt-2 leading-relaxed">
-            The Second Entry method (popularized by Al Brooks and Mack's Price Action Trading System - PATs) is based on a foundational market reality: <strong>counter-trend market participants almost always try twice to turn a strong trend, and when the second attempt fails, trapped traders fuel a rapid resumption of the major trend.</strong>
+            Every trade signal in the MT4 indicator must satisfy this strict 5-layer confluence checklist before executing.
           </p>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          
-          <!-- Bullish Setup (2EL) -->
-          <div class="bg-slate-950/80 border border-emerald-500/30 rounded-2xl p-6 space-y-4">
-            <div class="flex items-center justify-between border-b border-emerald-500/20 pb-3">
-              <div class="flex items-center space-x-2">
-                <span class="w-3 h-3 rounded-full bg-emerald-400"></span>
-                <h3 class="font-bold text-lg text-emerald-400">Second Entry Long (2EL) Setup</h3>
-              </div>
-              <span class="px-2.5 py-1 text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-lg">BULLISH</span>
+          <div class="bg-slate-950/80 border border-purple-500/30 rounded-2xl p-5 space-y-2">
+            <div class="flex items-center space-x-2 text-purple-400 font-bold text-sm">
+              <span class="w-6 h-6 rounded-full bg-purple-500/20 flex items-center justify-center text-xs">1</span>
+              <h3>Static Support & Resistance Mapping</h3>
             </div>
-
-            <ol class="space-y-3 text-xs text-slate-300">
-              <li class="flex items-start space-x-3">
-                <span class="w-5 h-5 rounded-full bg-slate-800 text-emerald-400 flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">1</span>
-                <div>
-                  <strong class="text-white">Trend Established:</strong> Price is trading above the 21 EMA, and the EMA slope is angled upward.
-                </div>
-              </li>
-              <li class="flex items-start space-x-3">
-                <span class="w-5 h-5 rounded-full bg-slate-800 text-emerald-400 flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">2</span>
-                <div>
-                  <strong class="text-white">Leg 1 Pullback & 1EL:</strong> Price makes a swing high, then pulls back downward. A candle ticks above the prior candle's high, making the <em>First Entry Long (1EL)</em>.
-                </div>
-              </li>
-              <li class="flex items-start space-x-3">
-                <span class="w-5 h-5 rounded-full bg-slate-800 text-emerald-400 flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">3</span>
-                <div>
-                  <strong class="text-white">Leg 2 Push Down (Trapping Bears):</strong> 1EL fails to create a new high; sellers push price lower a second time directly into the <strong>21 EMA</strong> or a <strong>Key Naked Support Level</strong>.
-                </div>
-              </li>
-              <li class="flex items-start space-x-3">
-                <span class="w-5 h-5 rounded-full bg-slate-800 text-emerald-400 flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">4</span>
-                <div>
-                  <strong class="text-white">Signal Candle Confirmation:</strong> The candle produces a strong lower rejection wick (&ge; 35% of bar range) bouncing sharply off the EMA/Support, closing in the upper half of the bar.
-                </div>
-              </li>
-              <li class="flex items-start space-x-3">
-                <span class="w-5 h-5 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">✓</span>
-                <div>
-                  <strong class="text-emerald-400">Execution:</strong> Enter Long on bar close or 1 tick above signal bar high. Stop loss placed 2 pips below signal bar low. TP at 1:1.5 to 1:2 R:R.
-                </div>
-              </li>
-            </ol>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Marks horizontal support and resistance lines where price previously bounced or reversed aggressively. These key levels act as primary trigger zones — setups are analyzed when price approaches these zones.
+            </p>
           </div>
 
-          <!-- Bearish Setup (2ES) -->
-          <div class="bg-slate-950/80 border border-rose-500/30 rounded-2xl p-6 space-y-4">
-            <div class="flex items-center justify-between border-b border-rose-500/20 pb-3">
-              <div class="flex items-center space-x-2">
-                <span class="w-3 h-3 rounded-full bg-rose-400"></span>
-                <h3 class="font-bold text-lg text-rose-400">Second Entry Short (2ES) Setup</h3>
-              </div>
-              <span class="px-2.5 py-1 text-xs font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30 rounded-lg">BEARISH</span>
+          <div class="bg-slate-950/80 border border-emerald-500/30 rounded-2xl p-5 space-y-2">
+            <div class="flex items-center space-x-2 text-emerald-400 font-bold text-sm">
+              <span class="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center text-xs">2</span>
+              <h3>Candlestick Rejection & Absorption</h3>
             </div>
-
-            <ol class="space-y-3 text-xs text-slate-300">
-              <li class="flex items-start space-x-3">
-                <span class="w-5 h-5 rounded-full bg-slate-800 text-rose-400 flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">1</span>
-                <div>
-                  <strong class="text-white">Trend Established:</strong> Price is trading below the 21 EMA, and the EMA slope is angled downward.
-                </div>
-              </li>
-              <li class="flex items-start space-x-3">
-                <span class="w-5 h-5 rounded-full bg-slate-800 text-rose-400 flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">2</span>
-                <div>
-                  <strong class="text-white">Leg 1 Pullback & 1ES:</strong> Price makes a swing low, then pulls back upward. A candle ticks below the prior candle's low, making the <em>First Entry Short (1ES)</em>.
-                </div>
-              </li>
-              <li class="flex items-start space-x-3">
-                <span class="w-5 h-5 rounded-full bg-slate-800 text-rose-400 flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">3</span>
-                <div>
-                  <strong class="text-white">Leg 2 Push Up (Trapping Bulls):</strong> 1ES fails to create a new low; buyers push price higher a second time directly into the <strong>21 EMA</strong> or a <strong>Key Naked Resistance Level</strong>.
-                </div>
-              </li>
-              <li class="flex items-start space-x-3">
-                <span class="w-5 h-5 rounded-full bg-slate-800 text-rose-400 flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">4</span>
-                <div>
-                  <strong class="text-white">Signal Candle Confirmation:</strong> The candle produces a strong upper rejection wick (&ge; 35% of bar range) bouncing sharply off the EMA/Resistance, closing in the lower half of the bar.
-                </div>
-              </li>
-              <li class="flex items-start space-x-3">
-                <span class="w-5 h-5 rounded-full bg-rose-500 text-slate-950 flex items-center justify-center font-bold text-[11px] shrink-0 mt-0.5">✓</span>
-                <div>
-                  <strong class="text-rose-400">Execution:</strong> Enter Short on bar close or 1 tick below signal bar low. Stop loss placed 2 pips above signal bar high. TP at 1:1.5 to 1:2 R:R.
-                </div>
-              </li>
-            </ol>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Executes strictly on completed candle closes (no premature limit guessing). Looks for long rejection wicks (pin bars &ge; 35%) and strong closing bodies. A long lower wick bouncing off support proves sellers were absorbed and buyers took total control.
+            </p>
           </div>
 
-        </div>
+          <div class="bg-slate-950/80 border border-blue-500/30 rounded-2xl p-5 space-y-2">
+            <div class="flex items-center space-x-2 text-blue-400 font-bold text-sm">
+              <span class="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center text-xs">3</span>
+              <h3>Second Entry Failure Patterns (2L & 2S)</h3>
+            </div>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              <strong>2L (Bullish):</strong> Pullback in uptrend &rarr; sellers try once (1st entry) &rarr; fail &rarr; sellers try a 2nd time &rarr; fail again. As price breaks higher, enter Long.<br>
+              <strong>2S (Bearish):</strong> Pullback in downtrend &rarr; buyers attempt two rallies &rarr; both fail. Enter Short on breakdown.
+            </p>
+          </div>
 
-        <!-- Strategy Nuances & Pro Tips -->
-        <div class="bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-3">
-          <h4 class="font-bold text-white text-sm">Key Principles for Maximum Edge:</h4>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs text-slate-300">
-            <div class="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
-              <div class="font-bold text-emerald-400 mb-1">1. Context Over Signal</div>
-              <p>Never take a 2nd entry in a sideways chop or when price is slicing back and forth through the EMA without clean slope.</p>
+          <div class="bg-slate-950/80 border border-amber-500/30 rounded-2xl p-5 space-y-2">
+            <div class="flex items-center space-x-2 text-amber-400 font-bold text-sm">
+              <span class="w-6 h-6 rounded-full bg-amber-500/20 flex items-center justify-center text-xs">4</span>
+              <h3>Market Structure Alignment</h3>
             </div>
-            <div class="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
-              <div class="font-bold text-blue-400 mb-1">2. S/R Confluence</div>
-              <p>When the 21 EMA aligns directly with a naked horizontal support/resistance level, the bounce rate increases drastically.</p>
-            </div>
-            <div class="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
-              <div class="font-bold text-amber-400 mb-1">3. Signal Candle Quality</div>
-              <p>The signal bar must show decisive rejection. Avoid dojis with wicks on both sides; prioritize clean pin bars closing in trend direction.</p>
-            </div>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Monitors structural swing points: Higher Highs (HH) and Higher Lows (HL) for uptrends; Lower Highs (LH) and Lower Lows (LL) for downtrends. Suppresses signals in choppy, sideways consolidations.
+            </p>
           </div>
         </div>
 
+        <div class="bg-slate-950 border border-emerald-500/40 rounded-2xl p-6 space-y-3">
+          <div class="flex items-center space-x-2 text-emerald-400 font-bold text-base">
+            <span class="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center text-xs">5</span>
+            <h3>Confluence with the 13 / 50 EMA Dynamic Value Zone</h3>
+          </div>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            Combines candlestick rejections and second-entry patterns with the <strong>13 EMA (Dynamic Trigger)</strong> and <strong>50 EMA (Macro Baseline Trend)</strong>. A trade is only valid when the price action rejection happens right as price touches or tests the dynamic EMA line in confluence with static S/R.
+          </p>
+        </div>
       </div>
-
     </div>
 
     <!-- TAB 3: BACKTEST STATS & LOG -->
     <div id="tab-backtest" class="tab-content hidden space-y-6">
-      
       <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
         <div class="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h2 class="text-2xl font-extrabold text-white tracking-tight">Strategy Simulation & Backtest Log</h2>
-            <p class="text-slate-400 text-xs mt-1">Real-time trade simulation results using the 2EL / 2ES logic with 1:2.0 Risk:Reward target.</p>
+            <p class="text-slate-400 text-xs mt-1">Real-time trade simulation results using the 2L / 2S logic with 1:2.0 Risk:Reward target.</p>
           </div>
 
           <button onclick="runDetailedBacktest()" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center space-x-2 transition">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-            <span>Re-run 1000-Bar Backtest</span>
+            <span>Re-run Backtest</span>
           </button>
         </div>
 
-        <!-- Metric Summary Cards -->
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <div class="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
             <div class="text-[11px] text-slate-400 uppercase font-semibold">Total Trades</div>
@@ -459,7 +384,6 @@
           </div>
         </div>
 
-        <!-- Trade Log Table -->
         <div class="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden">
           <div class="px-4 py-3 border-b border-slate-800 font-semibold text-xs text-slate-300">
             Recent Simulated Signals Log
@@ -473,28 +397,22 @@
                   <th class="py-2.5 px-3">Entry Price</th>
                   <th class="py-2.5 px-3">Stop Loss</th>
                   <th class="py-2.5 px-3">Take Profit</th>
-                  <th class="py-2.5 px-3">Wick %</th>
+                  <th class="py-2.5 px-3">Absorption %</th>
                   <th class="py-2.5 px-3">Outcome</th>
                   <th class="py-2.5 px-3">Profit</th>
                 </tr>
               </thead>
               <tbody id="trade-log-tbody" class="divide-y divide-slate-800/60 text-slate-300">
-                <!-- Injected via JavaScript -->
               </tbody>
             </table>
           </div>
         </div>
-
       </div>
-
     </div>
 
     <!-- TAB 4: MQL4 CODE & INSTALLATION GUIDE -->
     <div id="tab-code" class="tab-content hidden space-y-6">
-      
       <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6">
-        
-        <!-- Header & Download actions -->
         <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-6">
           <div>
             <h2 class="text-2xl font-extrabold text-white tracking-tight">MetaTrader 4 Indicator Source Code</h2>
@@ -513,7 +431,6 @@
           </div>
         </div>
 
-        <!-- Installation Instructions Step-by-Step -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div class="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1.5">
             <div class="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-bold flex items-center justify-center">1</div>
@@ -540,7 +457,6 @@
           </div>
         </div>
 
-        <!-- Source Code Box -->
         <div class="relative bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden">
           <div class="px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400 font-mono">
             <span>SecondEntry_PriceAction_EMA.mq4</span>
@@ -548,18 +464,15 @@
           </div>
           <pre class="p-4 text-xs font-mono text-slate-300 overflow-x-auto max-h-[500px] leading-relaxed select-all" id="code-container"><code>Loading source code...</code></pre>
         </div>
-
       </div>
-
     </div>
 
   </main>
 
-  <!-- Footer -->
   <footer class="border-t border-slate-800 bg-slate-900/60 py-4 mt-auto text-xs text-slate-500 text-center">
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-      <div>Second Entry Price Action Strategy &bull; MT4 Custom Indicator &bull; 2026</div>
-      <div class="text-slate-400">Developed with Exponential Moving Average Dynamic S/R & Naked Support/Resistance</div>
+      <div>2L/2S Price Action Strategy &bull; MT4 Custom Indicator &bull; 2026</div>
+      <div class="text-slate-400">Static S/R &bull; Candlestick Absorption &bull; Structure Alignment &bull; 13/50 EMA Confluence</div>
     </div>
   </footer>
 
