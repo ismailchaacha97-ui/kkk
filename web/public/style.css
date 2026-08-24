@@ -1,0 +1,71 @@
+/* Tailwind-compatible custom styling & reset */
+@import "https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css";
+
+:root {
+  --bg-primary: #030712;
+  --bg-card: #0f172a;
+  --border-color: #1e293b;
+  --accent-emerald: #10b981;
+  --accent-rose: #f43f5e;
+  --accent-blue: #3b82f6;
+  --accent-purple: #a855f7;
+}
+
+body {
+  background-color: var(--bg-primary);
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  color: #f1f5f9;
+}
+
+code, pre, .font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0f19;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+/* Custom Canvas styling */
+#trading-canvas {
+  touch-action: none;
+}
+
+/* Tab buttons active state */
+.tab-btn.active {
+  color: #34d399;
+  background-color: #1e293b;
+  border-color: #334155;
+}
+
+/* Preset buttons active state */
+.preset-btn.active {
+  border-color: rgba(16, 185, 129, 0.6);
+  background-color: #1e293b;
+  color: #ffffff;
+}
+
+/* Animation */
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.8; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+
+.glow-emerald {
+  box-shadow: 0 0 20px -3px rgba(16, 185, 129, 0.3);
+}
+
+.glow-rose {
+  box-shadow: 0 0 20px -3px rgba(244, 63, 94, 0.3);
+}
