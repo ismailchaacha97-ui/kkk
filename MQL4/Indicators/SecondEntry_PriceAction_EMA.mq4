@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright   "Copyright 2026, Arena AI Trader"
 #property link        "https://arena.ai/trading"
-#property version     "2.10"
+#property version     "2.20"
 #property description "Institutional Price Action Trading (PATs) Indicator"
 #property description "Detects Second Entry Long (2EL) & Second Entry Short (2ES) with 21 EMA Dynamic S/R and Naked S/R levels."
 #property indicator_chart_window
@@ -161,7 +161,7 @@ int OnInit()
    // Set Pip Multiplier based on digits (handles 3 & 5 digit brokers)
    if(Digits == 3 || Digits == 5)
    {
-      PipMultiplier = Point * 10;
+      PipMultiplier = Point * 10.0;
       PipDigits = Digits - 1;
    }
    else
@@ -254,30 +254,33 @@ void UpdateSRLevels(int rates_total, const double &high[], const double &low[], 
    ArrayResize(swingLows, scanLimit);
    ArrayResize(swingLowTimes, scanLimit);
 
-   // Detect Fractal Swings
-   for(int i = InpSRSwingStrength + 1; i < scanLimit; i++)
-   {
-      bool isHigh = true;
-      bool isLow = true;
+   int i_idx, k_idx, h1, h2, l1, l2;
+   bool isHigh, isLow;
 
-      for(int k = 1; k <= InpSRSwingStrength; k++)
+   // Detect Fractal Swings
+   for(i_idx = InpSRSwingStrength + 1; i_idx < scanLimit; i_idx++)
+   {
+      isHigh = true;
+      isLow = true;
+
+      for(k_idx = 1; k_idx <= InpSRSwingStrength; k_idx++)
       {
-         if(high[i] <= high[i - k] || high[i] < high[i + k])
+         if(high[i_idx] <= high[i_idx - k_idx] || high[i_idx] < high[i_idx + k_idx])
             isHigh = false;
-         if(low[i] >= low[i - k] || low[i] > low[i + k])
+         if(low[i_idx] >= low[i_idx - k_idx] || low[i_idx] > low[i_idx + k_idx])
             isLow = false;
       }
 
       if(isHigh)
       {
-         swingHighs[countHighs] = high[i];
-         swingHighTimes[countHighs] = time[i];
+         swingHighs[countHighs] = high[i_idx];
+         swingHighTimes[countHighs] = time[i_idx];
          countHighs++;
       }
       if(isLow)
       {
-         swingLows[countLows] = low[i];
-         swingLowTimes[countLows] = time[i];
+         swingLows[countLows] = low[i_idx];
+         swingLowTimes[countLows] = time[i_idx];
          countLows++;
       }
    }
@@ -288,15 +291,19 @@ void UpdateSRLevels(int rates_total, const double &high[], const double &low[], 
    ArrayResize(usedHigh, countHighs);
    ArrayInitialize(usedHigh, false);
 
-   for(int h1 = 0; h1 < countHighs; h1++)
+   double sumPrice;
+   int touches;
+   datetime lastT;
+
+   for(h1 = 0; h1 < countHighs; h1++)
    {
       if(usedHigh[h1]) continue;
 
-      double sumPrice = swingHighs[h1];
-      int touches = 1;
-      datetime lastT = swingHighTimes[h1];
+      sumPrice = swingHighs[h1];
+      touches = 1;
+      lastT = swingHighTimes[h1];
 
-      for(int h2 = h1 + 1; h2 < countHighs; h2++)
+      for(h2 = h1 + 1; h2 < countHighs; h2++)
       {
          if(!usedHigh[h2] && MathAbs(swingHighs[h1] - swingHighs[h2]) <= zonePips)
          {
@@ -323,15 +330,15 @@ void UpdateSRLevels(int rates_total, const double &high[], const double &low[], 
    ArrayResize(usedLow, countLows);
    ArrayInitialize(usedLow, false);
 
-   for(int l1 = 0; l1 < countLows; l1++)
+   for(l1 = 0; l1 < countLows; l1++)
    {
       if(usedLow[l1]) continue;
 
-      double sumPrice = swingLows[l1];
-      int touches = 1;
-      datetime lastT = swingLowTimes[l1];
+      sumPrice = swingLows[l1];
+      touches = 1;
+      lastT = swingLowTimes[l1];
 
-      for(int l2 = l1 + 1; l2 < countLows; l2++)
+      for(l2 = l1 + 1; l2 < countLows; l2++)
       {
          if(!usedLow[l2] && MathAbs(swingLows[l1] - swingLows[l2]) <= zonePips)
          {
@@ -362,9 +369,10 @@ void UpdateSRLevels(int rates_total, const double &high[], const double &low[], 
 //+------------------------------------------------------------------+
 void DrawSRLevels()
 {
-   for(int i = ObjectsTotal(0, 0, OBJ_HLINE) - 1; i >= 0; i--)
+   int objIdx;
+   for(objIdx = ObjectsTotal(0, 0, OBJ_HLINE) - 1; objIdx >= 0; objIdx--)
    {
-      string objName = ObjectName(0, i, 0, OBJ_HLINE);
+      string objName = ObjectName(0, objIdx, 0, OBJ_HLINE);
       if(StringFind(objName, Prefix + "SR_") == 0)
          ObjectDelete(0, objName);
    }
@@ -396,13 +404,13 @@ bool IsNearSR(double price, bool checkSupport, double &nearestLevel)
    if(!InpEnableSR || SR_Count == 0) return false;
 
    double maxDist = InpMaxLevelDistPips * PipMultiplier;
-   for(int i = 0; i < SR_Count; i++)
+   for(int idx = 0; idx < SR_Count; idx++)
    {
-      if(SR_Levels[i].isSupport == checkSupport)
+      if(SR_Levels[idx].isSupport == checkSupport)
       {
-         if(MathAbs(price - SR_Levels[i].price) <= maxDist)
+         if(MathAbs(price - SR_Levels[idx].price) <= maxDist)
          {
-            nearestLevel = SR_Levels[i].price;
+            nearestLevel = SR_Levels[idx].price;
             return true;
          }
       }
@@ -413,13 +421,13 @@ bool IsNearSR(double price, bool checkSupport, double &nearestLevel)
 //+------------------------------------------------------------------+
 //| Rejection Candle Analysis                                        |
 //+------------------------------------------------------------------+
-bool IsBullishRejection(double open, double high, double low, double close)
+bool IsBullishRejection(double openVal, double highVal, double lowVal, double closeVal)
 {
-   double range = high - low;
+   double range = highVal - lowVal;
    if(range <= 0.0) return false;
 
-   double lowerWick = MathMin(open, close) - low;
-   double upperWick = high - MathMax(open, close);
+   double lowerWick = MathMin(openVal, closeVal) - lowVal;
+   double upperWick = highVal - MathMax(openVal, closeVal);
 
    double lowerWickPct = (lowerWick / range) * 100.0;
    double upperWickPct = (upperWick / range) * 100.0;
@@ -433,20 +441,20 @@ bool IsBullishRejection(double open, double high, double low, double close)
    // Directional close check
    if(InpRequireCloseInTrend)
    {
-      if(close < open && close < (low + range * 0.45))
+      if(closeVal < openVal && closeVal < (lowVal + range * 0.45))
          return false;
    }
 
    return true;
 }
 
-bool IsBearishRejection(double open, double high, double low, double close)
+bool IsBearishRejection(double openVal, double highVal, double lowVal, double closeVal)
 {
-   double range = high - low;
+   double range = highVal - lowVal;
    if(range <= 0.0) return false;
 
-   double upperWick = high - MathMax(open, close);
-   double lowerWick = MathMin(open, close) - low;
+   double upperWick = highVal - MathMax(openVal, closeVal);
+   double lowerWick = MathMin(openVal, closeVal) - lowVal;
 
    double upperWickPct = (upperWick / range) * 100.0;
    double lowerWickPct = (lowerWick / range) * 100.0;
@@ -460,7 +468,7 @@ bool IsBearishRejection(double open, double high, double low, double close)
    // Directional close check
    if(InpRequireCloseInTrend)
    {
-      if(close > open && close > (high - range * 0.45))
+      if(closeVal > openVal && closeVal > (highVal - range * 0.45))
          return false;
    }
 
@@ -498,23 +506,37 @@ int OnCalculate(const int rates_total,
    }
    if(limit < 1) limit = 1;
 
+   // Declared once for entire function scope
+   int i, k, bar;
+   double emaVal, prevEma, slopeVal;
+   double curEMA, prevEMA, emaSlope;
+   double maxDist = InpMaxLevelDistPips * PipMultiplier;
+   
+   int swingHighBar, swingLowBar;
+   int firstEntryLongBar, firstEntryShortBar;
+   double maxHigh, minLow;
+   bool isUptrend, isDowntrend;
+   bool leg2Occurred, triggerSignal;
+   bool nearEMA, nearSR, levelValid, candleValid, touched;
+   double srLevel, slPrice, risk, tpPrice;
+
    // 1. Calculate Base EMA & Slope Buffers
-   for(int i = limit; i >= 0; i--)
+   for(i = limit; i >= 0; i--)
    {
-      double emaVal = iMA(NULL, 0, InpEMAPeriod, 0, InpEMAMethod, InpEMAAppliedPrice, i);
+      emaVal = iMA(NULL, 0, InpEMAPeriod, 0, InpEMAMethod, InpEMAAppliedPrice, i);
       BufferEMAMain[i] = emaVal;
 
       if(InpEnableEMATrendColor && i < rates_total - 2)
       {
-         double prevEma = iMA(NULL, 0, InpEMAPeriod, 0, InpEMAMethod, InpEMAAppliedPrice, i + 1);
-         double slope = (emaVal - prevEma) / PipMultiplier;
+         prevEma = iMA(NULL, 0, InpEMAPeriod, 0, InpEMAMethod, InpEMAAppliedPrice, i + 1);
+         slopeVal = (emaVal - prevEma) / PipMultiplier;
 
-         if(slope > InpEMASlopeThresholdPts)
+         if(slopeVal > InpEMASlopeThresholdPts)
          {
             BufferEMABull[i] = emaVal;
             BufferEMABear[i] = EMPTY_VALUE;
          }
-         else if(slope < -InpEMASlopeThresholdPts)
+         else if(slopeVal < -InpEMASlopeThresholdPts)
          {
             BufferEMABear[i] = emaVal;
             BufferEMABull[i] = EMPTY_VALUE;
@@ -536,25 +558,22 @@ int OnCalculate(const int rates_total,
    UpdateSRLevels(rates_total, high, low, time);
 
    // 3. Scan for Second Entry Long (2EL) and Second Entry Short (2ES)
-   double maxDist = InpMaxLevelDistPips * PipMultiplier;
-   
-   for(int i = limit; i >= 1; i--)
+   for(i = limit; i >= 1; i--)
    {
       BufferBuyArrow[i] = 0.0;
       BufferSellArrow[i] = 0.0;
       BufferFirstEntry[i] = 0.0;
 
-      double curEMA = BufferEMAMain[i];
-      double prevEMA = BufferEMAMain[i + 1];
-      double emaSlope = (curEMA - prevEMA) / PipMultiplier;
+      curEMA = BufferEMAMain[i];
+      prevEMA = BufferEMAMain[i + 1];
+      emaSlope = (curEMA - prevEMA) / PipMultiplier;
 
       // ===================================================================
       // BULLISH SETUP: Second Entry Long (2EL)
       // ===================================================================
       if(InpEnable2EL)
       {
-         // Trend condition: EMA sloping up or price comfortably above EMA
-         bool isUptrend = (emaSlope >= -0.2 && close[i] >= curEMA - (2 * PipMultiplier));
+         isUptrend = (emaSlope >= -0.2 && close[i] >= curEMA - (2.0 * PipMultiplier));
          if(InpStrictTrendFilter)
          {
             isUptrend = (emaSlope > 0.0 && close[i] > curEMA);
@@ -562,11 +581,10 @@ int OnCalculate(const int rates_total,
 
          if(isUptrend)
          {
-            // Find swing high that started the pullback
-            int swingHighBar = -1;
-            double maxHigh = -1.0;
+            swingHighBar = -1;
+            maxHigh = -1.0;
 
-            for(int k = i + 1; k <= i + InpMaxPullbackBars && k < rates_total - 2; k++)
+            for(k = i + 1; k <= i + InpMaxPullbackBars && k < rates_total - 2; k++)
             {
                if(high[k] > curEMA && high[k] > maxHigh)
                {
@@ -577,10 +595,9 @@ int OnCalculate(const int rates_total,
 
             if(swingHighBar > i + InpMinPullbackBars)
             {
-               int firstEntryLongBar = -1;
+               firstEntryLongBar = -1;
 
-               // Scan for First Entry Long (1EL)
-               for(int bar = swingHighBar - 1; bar > i; bar--)
+               for(bar = swingHighBar - 1; bar > i; bar--)
                {
                   if(high[bar] > high[bar + 1])
                   {
@@ -589,17 +606,15 @@ int OnCalculate(const int rates_total,
                   }
                }
 
-               // If 1EL occurred, scan for 2nd push down and 2EL trigger
                if(firstEntryLongBar > i)
                {
                   if(InpShow1stEntryMarkers)
                   {
-                     BufferFirstEntry[firstEntryLongBar] = low[firstEntryLongBar] - (3 * PipMultiplier);
+                     BufferFirstEntry[firstEntryLongBar] = low[firstEntryLongBar] - (3.0 * PipMultiplier);
                   }
 
-                  // Check if price pushed down again after 1EL (Leg 2 Down)
-                  bool leg2Occurred = false;
-                  for(int bar = firstEntryLongBar - 1; bar >= i; bar--)
+                  leg2Occurred = false;
+                  for(bar = firstEntryLongBar - 1; bar >= i; bar--)
                   {
                      if(low[bar] < low[bar + 1])
                      {
@@ -610,18 +625,16 @@ int OnCalculate(const int rates_total,
 
                   if(leg2Occurred)
                   {
-                     // Check if bar 'i' triggered 2EL
-                     bool trigger2EL = (high[i] > high[i + 1] || close[i] > open[i]);
+                     triggerSignal = (high[i] > high[i + 1] || close[i] > open[i]);
 
-                     if(trigger2EL)
+                     if(triggerSignal)
                      {
-                        double srLevel = 0.0;
-                        bool nearEMA = (MathAbs(low[i] - curEMA) <= maxDist || (low[i] <= curEMA && close[i] >= curEMA));
-                        bool nearSR = IsNearSR(low[i], true, srLevel);
+                        srLevel = 0.0;
+                        nearEMA = (MathAbs(low[i] - curEMA) <= maxDist || (low[i] <= curEMA && close[i] >= curEMA));
+                        nearSR = IsNearSR(low[i], true, srLevel);
+                        levelValid = nearEMA || (InpAllowSRBounces && nearSR);
 
-                        bool levelValid = nearEMA || (InpAllowSRBounces && nearSR);
-
-                        bool candleValid = true;
+                        candleValid = true;
                         if(InpRequireRejection)
                         {
                            candleValid = IsBullishRejection(open[i], high[i], low[i], close[i]);
@@ -629,25 +642,25 @@ int OnCalculate(const int rates_total,
 
                         if(InpMustTouchLevel)
                         {
-                           bool touched = (low[i] <= curEMA + (2 * PipMultiplier)) || (nearSR && low[i] <= srLevel + (2 * PipMultiplier));
+                           touched = (low[i] <= curEMA + (2.0 * PipMultiplier)) || (nearSR && low[i] <= srLevel + (2.0 * PipMultiplier));
                            if(!touched) candleValid = false;
                         }
 
                         if(levelValid && candleValid)
                         {
-                           BufferBuyArrow[i] = low[i] - (5 * PipMultiplier);
+                           BufferBuyArrow[i] = low[i] - (5.0 * PipMultiplier);
                            TotalBuySignals++;
 
                            if(InpShowPatternLabels)
                            {
-                              CreateSignalLabel(time[i], BufferBuyArrow[i] - (3 * PipMultiplier), "2EL", clrLime, true);
+                              CreateSignalLabel(time[i], BufferBuyArrow[i] - (3.0 * PipMultiplier), "2EL", clrLime, true);
                            }
 
                            if(InpShowSLTP)
                            {
-                              double slPrice = low[i] - (InpSLBufferPips * PipMultiplier);
-                              double risk = (close[i] - slPrice);
-                              double tpPrice = close[i] + (risk * InpRiskRewardRatio);
+                              slPrice = low[i] - (InpSLBufferPips * PipMultiplier);
+                              risk = (close[i] - slPrice);
+                              tpPrice = close[i] + (risk * InpRiskRewardRatio);
                               DrawSLTP(time[i], close[i], slPrice, tpPrice, true);
                            }
 
@@ -669,8 +682,7 @@ int OnCalculate(const int rates_total,
       // ===================================================================
       if(InpEnable2ES)
       {
-         // Trend condition: EMA sloping down or price comfortably below EMA
-         bool isDowntrend = (emaSlope <= 0.2 && close[i] <= curEMA + (2 * PipMultiplier));
+         isDowntrend = (emaSlope <= 0.2 && close[i] <= curEMA + (2.0 * PipMultiplier));
          if(InpStrictTrendFilter)
          {
             isDowntrend = (emaSlope < 0.0 && close[i] < curEMA);
@@ -678,11 +690,10 @@ int OnCalculate(const int rates_total,
 
          if(isDowntrend)
          {
-            // Find swing low that started the pullback
-            int swingLowBar = -1;
-            double minLow = 999999.0;
+            swingLowBar = -1;
+            minLow = 999999.0;
 
-            for(int k = i + 1; k <= i + InpMaxPullbackBars && k < rates_total - 2; k++)
+            for(k = i + 1; k <= i + InpMaxPullbackBars && k < rates_total - 2; k++)
             {
                if(low[k] < curEMA && low[k] < minLow)
                {
@@ -693,10 +704,9 @@ int OnCalculate(const int rates_total,
 
             if(swingLowBar > i + InpMinPullbackBars)
             {
-               int firstEntryShortBar = -1;
+               firstEntryShortBar = -1;
 
-               // Scan for First Entry Short (1ES)
-               for(int bar = swingLowBar - 1; bar > i; bar--)
+               for(bar = swingLowBar - 1; bar > i; bar--)
                {
                   if(low[bar] < low[bar + 1])
                   {
@@ -705,17 +715,15 @@ int OnCalculate(const int rates_total,
                   }
                }
 
-               // If 1ES occurred, scan for 2nd push up and 2ES trigger
                if(firstEntryShortBar > i)
                {
                   if(InpShow1stEntryMarkers)
                   {
-                     BufferFirstEntry[firstEntryShortBar] = high[firstEntryShortBar] + (3 * PipMultiplier);
+                     BufferFirstEntry[firstEntryShortBar] = high[firstEntryShortBar] + (3.0 * PipMultiplier);
                   }
 
-                  // Check if price pushed up again after 1ES (Leg 2 Up)
-                  bool leg2Occurred = false;
-                  for(int bar = firstEntryShortBar - 1; bar >= i; bar--)
+                  leg2Occurred = false;
+                  for(bar = firstEntryShortBar - 1; bar >= i; bar--)
                   {
                      if(high[bar] > high[bar + 1])
                      {
@@ -726,18 +734,16 @@ int OnCalculate(const int rates_total,
 
                   if(leg2Occurred)
                   {
-                     // Check if bar 'i' triggered 2ES
-                     bool trigger2ES = (low[i] < low[i + 1] || close[i] < open[i]);
+                     triggerSignal = (low[i] < low[i + 1] || close[i] < open[i]);
 
-                     if(trigger2ES)
+                     if(triggerSignal)
                      {
-                        double srLevel = 0.0;
-                        bool nearEMA = (MathAbs(high[i] - curEMA) <= maxDist || (high[i] >= curEMA && close[i] <= curEMA));
-                        bool nearSR = IsNearSR(high[i], false, srLevel);
+                        srLevel = 0.0;
+                        nearEMA = (MathAbs(high[i] - curEMA) <= maxDist || (high[i] >= curEMA && close[i] <= curEMA));
+                        nearSR = IsNearSR(high[i], false, srLevel);
+                        levelValid = nearEMA || (InpAllowSRBounces && nearSR);
 
-                        bool levelValid = nearEMA || (InpAllowSRBounces && nearSR);
-
-                        bool candleValid = true;
+                        candleValid = true;
                         if(InpRequireRejection)
                         {
                            candleValid = IsBearishRejection(open[i], high[i], low[i], close[i]);
@@ -745,25 +751,25 @@ int OnCalculate(const int rates_total,
 
                         if(InpMustTouchLevel)
                         {
-                           bool touched = (high[i] >= curEMA - (2 * PipMultiplier)) || (nearSR && high[i] >= srLevel - (2 * PipMultiplier));
+                           touched = (high[i] >= curEMA - (2.0 * PipMultiplier)) || (nearSR && high[i] >= srLevel - (2.0 * PipMultiplier));
                            if(!touched) candleValid = false;
                         }
 
                         if(levelValid && candleValid)
                         {
-                           BufferSellArrow[i] = high[i] + (5 * PipMultiplier);
+                           BufferSellArrow[i] = high[i] + (5.0 * PipMultiplier);
                            TotalSellSignals++;
 
                            if(InpShowPatternLabels)
                            {
-                              CreateSignalLabel(time[i], BufferSellArrow[i] + (3 * PipMultiplier), "2ES", clrRed, false);
+                              CreateSignalLabel(time[i], BufferSellArrow[i] + (3.0 * PipMultiplier), "2ES", clrRed, false);
                            }
 
                            if(InpShowSLTP)
                            {
-                              double slPrice = high[i] + (InpSLBufferPips * PipMultiplier);
-                              double risk = (slPrice - close[i]);
-                              double tpPrice = close[i] - (risk * InpRiskRewardRatio);
+                              slPrice = high[i] + (InpSLBufferPips * PipMultiplier);
+                              risk = (slPrice - close[i]);
+                              tpPrice = close[i] - (risk * InpRiskRewardRatio);
                               DrawSLTP(time[i], close[i], slPrice, tpPrice, false);
                            }
 
@@ -815,7 +821,7 @@ void DrawSLTP(datetime t, double entry, double sl, double tp, bool isLong)
    string nameSL = Prefix + "SL_" + TimeToString(t, TIME_DATE|TIME_MINUTES);
    string nameTP = Prefix + "TP_" + TimeToString(t, TIME_DATE|TIME_MINUTES);
 
-   datetime tEnd = t + PeriodSeconds() * 10;
+   datetime tEnd = t + (datetime)(PeriodSeconds() * 10);
 
    // SL Line
    ObjectCreate(0, nameSL, OBJ_TREND, 0, t, sl, tEnd, sl);
