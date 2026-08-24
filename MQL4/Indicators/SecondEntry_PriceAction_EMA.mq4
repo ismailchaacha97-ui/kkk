@@ -5,120 +5,131 @@
 //+------------------------------------------------------------------+
 #property copyright   "Copyright 2026, Arena AI Trader"
 #property link        "https://arena.ai/trading"
-#property version     "2.20"
-#property description "Institutional Price Action Trading (PATs) Indicator"
-#property description "Detects Second Entry Long (2EL) & Second Entry Short (2ES) with 21 EMA Dynamic S/R and Naked S/R levels."
+#property version     "3.00"
+#property description "Institutional Price Action Strategy: 2L & 2S Failure Patterns"
+#property description "Combines Static S/R Mapping, Candle Rejection/Absorption, Market Structure (HH/HL/LH/LL), and 13/50 EMA Dynamic Confluence."
 #property indicator_chart_window
-#property indicator_buffers 6
-#property indicator_plots   6
+#property indicator_buffers 7
+#property indicator_plots   7
 
-// Plot 1: Buy Arrow (2EL)
-#property indicator_label1  "2EL Buy Signal"
+// Plot 1: Buy Arrow (2L Signal)
+#property indicator_label1  "2L Buy Signal"
 #property indicator_type1   DRAW_ARROW
 #property indicator_color1  clrLime
 #property indicator_style1  STYLE_SOLID
 #property indicator_width1  2
 
-// Plot 2: Sell Arrow (2ES)
-#property indicator_label2  "2ES Sell Signal"
+// Plot 2: Sell Arrow (2S Signal)
+#property indicator_label2  "2S Sell Signal"
 #property indicator_type2   DRAW_ARROW
 #property indicator_color2  clrRed
 #property indicator_style2  STYLE_SOLID
 #property indicator_width2  2
 
-// Plot 3: EMA Main Line
-#property indicator_label3  "Dynamic EMA Base"
+// Plot 3: Fast EMA Line (13 EMA)
+#property indicator_label3  "Fast EMA (13)"
 #property indicator_type3   DRAW_LINE
 #property indicator_color3  clrDodgerBlue
 #property indicator_style3  STYLE_SOLID
 #property indicator_width3  2
 
-// Plot 4: Bullish EMA Slope
-#property indicator_label4  "EMA Bullish Trend"
+// Plot 4: Slow EMA Line (50 EMA)
+#property indicator_label4  "Slow EMA (50)"
 #property indicator_type4   DRAW_LINE
-#property indicator_color4  clrLimeGreen
+#property indicator_color4  clrOrange
 #property indicator_style4  STYLE_SOLID
 #property indicator_width4  2
 
-// Plot 5: Bearish EMA Slope
-#property indicator_label5  "EMA Bearish Trend"
+// Plot 5: Bullish EMA Accent
+#property indicator_label5  "Bullish EMA Accent"
 #property indicator_type5   DRAW_LINE
-#property indicator_color5  clrCrimson
+#property indicator_color5  clrLimeGreen
 #property indicator_style5  STYLE_SOLID
 #property indicator_width5  2
 
-// Plot 6: 1st Entry Marker (Educational/Optional)
-#property indicator_label6  "1st Entry Marker"
-#property indicator_type6   DRAW_ARROW
-#property indicator_color6  clrDarkGray
-#property indicator_style6  STYLE_DOT
-#property indicator_width6  1
+// Plot 6: Bearish EMA Accent
+#property indicator_label6  "Bearish EMA Accent"
+#property indicator_type6   DRAW_LINE
+#property indicator_color6  clrCrimson
+#property indicator_style6  STYLE_SOLID
+#property indicator_width6  2
+
+// Plot 7: 1st Entry Failed Marker
+#property indicator_label7  "1st Entry Failed Marker"
+#property indicator_type7   DRAW_ARROW
+#property indicator_color7  clrSlateGray
+#property indicator_style7  STYLE_DOT
+#property indicator_width7  1
 
 //+------------------------------------------------------------------+
 //| INPUT PARAMETERS                                                 |
 //+------------------------------------------------------------------+
 
-// --- 1. Dynamic EMA Settings ---
-input string               Section_EMA             = "=== 1. EMA (DYNAMIC S/R) SETTINGS ==="; // --- EMA Settings ---
-input int                  InpEMAPeriod            = 21;              // EMA Period (Default: 21)
-input ENUM_MA_METHOD       InpEMAMethod            = MODE_EMA;        // Moving Average Method
+// --- 1. Dynamic EMA Confluence Settings (13 / 50 EMA) ---
+input string               Section_EMA             = "=== 1. DUAL EMA DYNAMIC CONFLUENCE ==="; // --- EMA Settings ---
+input int                  InpFastEMAPeriod        = 13;              // Fast EMA Period (Dynamic Trigger, default: 13)
+input int                  InpSlowEMAPeriod        = 50;              // Slow EMA Period (Macro Trend / Baseline, default: 50)
+input ENUM_MA_METHOD       InpEMAMethod            = MODE_EMA;        // MA Method
 input ENUM_APPLIED_PRICE   InpEMAAppliedPrice      = PRICE_CLOSE;     // Applied Price
-input bool                 InpEnableEMATrendColor  = true;            // Color EMA by Trend Direction
-input double               InpEMASlopeThresholdPts = 1.5;             // Slope Threshold (Points/Pips)
-input int                  InpEMALineWidth         = 2;               // EMA Line Width
+input bool                 InpRequireEMATouch      = true;            // Trade ONLY if Price Touches/Tests 13 or 50 EMA
+input double               InpEMATouchBufferPips   = 4.0;             // Max Distance from EMA to Count as Touch (Pips)
+input bool                 InpEnableEMATrendColor  = true;            // Color Fast EMA by Alignment
 
-// --- 2. Naked Support & Resistance Settings ---
-input string               Section_SR              = "=== 2. HORIZONTAL S/R SETTINGS ==="; // --- S/R Settings ---
-input bool                 InpEnableSR             = true;            // Enable Naked S/R Detection
-input int                  InpSRBarsBack           = 300;             // Historical Bars to Scan
+// --- 2. Static Support & Resistance Mapping ---
+input string               Section_SR              = "=== 2. STATIC S/R MAPPING ==="; // --- S/R Mapping ---
+input bool                 InpEnableStaticSR       = true;            // Enable Static Horizontal S/R Detection
+input int                  InpSRBarsBack           = 350;             // Historical Bars to Scan for Reversals
 input int                  InpSRSwingStrength      = 5;               // Swing Fractal Strength (Left/Right bars)
-input int                  InpSRMinTouches         = 2;               // Min Touches to confirm Key Level
-input double               InpSRZoneTolerancePips  = 6.0;             // S/R Level Zone Tolerance (Pips)
-input int                  InpSRMaxLines           = 6;               // Max S/R Lines to display
+input int                  InpSRMinTouches         = 2;               // Min Reversal Touches to Confirm Level
+input double               InpSRZoneTolerancePips  = 6.0;             // S/R Zone Width Tolerance (Pips)
+input int                  InpSRMaxLines           = 6;               // Max S/R Lines on Chart
 input color                InpColorSupport         = clrDeepSkyBlue;  // Support Line Color
 input color                InpColorResistance      = clrOrangeRed;    // Resistance Line Color
 input ENUM_LINE_STYLE      InpSRLineStyle          = STYLE_DASH;      // S/R Line Style
 
-// --- 3. Second Entry (2EL / 2ES) Core Rules ---
-input string               Section_Strategy        = "=== 3. SECOND ENTRY STRATEGY RULES ==="; // --- Strategy Rules ---
-input bool                 InpEnable2EL            = true;            // Enable Second Entry Long (2EL)
-input bool                 InpEnable2ES            = true;            // Enable Second Entry Short (2ES)
+// --- 3. Market Structure Alignment (HH/HL vs LH/LL) ---
+input string               Section_Structure       = "=== 3. MARKET STRUCTURE ALIGNMENT ==="; // --- Market Structure ---
+input bool                 InpRequireStructure     = true;            // Filter by Structure (HH/HL for Long, LH/LL for Short)
+input int                  InpStructureLookback    = 30;              // Structure Lookback Bars
+input bool                 InpFilterRangeChop      = true;            // Suppress Signals in Flat / Choppy Consolidation
+input double               InpMinEMASeparationPips = 1.0;             // Min Separation Between 13 & 50 EMA (Pips)
+
+// --- 4. Second Entry Failure Rules (2L & 2S) ---
+input string               Section_Strategy        = "=== 4. SECOND ENTRY PATTERN (2L / 2S) ==="; // --- 2L / 2S Rules ---
+input bool                 InpEnable2L             = true;            // Enable Second Entry Long (2L)
+input bool                 InpEnable2S             = true;            // Enable Second Entry Short (2S)
 input int                  InpMaxPullbackBars      = 25;              // Max Pullback Duration (Bars)
 input int                  InpMinPullbackBars      = 2;               // Min Pullback Duration (Bars)
-input bool                 InpStrictTrendFilter    = true;            // Strict Trend Filter (Price on correct side of EMA)
-input bool                 InpAllowSRBounces       = true;            // Allow Bounces off Key S/R if near EMA
-input double               InpMaxLevelDistPips     = 10.0;            // Max Distance from EMA/SR Level (Pips)
+input bool                 InpRequireSRConfluence  = false;           // Require Setup to Touch BOTH S/R Zone & EMA (False = EMA OR S/R)
 
-// --- 4. Candle Confirmation & Rejection Filters ---
-input string               Section_Candle          = "=== 4. CANDLE REJECTION FILTERS ==="; // --- Candle Confirmation ---
-input bool                 InpRequireRejection     = true;            // Require Sharp Rejection / Pinbar
+// --- 5. Candlestick Rejection & Absorption Filter ---
+input string               Section_Candle          = "=== 5. CANDLE REJECTION & ABSORPTION ==="; // --- Candle Confirmation ---
+input bool                 InpRequireAbsorption    = true;            // Require Clear Rejection Wick & Strong Close
 input double               InpMinWickPercent       = 35.0;            // Min Rejection Wick % of Total Candle (e.g. 35%)
 input double               InpMaxOppositeWickPct   = 35.0;            // Max Opposing Wick %
-input bool                 InpRequireCloseInTrend  = true;            // Require Bullish Close for 2EL / Bearish for 2ES
-input bool                 InpMustTouchLevel       = true;            // Candle Wick MUST Touch EMA or S/R
+input bool                 InpRequireStrongClose   = true;            // 2L: Close in upper 50% | 2S: Close in lower 50%
 
-// --- 5. Risk Management & Targets (SL / TP Projections) ---
-input string               Section_Risk            = "=== 5. RISK MANAGEMENT & TARGETS ==="; // --- SL / TP ---
+// --- 6. Risk Management & Targets (SL / TP) ---
+input string               Section_Risk            = "=== 6. RISK MANAGEMENT & TARGETS ==="; // --- SL / TP ---
 input bool                 InpShowSLTP             = true;            // Draw SL & TP Target Lines on Chart
-input double               InpRiskRewardRatio      = 2.0;             // Take Profit Risk:Reward Ratio (e.g. 2.0)
-input double               InpSLBufferPips         = 2.0;             // Stop Loss Buffer below/above Signal (Pips)
-input int                  InpATRPeriod            = 14;              // ATR Period for Dynamic Volatility Buffer
+input double               InpRiskRewardRatio      = 2.0;             // Take Profit Risk:Reward Ratio (e.g. 1:2.0)
+input double               InpSLBufferPips         = 2.0;             // Stop Loss Buffer beyond Signal Wick (Pips)
 
-// --- 6. Visual Display & On-Chart Dashboard ---
-input string               Section_Visuals         = "=== 6. VISUALS & HUD DASHBOARD ==="; // --- Visuals ---
+// --- 7. Visuals & On-Chart Dashboard ---
+input string               Section_Visuals         = "=== 7. VISUALS & HUD DASHBOARD ==="; // --- Visuals ---
 input int                  InpBuyArrowCode         = 233;             // Buy Arrow Wingdings Code (233=Arrow Up)
 input int                  InpSellArrowCode        = 234;             // Sell Arrow Wingdings Code (234=Arrow Down)
 input int                  InpArrowSize            = 2;               // Signal Arrow Size
-input bool                 InpShowPatternLabels    = true;            // Show "2EL" / "2ES" Text Labels
-input bool                 InpShow1stEntryMarkers  = false;           // Show "1EL" / "1ES" educational dots
+input bool                 InpShowPatternLabels    = true;            // Show "2L" / "2S" Text Labels
+input bool                 InpShow1stEntryMarkers  = false;           // Show "1L" / "1S" educational markers
 input bool                 InpShowDashboard        = true;            // Show On-Chart HUD Dashboard
-input ENUM_BASE_CORNER     InpDashboardCorner      = CORNER_RIGHT_UPPER; // Dashboard Screen Corner
-input color                InpDashboardBgColor     = C'20,24,35';     // Dashboard Background Color
+input ENUM_BASE_CORNER     InpDashboardCorner      = CORNER_RIGHT_UPPER; // Dashboard Corner
+input color                InpDashboardBgColor     = C'16,20,30';     // Dashboard Background Color
 input color                InpDashboardTextColor   = clrWhite;        // Dashboard Text Color
 
-// --- 7. Multi-Alert Engine ---
-input string               Section_Alerts          = "=== 7. ALERTS & NOTIFICATIONS ==="; // --- Alerts ---
-input bool                 InpAlertOnBarClose      = true;            // Alert Only on Bar Close (No Repaint)
+// --- 8. Multi-Alert Engine ---
+input string               Section_Alerts          = "=== 8. ALERTS & NOTIFICATIONS ==="; // --- Alerts ---
+input bool                 InpAlertOnBarClose      = true;            // Alert Only on Bar Close (Confirmed Candle)
 input bool                 InpPopupAlert           = true;            // Enable MT4 Pop-up Alert Window
 input bool                 InpSoundAlert           = true;            // Enable Sound Alert
 input string               InpSoundFile            = "alert.wav";     // Sound File Name
@@ -130,12 +141,13 @@ input bool                 InpEmailAlert           = false;           // Enable 
 //+------------------------------------------------------------------+
 double BufferBuyArrow[];
 double BufferSellArrow[];
-double BufferEMAMain[];
+double BufferFastEMA[];
+double BufferSlowEMA[];
 double BufferEMABull[];
 double BufferEMABear[];
 double BufferFirstEntry[];
 
-string   Prefix = "2E_PA_";
+string   Prefix = "2E_PRO_";
 double   PipMultiplier = 0.0001;
 int      PipDigits = 4;
 datetime LastAlertTime = 0;
@@ -153,12 +165,19 @@ struct SRLevel
 SRLevel SR_Levels[];
 int     SR_Count = 0;
 
+// Structure for market structure swings
+struct SwingPoint
+{
+   double   price;
+   int      bar;
+   bool     isHigh;
+};
+
 //+------------------------------------------------------------------+
 //| Custom indicator initialization function                         |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // Set Pip Multiplier based on digits (handles 3 & 5 digit brokers)
    if(Digits == 3 || Digits == 5)
    {
       PipMultiplier = Point * 10.0;
@@ -170,52 +189,56 @@ int OnInit()
       PipDigits = Digits;
    }
 
-   // Indicator Buffers Mapping
-   IndicatorBuffers(6);
+   IndicatorBuffers(7);
 
-   // Buffer 0: Buy Signal (2EL)
+   // Buffer 0: Buy Signal (2L)
    SetIndexBuffer(0, BufferBuyArrow);
    SetIndexStyle(0, DRAW_ARROW, STYLE_SOLID, InpArrowSize, clrLime);
    SetIndexArrow(0, InpBuyArrowCode);
    SetIndexEmptyValue(0, 0.0);
    ArraySetAsSeries(BufferBuyArrow, true);
 
-   // Buffer 1: Sell Signal (2ES)
+   // Buffer 1: Sell Signal (2S)
    SetIndexBuffer(1, BufferSellArrow);
    SetIndexStyle(1, DRAW_ARROW, STYLE_SOLID, InpArrowSize, clrRed);
    SetIndexArrow(1, InpSellArrowCode);
    SetIndexEmptyValue(1, 0.0);
    ArraySetAsSeries(BufferSellArrow, true);
 
-   // Buffer 2: EMA Base Line
-   SetIndexBuffer(2, BufferEMAMain);
-   SetIndexStyle(2, DRAW_LINE, STYLE_SOLID, InpEMALineWidth, clrDodgerBlue);
+   // Buffer 2: Fast EMA (13)
+   SetIndexBuffer(2, BufferFastEMA);
+   SetIndexStyle(2, DRAW_LINE, STYLE_SOLID, 2, clrDodgerBlue);
    SetIndexEmptyValue(2, 0.0);
-   ArraySetAsSeries(BufferEMAMain, true);
+   ArraySetAsSeries(BufferFastEMA, true);
 
-   // Buffer 3: EMA Bullish Slope
-   SetIndexBuffer(3, BufferEMABull);
-   SetIndexStyle(3, DRAW_LINE, STYLE_SOLID, InpEMALineWidth, clrLimeGreen);
+   // Buffer 3: Slow EMA (50)
+   SetIndexBuffer(3, BufferSlowEMA);
+   SetIndexStyle(3, DRAW_LINE, STYLE_SOLID, 2, clrOrange);
    SetIndexEmptyValue(3, 0.0);
+   ArraySetAsSeries(BufferSlowEMA, true);
+
+   // Buffer 4: EMA Bullish Accent
+   SetIndexBuffer(4, BufferEMABull);
+   SetIndexStyle(4, DRAW_LINE, STYLE_SOLID, 2, clrLimeGreen);
+   SetIndexEmptyValue(4, 0.0);
    ArraySetAsSeries(BufferEMABull, true);
 
-   // Buffer 4: EMA Bearish Slope
-   SetIndexBuffer(4, BufferEMABear);
-   SetIndexStyle(4, DRAW_LINE, STYLE_SOLID, InpEMALineWidth, clrCrimson);
-   SetIndexEmptyValue(4, 0.0);
+   // Buffer 5: EMA Bearish Accent
+   SetIndexBuffer(5, BufferEMABear);
+   SetIndexStyle(5, DRAW_LINE, STYLE_SOLID, 2, clrCrimson);
+   SetIndexEmptyValue(5, 0.0);
    ArraySetAsSeries(BufferEMABear, true);
 
-   // Buffer 5: 1st Entry Marker
-   SetIndexBuffer(5, BufferFirstEntry);
-   SetIndexStyle(5, DRAW_ARROW, STYLE_DOT, 1, clrDarkGray);
-   SetIndexArrow(5, 159);
-   SetIndexEmptyValue(5, 0.0);
+   // Buffer 6: 1st Entry Marker
+   SetIndexBuffer(6, BufferFirstEntry);
+   SetIndexStyle(6, DRAW_ARROW, STYLE_DOT, 1, clrSlateGray);
+   SetIndexArrow(6, 159);
+   SetIndexEmptyValue(6, 0.0);
    ArraySetAsSeries(BufferFirstEntry, true);
 
-   // Clear any existing chart objects with our prefix
    ObjectsDeleteAll(0, Prefix);
 
-   IndicatorShortName("Second Entry PA Pro (21 EMA + S/R)");
+   IndicatorShortName(StringFormat("2L/2S Price Action Pro (%d/%d EMA + Static S/R)", InpFastEMAPeriod, InpSlowEMAPeriod));
 
    return(INIT_SUCCEEDED);
 }
@@ -230,11 +253,11 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
-//| Horizontal Support and Resistance Calculation                    |
+//| Static Support and Resistance Mapping Function                   |
 //+------------------------------------------------------------------+
-void UpdateSRLevels(int rates_total, const double &high[], const double &low[], const datetime &time[])
+void UpdateStaticSR(int rates_total, const double &high[], const double &low[], const datetime &time[])
 {
-   if(!InpEnableSR) return;
+   if(!InpEnableStaticSR) return;
 
    ArrayResize(SR_Levels, 0);
    SR_Count = 0;
@@ -257,7 +280,6 @@ void UpdateSRLevels(int rates_total, const double &high[], const double &low[], 
    int i_idx, k_idx, h1, h2, l1, l2;
    bool isHigh, isLow;
 
-   // Detect Fractal Swings
    for(i_idx = InpSRSwingStrength + 1; i_idx < scanLimit; i_idx++)
    {
       isHigh = true;
@@ -285,7 +307,6 @@ void UpdateSRLevels(int rates_total, const double &high[], const double &low[], 
       }
    }
 
-   // Group Resistance Levels
    double zonePips = InpSRZoneTolerancePips * PipMultiplier;
    bool usedHigh[];
    ArrayResize(usedHigh, countHighs);
@@ -325,7 +346,6 @@ void UpdateSRLevels(int rates_total, const double &high[], const double &low[], 
       }
    }
 
-   // Group Support Levels
    bool usedLow[];
    ArrayResize(usedLow, countLows);
    ArrayInitialize(usedLow, false);
@@ -360,14 +380,13 @@ void UpdateSRLevels(int rates_total, const double &high[], const double &low[], 
       }
    }
 
-   // Render S/R Lines on Chart
-   DrawSRLevels();
+   DrawStaticSRLevels();
 }
 
 //+------------------------------------------------------------------+
-//| Draw Support & Resistance Lines on Chart                         |
+//| Draw Static S/R Levels on Chart                                  |
 //+------------------------------------------------------------------+
-void DrawSRLevels()
+void DrawStaticSRLevels()
 {
    int objIdx;
    for(objIdx = ObjectsTotal(0, 0, OBJ_HLINE) - 1; objIdx >= 0; objIdx--)
@@ -388,7 +407,7 @@ void DrawSRLevels()
       ObjectSetInteger(0, name, OBJPROP_BACK, true);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
       
-      string text = (SR_Levels[s].isSupport ? "Key Support (" : "Key Resistance (") + 
+      string text = (SR_Levels[s].isSupport ? "Static Support (" : "Static Resistance (") + 
                     IntegerToString(SR_Levels[s].touches) + " tests) " + DoubleToString(SR_Levels[s].price, Digits);
       ObjectSetString(0, name, OBJPROP_TEXT, text);
       ObjectSetString(0, name, OBJPROP_TOOLTIP, text);
@@ -397,13 +416,13 @@ void DrawSRLevels()
 }
 
 //+------------------------------------------------------------------+
-//| Check if price is near any active S/R level                      |
+//| Check if price touches or is near a static S/R level             |
 //+------------------------------------------------------------------+
-bool IsNearSR(double price, bool checkSupport, double &nearestLevel)
+bool IsNearStaticSR(double price, bool checkSupport, double &nearestLevel)
 {
-   if(!InpEnableSR || SR_Count == 0) return false;
+   if(!InpEnableStaticSR || SR_Count == 0) return false;
 
-   double maxDist = InpMaxLevelDistPips * PipMultiplier;
+   double maxDist = InpSRZoneTolerancePips * PipMultiplier;
    for(int idx = 0; idx < SR_Count; idx++)
    {
       if(SR_Levels[idx].isSupport == checkSupport)
@@ -419,9 +438,9 @@ bool IsNearSR(double price, bool checkSupport, double &nearestLevel)
 }
 
 //+------------------------------------------------------------------+
-//| Rejection Candle Analysis                                        |
+//| Candlestick Rejection & Absorption Analysis                      |
 //+------------------------------------------------------------------+
-bool IsBullishRejection(double openVal, double highVal, double lowVal, double closeVal)
+bool IsBullishAbsorption(double openVal, double highVal, double lowVal, double closeVal)
 {
    double range = highVal - lowVal;
    if(range <= 0.0) return false;
@@ -432,23 +451,19 @@ bool IsBullishRejection(double openVal, double highVal, double lowVal, double cl
    double lowerWickPct = (lowerWick / range) * 100.0;
    double upperWickPct = (upperWick / range) * 100.0;
 
-   // Lower wick must meet minimum percentage
    if(lowerWickPct < InpMinWickPercent) return false;
-
-   // Upper wick should not be excessive
    if(upperWickPct > InpMaxOppositeWickPct) return false;
 
-   // Directional close check
-   if(InpRequireCloseInTrend)
+   if(InpRequireStrongClose)
    {
-      if(closeVal < openVal && closeVal < (lowVal + range * 0.45))
+      if(closeVal < (lowVal + range * 0.45))
          return false;
    }
 
    return true;
 }
 
-bool IsBearishRejection(double openVal, double highVal, double lowVal, double closeVal)
+bool IsBearishAbsorption(double openVal, double highVal, double lowVal, double closeVal)
 {
    double range = highVal - lowVal;
    if(range <= 0.0) return false;
@@ -459,20 +474,56 @@ bool IsBearishRejection(double openVal, double highVal, double lowVal, double cl
    double upperWickPct = (upperWick / range) * 100.0;
    double lowerWickPct = (lowerWick / range) * 100.0;
 
-   // Upper wick must meet minimum percentage
    if(upperWickPct < InpMinWickPercent) return false;
-
-   // Lower wick should not be excessive
    if(lowerWickPct > InpMaxOppositeWickPct) return false;
 
-   // Directional close check
-   if(InpRequireCloseInTrend)
+   if(InpRequireStrongClose)
    {
-      if(closeVal > openVal && closeVal > (highVal - range * 0.45))
+      if(closeVal > (highVal - range * 0.45))
          return false;
    }
 
    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Market Structure Alignment Check (HH/HL for Bull, LH/LL for Bear)|
+//+------------------------------------------------------------------+
+int CheckMarketStructure(int barIdx, const double &high[], const double &low[], int rates_total)
+{
+   int lookback = MathMin(InpStructureLookback, rates_total - barIdx - 10);
+   if(lookback < 15) return 0;
+
+   double recentHigh1 = -1.0, recentHigh2 = -1.0;
+   double recentLow1 = 999999.0, recentLow2 = 999999.0;
+   int countH = 0, countL = 0;
+
+   for(int b = barIdx + 2; b <= barIdx + lookback; b++)
+   {
+      if(high[b] > high[b - 1] && high[b] > high[b + 1])
+      {
+         if(countH == 0) { recentHigh1 = high[b]; countH++; }
+         else if(countH == 1 && MathAbs(high[b] - recentHigh1) > (3.0 * PipMultiplier)) { recentHigh2 = high[b]; countH++; }
+      }
+
+      if(low[b] < low[b - 1] && low[b] < low[b + 1])
+      {
+         if(countL == 0) { recentLow1 = low[b]; countL++; }
+         else if(countL == 1 && MathAbs(low[b] - recentLow1) > (3.0 * PipMultiplier)) { recentLow2 = low[b]; countL++; }
+      }
+
+      if(countH >= 2 && countL >= 2) break;
+   }
+
+   if(countH >= 2 && countL >= 2)
+   {
+      if(recentHigh1 >= recentHigh2 && recentLow1 >= recentLow2)
+         return 1;
+      if(recentHigh1 <= recentHigh2 && recentLow1 <= recentLow2)
+         return -1;
+   }
+
+   return 0;
 }
 
 //+------------------------------------------------------------------+
@@ -489,15 +540,16 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
-   if(rates_total < InpEMAPeriod + 30) return(0);
+   if(rates_total < InpSlowEMAPeriod + 30) return(0);
 
    int limit = rates_total - prev_calculated;
    if(prev_calculated == 0)
    {
-      limit = rates_total - InpEMAPeriod - 2;
+      limit = rates_total - InpSlowEMAPeriod - 2;
       ArrayInitialize(BufferBuyArrow, 0.0);
       ArrayInitialize(BufferSellArrow, 0.0);
-      ArrayInitialize(BufferEMAMain, 0.0);
+      ArrayInitialize(BufferFastEMA, 0.0);
+      ArrayInitialize(BufferSlowEMA, 0.0);
       ArrayInitialize(BufferEMABull, 0.0);
       ArrayInitialize(BufferEMABear, 0.0);
       ArrayInitialize(BufferFirstEntry, 0.0);
@@ -506,39 +558,42 @@ int OnCalculate(const int rates_total,
    }
    if(limit < 1) limit = 1;
 
-   // Declared once for entire function scope
    int i, k, bar;
-   double emaVal, prevEma, slopeVal;
-   double curEMA, prevEMA, emaSlope;
-   double maxDist = InpMaxLevelDistPips * PipMultiplier;
+   double fastEmaVal, slowEmaVal, prevFastEma, fastSlope;
+   double curFastEMA, prevFastEMA, curSlowEMA;
+   double emaTouchBuffer = InpEMATouchBufferPips * PipMultiplier;
    
    int swingHighBar, swingLowBar;
    int firstEntryLongBar, firstEntryShortBar;
    double maxHigh, minLow;
-   bool isUptrend, isDowntrend;
+   int structureState;
+   bool isBullishTrend, isBearishTrend;
    bool leg2Occurred, triggerSignal;
-   bool nearEMA, nearSR, levelValid, candleValid, touched;
+   bool touchedFastEMA, touchedSlowEMA, touchedEMA, nearSR, levelConfluence, candleAbsorption;
    double srLevel, slPrice, risk, tpPrice;
 
-   // 1. Calculate Base EMA & Slope Buffers
+   // 1. Calculate Dual EMAs (13 Fast & 50 Slow)
    for(i = limit; i >= 0; i--)
    {
-      emaVal = iMA(NULL, 0, InpEMAPeriod, 0, InpEMAMethod, InpEMAAppliedPrice, i);
-      BufferEMAMain[i] = emaVal;
+      fastEmaVal = iMA(NULL, 0, InpFastEMAPeriod, 0, InpEMAMethod, InpEMAAppliedPrice, i);
+      slowEmaVal = iMA(NULL, 0, InpSlowEMAPeriod, 0, InpEMAMethod, InpEMAAppliedPrice, i);
+
+      BufferFastEMA[i] = fastEmaVal;
+      BufferSlowEMA[i] = slowEmaVal;
 
       if(InpEnableEMATrendColor && i < rates_total - 2)
       {
-         prevEma = iMA(NULL, 0, InpEMAPeriod, 0, InpEMAMethod, InpEMAAppliedPrice, i + 1);
-         slopeVal = (emaVal - prevEma) / PipMultiplier;
+         prevFastEma = iMA(NULL, 0, InpFastEMAPeriod, 0, InpEMAMethod, InpEMAAppliedPrice, i + 1);
+         fastSlope = (fastEmaVal - prevFastEma) / PipMultiplier;
 
-         if(slopeVal > InpEMASlopeThresholdPts)
+         if(fastEmaVal > slowEmaVal && fastSlope > 0.2)
          {
-            BufferEMABull[i] = emaVal;
+            BufferEMABull[i] = fastEmaVal;
             BufferEMABear[i] = EMPTY_VALUE;
          }
-         else if(slopeVal < -InpEMASlopeThresholdPts)
+         else if(fastEmaVal < slowEmaVal && fastSlope < -0.2)
          {
-            BufferEMABear[i] = emaVal;
+            BufferEMABear[i] = fastEmaVal;
             BufferEMABull[i] = EMPTY_VALUE;
          }
          else
@@ -554,39 +609,52 @@ int OnCalculate(const int rates_total,
       }
    }
 
-   // 2. Update Horizontal Support & Resistance Levels
-   UpdateSRLevels(rates_total, high, low, time);
+   // 2. Update Static Support & Resistance Mapping
+   UpdateStaticSR(rates_total, high, low, time);
 
-   // 3. Scan for Second Entry Long (2EL) and Second Entry Short (2ES)
+   // 3. Scan for Second Entry Failure Patterns (2L & 2S)
    for(i = limit; i >= 1; i--)
    {
       BufferBuyArrow[i] = 0.0;
       BufferSellArrow[i] = 0.0;
       BufferFirstEntry[i] = 0.0;
 
-      curEMA = BufferEMAMain[i];
-      prevEMA = BufferEMAMain[i + 1];
-      emaSlope = (curEMA - prevEMA) / PipMultiplier;
+      curFastEMA = BufferFastEMA[i];
+      prevFastEMA = BufferFastEMA[i + 1];
+      curSlowEMA = BufferSlowEMA[i];
+      fastSlope = (curFastEMA - prevFastEMA) / PipMultiplier;
+
+      if(InpFilterRangeChop)
+      {
+         if(MathAbs(curFastEMA - curSlowEMA) < (InpMinEMASeparationPips * PipMultiplier))
+            continue;
+      }
+
+      structureState = 0;
+      if(InpRequireStructure)
+      {
+         structureState = CheckMarketStructure(i, high, low, rates_total);
+      }
 
       // ===================================================================
-      // BULLISH SETUP: Second Entry Long (2EL)
+      // BULLISH SETUP: Second Entry Long (2L)
       // ===================================================================
-      if(InpEnable2EL)
+      if(InpEnable2L)
       {
-         isUptrend = (emaSlope >= -0.2 && close[i] >= curEMA - (2.0 * PipMultiplier));
-         if(InpStrictTrendFilter)
+         isBullishTrend = (curFastEMA >= curSlowEMA && fastSlope >= -0.1 && close[i] >= curSlowEMA - (2.0 * PipMultiplier));
+         if(InpRequireStructure && structureState == -1)
          {
-            isUptrend = (emaSlope > 0.0 && close[i] > curEMA);
+            isBullishTrend = false;
          }
 
-         if(isUptrend)
+         if(isBullishTrend)
          {
             swingHighBar = -1;
             maxHigh = -1.0;
 
             for(k = i + 1; k <= i + InpMaxPullbackBars && k < rates_total - 2; k++)
             {
-               if(high[k] > curEMA && high[k] > maxHigh)
+               if(high[k] > curFastEMA && high[k] > maxHigh)
                {
                   maxHigh = high[k];
                   swingHighBar = k;
@@ -629,31 +697,34 @@ int OnCalculate(const int rates_total,
 
                      if(triggerSignal)
                      {
+                        touchedFastEMA = (low[i] <= curFastEMA + emaTouchBuffer && high[i] >= curFastEMA - emaTouchBuffer);
+                        touchedSlowEMA = (low[i] <= curSlowEMA + emaTouchBuffer && high[i] >= curSlowEMA - emaTouchBuffer);
+                        touchedEMA = (touchedFastEMA || touchedSlowEMA);
+
                         srLevel = 0.0;
-                        nearEMA = (MathAbs(low[i] - curEMA) <= maxDist || (low[i] <= curEMA && close[i] >= curEMA));
-                        nearSR = IsNearSR(low[i], true, srLevel);
-                        levelValid = nearEMA || (InpAllowSRBounces && nearSR);
+                        nearSR = IsNearStaticSR(low[i], true, srLevel);
 
-                        candleValid = true;
-                        if(InpRequireRejection)
+                        if(InpRequireSRConfluence)
+                           levelConfluence = (touchedEMA && nearSR);
+                        else if(InpRequireEMATouch)
+                           levelConfluence = (touchedEMA || nearSR);
+                        else
+                           levelConfluence = true;
+
+                        candleAbsorption = true;
+                        if(InpRequireAbsorption)
                         {
-                           candleValid = IsBullishRejection(open[i], high[i], low[i], close[i]);
+                           candleAbsorption = IsBullishAbsorption(open[i], high[i], low[i], close[i]);
                         }
 
-                        if(InpMustTouchLevel)
-                        {
-                           touched = (low[i] <= curEMA + (2.0 * PipMultiplier)) || (nearSR && low[i] <= srLevel + (2.0 * PipMultiplier));
-                           if(!touched) candleValid = false;
-                        }
-
-                        if(levelValid && candleValid)
+                        if(levelConfluence && candleAbsorption)
                         {
                            BufferBuyArrow[i] = low[i] - (5.0 * PipMultiplier);
                            TotalBuySignals++;
 
                            if(InpShowPatternLabels)
                            {
-                              CreateSignalLabel(time[i], BufferBuyArrow[i] - (3.0 * PipMultiplier), "2EL", clrLime, true);
+                              CreateSignalLabel(time[i], BufferBuyArrow[i] - (3.0 * PipMultiplier), "2L", clrLime, true);
                            }
 
                            if(InpShowSLTP)
@@ -666,7 +737,7 @@ int OnCalculate(const int rates_total,
 
                            if(i == 1 && time[1] != LastAlertTime)
                            {
-                              TriggerAlert("2EL (Second Entry Long) Bullish Setup", close[1], time[1]);
+                              TriggerAlert("2L (Second Entry Long) Setup", close[1], time[1]);
                               LastAlertTime = time[1];
                            }
                         }
@@ -678,24 +749,24 @@ int OnCalculate(const int rates_total,
       }
 
       // ===================================================================
-      // BEARISH SETUP: Second Entry Short (2ES)
+      // BEARISH SETUP: Second Entry Short (2S)
       // ===================================================================
-      if(InpEnable2ES)
+      if(InpEnable2S)
       {
-         isDowntrend = (emaSlope <= 0.2 && close[i] <= curEMA + (2.0 * PipMultiplier));
-         if(InpStrictTrendFilter)
+         isBearishTrend = (curFastEMA <= curSlowEMA && fastSlope <= 0.1 && close[i] <= curSlowEMA + (2.0 * PipMultiplier));
+         if(InpRequireStructure && structureState == 1)
          {
-            isDowntrend = (emaSlope < 0.0 && close[i] < curEMA);
+            isBearishTrend = false;
          }
 
-         if(isDowntrend)
+         if(isBearishTrend)
          {
             swingLowBar = -1;
             minLow = 999999.0;
 
             for(k = i + 1; k <= i + InpMaxPullbackBars && k < rates_total - 2; k++)
             {
-               if(low[k] < curEMA && low[k] < minLow)
+               if(low[k] < curFastEMA && low[k] < minLow)
                {
                   minLow = low[k];
                   swingLowBar = k;
@@ -738,31 +809,34 @@ int OnCalculate(const int rates_total,
 
                      if(triggerSignal)
                      {
+                        touchedFastEMA = (high[i] >= curFastEMA - emaTouchBuffer && low[i] <= curFastEMA + emaTouchBuffer);
+                        touchedSlowEMA = (high[i] >= curSlowEMA - emaTouchBuffer && low[i] <= curSlowEMA + emaTouchBuffer);
+                        touchedEMA = (touchedFastEMA || touchedSlowEMA);
+
                         srLevel = 0.0;
-                        nearEMA = (MathAbs(high[i] - curEMA) <= maxDist || (high[i] >= curEMA && close[i] <= curEMA));
-                        nearSR = IsNearSR(high[i], false, srLevel);
-                        levelValid = nearEMA || (InpAllowSRBounces && nearSR);
+                        nearSR = IsNearStaticSR(high[i], false, srLevel);
 
-                        candleValid = true;
-                        if(InpRequireRejection)
+                        if(InpRequireSRConfluence)
+                           levelConfluence = (touchedEMA && nearSR);
+                        else if(InpRequireEMATouch)
+                           levelConfluence = (touchedEMA || nearSR);
+                        else
+                           levelConfluence = true;
+
+                        candleAbsorption = true;
+                        if(InpRequireAbsorption)
                         {
-                           candleValid = IsBearishRejection(open[i], high[i], low[i], close[i]);
+                           candleAbsorption = IsBearishAbsorption(open[i], high[i], low[i], close[i]);
                         }
 
-                        if(InpMustTouchLevel)
-                        {
-                           touched = (high[i] >= curEMA - (2.0 * PipMultiplier)) || (nearSR && high[i] >= srLevel - (2.0 * PipMultiplier));
-                           if(!touched) candleValid = false;
-                        }
-
-                        if(levelValid && candleValid)
+                        if(levelConfluence && candleAbsorption)
                         {
                            BufferSellArrow[i] = high[i] + (5.0 * PipMultiplier);
                            TotalSellSignals++;
 
                            if(InpShowPatternLabels)
                            {
-                              CreateSignalLabel(time[i], BufferSellArrow[i] + (3.0 * PipMultiplier), "2ES", clrRed, false);
+                              CreateSignalLabel(time[i], BufferSellArrow[i] + (3.0 * PipMultiplier), "2S", clrRed, false);
                            }
 
                            if(InpShowSLTP)
@@ -775,7 +849,7 @@ int OnCalculate(const int rates_total,
 
                            if(i == 1 && time[1] != LastAlertTime)
                            {
-                              TriggerAlert("2ES (Second Entry Short) Bearish Setup", close[1], time[1]);
+                              TriggerAlert("2S (Second Entry Short) Setup", close[1], time[1]);
                               LastAlertTime = time[1];
                            }
                         }
@@ -790,14 +864,14 @@ int OnCalculate(const int rates_total,
    // 4. Update HUD Dashboard
    if(InpShowDashboard)
    {
-      UpdateDashboard(close[0], BufferEMAMain[0], (BufferEMAMain[0] - BufferEMAMain[1]) / PipMultiplier);
+      UpdateDashboard(close[0], BufferFastEMA[0], BufferSlowEMA[0], (BufferFastEMA[0] - BufferFastEMA[1]) / PipMultiplier);
    }
 
    return(rates_total);
 }
 
 //+------------------------------------------------------------------+
-//| Create Text Label on Chart for 2EL / 2ES                         |
+//| Create Text Label on Chart for 2L / 2S                           |
 //+------------------------------------------------------------------+
 void CreateSignalLabel(datetime t, double price, string text, color clr, bool isLong)
 {
@@ -876,7 +950,7 @@ void TriggerAlert(string patternName, double price, datetime t)
 //+------------------------------------------------------------------+
 //| Draw On-Chart HUD Information Dashboard                          |
 //+------------------------------------------------------------------+
-void UpdateDashboard(double curPrice, double emaVal, double emaSlope)
+void UpdateDashboard(double curPrice, double fastEMA, double slowEMA, double fastSlope)
 {
    string bgName = Prefix + "Dash_BG";
    string titleName = Prefix + "Dash_Title";
@@ -895,8 +969,8 @@ void UpdateDashboard(double curPrice, double emaVal, double emaSlope)
       ObjectSetInteger(0, bgName, OBJPROP_CORNER, InpDashboardCorner);
       ObjectSetInteger(0, bgName, OBJPROP_XDISTANCE, xOffset);
       ObjectSetInteger(0, bgName, OBJPROP_YDISTANCE, yOffset);
-      ObjectSetInteger(0, bgName, OBJPROP_XSIZE, 240);
-      ObjectSetInteger(0, bgName, OBJPROP_YSIZE, 130);
+      ObjectSetInteger(0, bgName, OBJPROP_XSIZE, 255);
+      ObjectSetInteger(0, bgName, OBJPROP_YSIZE, 135);
       ObjectSetInteger(0, bgName, OBJPROP_BGCOLOR, InpDashboardBgColor);
       ObjectSetInteger(0, bgName, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bgName, OBJPROP_COLOR, clrDodgerBlue);
@@ -904,38 +978,38 @@ void UpdateDashboard(double curPrice, double emaVal, double emaSlope)
       ObjectSetInteger(0, bgName, OBJPROP_SELECTABLE, false);
    }
 
-   // Trend Evaluation
-   string trendStr = "NEUTRAL / FLAT";
+   // Trend & Structure Evaluation
+   string trendStr = "CHOP / CONSOLIDATION";
    color trendClr = clrGold;
-   if(emaSlope > InpEMASlopeThresholdPts && curPrice >= emaVal)
+   if(fastEMA > slowEMA && fastSlope > 0.2 && curPrice >= fastEMA - (2.0 * PipMultiplier))
    {
-      trendStr = "BULLISH (UPTREND)";
+      trendStr = "BULLISH (13>50 EMA + HH/HL)";
       trendClr = clrLimeGreen;
    }
-   else if(emaSlope < -InpEMASlopeThresholdPts && curPrice <= emaVal)
+   else if(fastEMA < slowEMA && fastSlope < -0.2 && curPrice <= fastEMA + (2.0 * PipMultiplier))
    {
-      trendStr = "BEARISH (DOWNTREND)";
+      trendStr = "BEARISH (13<50 EMA + LH/LL)";
       trendClr = clrCrimson;
    }
 
    // Title Label
-   CreateOrUpdateLabel(titleName, "  PATs SECOND ENTRY PRO", xOffset + 12, yOffset + 10, clrDodgerBlue, 10, true);
+   CreateOrUpdateLabel(titleName, "  2L/2S PRICE ACTION PRO", xOffset + 12, yOffset + 10, clrDodgerBlue, 10, true);
    
-   // Row 1: Trend
+   // Row 1: Trend & Structure
    CreateOrUpdateLabel(row1Name, "Trend: " + trendStr, xOffset + 12, yOffset + 35, trendClr, 8, false);
 
-   // Row 2: EMA Status
-   string emaText = StringFormat("EMA(%d): %s (Slope: %+.1f pips)", InpEMAPeriod, DoubleToString(emaVal, Digits), emaSlope);
+   // Row 2: Dual EMA Confluence
+   string emaText = StringFormat("13/50 EMA: %s / %s", DoubleToString(fastEMA, Digits), DoubleToString(slowEMA, Digits));
    CreateOrUpdateLabel(row2Name, emaText, xOffset + 12, yOffset + 55, clrLightSteelBlue, 8, false);
 
-   // Row 3: Active S/R Levels
-   string srText = StringFormat("Naked S/R: %d Active Levels", SR_Count);
+   // Row 3: Static S/R Levels
+   string srText = StringFormat("Static S/R: %d Active Zones Mapped", SR_Count);
    CreateOrUpdateLabel(row3Name, srText, xOffset + 12, yOffset + 75, clrWhite, 8, false);
 
-   // Row 4: Rule Status
-   string ruleText = "Waiting for 2-Legged Pullback...";
-   if(trendClr == clrLimeGreen) ruleText = "Bullish Filter: Watch for 2EL at EMA";
-   else if(trendClr == clrCrimson) ruleText = "Bearish Filter: Watch for 2ES at EMA";
+   // Row 4: Live Setup Status
+   string ruleText = "Waiting for 2-Leg Pullback...";
+   if(trendClr == clrLimeGreen) ruleText = "Scanning 2L Pullback to 13/50 EMA & Support";
+   else if(trendClr == clrCrimson) ruleText = "Scanning 2S Pullback to 13/50 EMA & Resistance";
    CreateOrUpdateLabel(row4Name, ruleText, xOffset + 12, yOffset + 98, clrAquamarine, 8, false);
 }
 
