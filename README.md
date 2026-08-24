@@ -20,8 +20,9 @@ MQL4/Indicators/PriceActionSentinel.mq4
 | **Trendlines** | Blue rays on swing pairs | Scores candidate lines by touches, violations, slope and recency. Broken lines go dotted grey. |
 | **TL breaks + retests** | Gold `BREAK`, yellow `RETEST` | A close through the line is the break. A return that rejects is the retest (classic second-chance entry). |
 | **Candlesticks** | Pattern name on the bar | Pin/hammer, engulfing, inside/outside, harami, piercing/dark cloud, morning/evening star, soldiers/crows, tweezers, marubozu, doji, **fakey**. |
-| **Setups** | Lime ▲ long / tomato ▼ short + R:R box | Scores confluence (trend + S/R + TL + candle + structure). Only fires at your minimum score. Stop beyond the signal candle; target next opposing level or N·R. |
-| **Dashboard** | Live panel | Bias, regime, structure text, last event, ceiling / price / floor, last candle, last setup, and a one-line plan. |
+| **Setups** | Lime ▲ long / tomato ▼ short + R:R box | Scores confluence (trend + S/R + TL + candle + structure + EMA). Only fires at your minimum score. Stop beyond the signal candle; target next opposing level or N·R. |
+| **EMA confluence** | Gold 50, cyan 13, purple 21 | Optional **50 EMA** filter/bounce and optional **13/21 ribbon**. Full stack `13>21>50` (or the inverse) adds extra score. |
+| **Dashboard** | Live panel | Bias, regime, structure text, last event, EMA stack, ceiling / price / floor, last candle, last setup, and a one-line plan. |
 
 **Plan the indicator writes**
 
@@ -84,8 +85,19 @@ Use it on H1 / H4 / D1 first. M1–M15 work, but you will want a smaller lookbac
 | Input | Default | Meaning |
 | --- | --- | --- |
 | Pattern bars | `60` | How far back names are printed. |
-| Min confluence score | `5` | 3–12. Raise to `7` if you only want A+ signals. |
+| Min confluence score | `5` | Raise to `7` if you only want A+ signals. |
 | Reward : risk | `2.0` | Height of the green target box. |
+
+### EMA confluence
+| Input | Default | Meaning |
+| --- | --- | --- |
+| Use 50 EMA as confluence | on | Longs want close above the 50; shorts below. A wick into the 50 that closes back is an `EMA50-bounce` / `EMA50-reject`. |
+| Draw 50 EMA | on | Gold line. Period is editable (default 50). |
+| Use 13/21 EMA ribbon | on | Fast above slow = bull ribbon. Pullbacks into the band score `ribbon-hold`. A fresh cross adds `13/21-cross`. |
+| Draw 13/21 EMA ribbon | on | Cyan 13 (solid) and purple 21 (dashed). Periods are editable. |
+| EMA bounce width | `0.35 × ATR` | How close a wick must come to count as a tag. |
+
+Turn **Use 13/21** off if you only want the 50 as a trend filter. Turn **Use 50** off if you only want the ribbon. Both on is the full stack: `13>21>50 BULL` or `13<21<50 BEAR`.
 
 Alerts: popup, sound, and optional push on a **freshly closed** setup bar or a trendline break.
 
@@ -103,6 +115,9 @@ Alerts: popup, sound, and optional push on a **freshly closed** setup bar or a t
 | 3 | Nearest resistance |
 | 4 | Trend bias: `1` bull, `-1` bear, `0` range |
 | 5 | Pattern code (signed by direction) |
+| 6 | 50 EMA |
+| 7 | 13 EMA (fast) |
+| 8 | 21 EMA (slow) |
 
 Pattern codes (absolute): `1` doji, `10/11` pin, `20/21` engulf, `22/23` harami, `24/25` pierce/cloud, `30` inside, `31` outside, `40/41` star, `42/43` soldiers/crows, `50/51` tweezer, `60/61` marubozu, `70/71` fakey.
 

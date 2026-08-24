@@ -6,24 +6,27 @@
 //+------------------------------------------------------------------+
 #property copyright "Price Action Sentinel"
 #property link      "https://github.com/ismailchaacha97-ui/kkk"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
 #property description "Whole-chart price action: S/R, structure (HH/HL/LH/LL),"
-#property description "auto trendlines + breaks, candlesticks, confluence entries."
+#property description "auto trendlines + breaks, candlesticks, EMA 50 / 13-21 confluence."
 #property indicator_chart_window
-#property indicator_buffers 6
+#property indicator_buffers 9
 #property indicator_color1  clrLime
 #property indicator_color2  clrTomato
 #property indicator_width1  2
 #property indicator_width2  2
 
-//--- visible signal arrows (EA-readable via iCustom)
+//--- visible signal arrows + EMA plots (EA-readable via iCustom)
 #property indicator_label1  "LongSetup"
 #property indicator_label2  "ShortSetup"
 #property indicator_label3  "NearestSupport"
 #property indicator_label4  "NearestResistance"
 #property indicator_label5  "TrendBias"
 #property indicator_label6  "PatternCode"
+#property indicator_label7  "EMA50"
+#property indicator_label8  "EMA13"
+#property indicator_label9  "EMA21"
 
 #define PAS_PREFIX     "PAS_"
 #define PAS_MAX_SWING  256
@@ -135,6 +138,9 @@ input color               InpColText        = C'226,232,240';  // Dashboard text
 input color               InpColMuted       = C'148,163,184';  // Dashboard muted
 input color               InpColDash        = C'15,23,42';     // Dashboard background
 input color               InpColBorder      = C'51,65,85';     // Dashboard border
+input color               InpColEMA50       = C'255,193,7';    // 50 EMA
+input color               InpColEMA13       = C'0,229,255';    // 13 EMA
+input color               InpColEMA21       = C'186,104,200';  // 21 EMA
 
 //+------------------------------------------------------------------+
 //| Types                                                             |
@@ -212,6 +218,9 @@ double BufSup[];
 double BufRes[];
 double BufTrend[];
 double BufPat[];
+double BufEMA50[];
+double BufEMA13[];
+double BufEMA21[];
 
 SwingPoint g_swings[];
 int        g_swingCount = 0;
@@ -239,6 +248,8 @@ string          g_lastPat   = "None";
 string          g_lastSetup = "Waiting";
 int             g_lastBosDir= 0;
 string          g_lastBos   = "None";
+string          g_emaTxt    = "off";
+int             g_emaBias   = 0;      // +1 bull stack, -1 bear stack, 0 mixed
 
 datetime g_lastAlertBar   = 0;
 datetime g_lastBarTime    = 0;
@@ -255,6 +266,9 @@ int OnInit()
    SetIndexBuffer(3, BufRes);
    SetIndexBuffer(4, BufTrend);
    SetIndexBuffer(5, BufPat);
+   SetIndexBuffer(6, BufEMA50);
+   SetIndexBuffer(7, BufEMA13);
+   SetIndexBuffer(8, BufEMA21);
 
    SetIndexStyle(0, DRAW_ARROW, STYLE_SOLID, 2, InpColBull);
    SetIndexStyle(1, DRAW_ARROW, STYLE_SOLID, 2, InpColBear);
@@ -262,6 +276,9 @@ int OnInit()
    SetIndexStyle(3, DRAW_NONE);
    SetIndexStyle(4, DRAW_NONE);
    SetIndexStyle(5, DRAW_NONE);
+   SetIndexStyle(6, (InpShowEMA50 ? DRAW_LINE : DRAW_NONE), STYLE_SOLID, 2, InpColEMA50);
+   SetIndexStyle(7, (InpShowEMA1321 ? DRAW_LINE : DRAW_NONE), STYLE_SOLID, 1, InpColEMA13);
+   SetIndexStyle(8, (InpShowEMA1321 ? DRAW_LINE : DRAW_NONE), STYLE_DASH, 1, InpColEMA21);
 
    SetIndexArrow(0, 233);
    SetIndexArrow(1, 234);
@@ -272,6 +289,9 @@ int OnInit()
    SetIndexEmptyValue(3, EMPTY_VALUE);
    SetIndexEmptyValue(4, EMPTY_VALUE);
    SetIndexEmptyValue(5, EMPTY_VALUE);
+   SetIndexEmptyValue(6, EMPTY_VALUE);
+   SetIndexEmptyValue(7, EMPTY_VALUE);
+   SetIndexEmptyValue(8, EMPTY_VALUE);
 
    SetIndexLabel(0, "LongSetup");
    SetIndexLabel(1, "ShortSetup");
@@ -279,6 +299,9 @@ int OnInit()
    SetIndexLabel(3, "NearestResistance");
    SetIndexLabel(4, "TrendBias");
    SetIndexLabel(5, "PatternCode");
+   SetIndexLabel(6, "EMA" + IntegerToString(EmaPeriod50()));
+   SetIndexLabel(7, "EMA" + IntegerToString(EmaPeriodFast()));
+   SetIndexLabel(8, "EMA" + IntegerToString(EmaPeriodSlow()));
 
    IndicatorShortName("Price Action Sentinel");
    IndicatorDigits(Digits);
@@ -365,6 +388,7 @@ void FullScan(const int rates_total)
    BuildSR(lookback);
    BuildTrendlines(lookback);
    DetectPatterns(lookback);
+   RefreshEmaState(1);
    ScoreSetups();
    FillBuffers(lookback);
   }
@@ -1419,6 +1443,169 @@ void PushPat(const CandlePat &p)
   }
 
 //+------------------------------------------------------------------+
+//| EMA helpers - 50 trend filter + 13/21 ribbon                      |
+//+------------------------------------------------------------------+
+int EmaPeriod50()
+  {
+   return(InpEMA50Period < 2 ? 50 : InpEMA50Period);
+  }
+
+int EmaPeriodFast()
+  {
+   return(InpEMAFast < 2 ? 13 : InpEMAFast);
+  }
+
+int EmaPeriodSlow()
+  {
+   int slow = (InpEMASlow < 2 ? 21 : InpEMASlow);
+   if(slow <= EmaPeriodFast())
+      slow = EmaPeriodFast() + 8;
+   return(slow);
+  }
+
+double EmaAt(const int period, const int bar)
+  {
+   return(iMA(NULL, 0, period, 0, MODE_EMA, PRICE_CLOSE, bar));
+  }
+
+bool EmaEnabled()
+  {
+   return(InpUseEMA50 || InpUseEMA1321);
+  }
+
+void RefreshEmaState(const int bar)
+  {
+   g_emaTxt  = "off";
+   g_emaBias = 0;
+   if(!EmaEnabled())
+      return;
+
+   double e50 = EmaAt(EmaPeriod50(), bar);
+   double e13 = EmaAt(EmaPeriodFast(), bar);
+   double e21 = EmaAt(EmaPeriodSlow(), bar);
+   double px  = Close[bar];
+
+   int stack = 0;
+   string txt = "";
+
+   if(InpUseEMA1321 && InpUseEMA50)
+     {
+      if(e13 > e21 && e21 > e50 && px > e50)
+        { stack = 1; txt = IntegerToString(EmaPeriodFast()) + ">" +
+                           IntegerToString(EmaPeriodSlow()) + ">" +
+                           IntegerToString(EmaPeriod50()) + "  BULL"; }
+      else if(e13 < e21 && e21 < e50 && px < e50)
+        { stack = -1; txt = IntegerToString(EmaPeriodFast()) + "<" +
+                            IntegerToString(EmaPeriodSlow()) + "<" +
+                            IntegerToString(EmaPeriod50()) + "  BEAR"; }
+      else
+         txt = "mixed stack";
+     }
+   else if(InpUseEMA1321)
+     {
+      if(e13 > e21)
+        { stack = 1; txt = IntegerToString(EmaPeriodFast()) + ">" +
+                           IntegerToString(EmaPeriodSlow()) + "  BULL"; }
+      else if(e13 < e21)
+        { stack = -1; txt = IntegerToString(EmaPeriodFast()) + "<" +
+                            IntegerToString(EmaPeriodSlow()) + "  BEAR"; }
+      else
+         txt = "13/21 flat";
+     }
+   else if(InpUseEMA50)
+     {
+      if(px > e50)
+        { stack = 1; txt = "above EMA" + IntegerToString(EmaPeriod50()); }
+      else if(px < e50)
+        { stack = -1; txt = "below EMA" + IntegerToString(EmaPeriod50()); }
+      else
+         txt = "on EMA" + IntegerToString(EmaPeriod50());
+     }
+
+   g_emaBias = stack;
+   g_emaTxt  = txt;
+  }
+
+bool TouchedEma(const int bar, const double ema)
+  {
+   double buf = g_atr * InpEMATouchATR;
+   if(buf <= 0.0)
+      buf = g_atr * 0.35;
+   return(Low[bar] <= ema + buf && High[bar] >= ema - buf);
+  }
+
+bool InRibbon(const int bar, const double fast, const double slow)
+  {
+   double lo = MathMin(fast, slow);
+   double hi = MathMax(fast, slow);
+   double pad = g_atr * InpEMATouchATR;
+   return(Low[bar] <= hi + pad && High[bar] >= lo - pad);
+  }
+
+int ApplyEmaScore(const int bar, const int dir, string &why)
+  {
+   if(!EmaEnabled() || dir == 0)
+      return(0);
+
+   int add = 0;
+   double e50 = EmaAt(EmaPeriod50(), bar);
+   double e13 = EmaAt(EmaPeriodFast(), bar);
+   double e21 = EmaAt(EmaPeriodSlow(), bar);
+
+   if(InpUseEMA50)
+     {
+      bool above = (Close[bar] > e50);
+      if((dir > 0 && above) || (dir < 0 && !above))
+        { add += 2; why += "EMA50 "; }
+      else
+        { add -= 1; why += "against-EMA50 "; }
+
+      if(TouchedEma(bar, e50))
+        {
+         if(dir > 0 && Close[bar] > e50 && Low[bar] <= e50 + g_atr * InpEMATouchATR)
+           { add += 2; why += "EMA50-bounce "; }
+         if(dir < 0 && Close[bar] < e50 && High[bar] >= e50 - g_atr * InpEMATouchATR)
+           { add += 2; why += "EMA50-reject "; }
+        }
+     }
+
+   if(InpUseEMA1321)
+     {
+      bool bullRibbon = (e13 > e21);
+      if((dir > 0 && bullRibbon) || (dir < 0 && !bullRibbon))
+        { add += 2; why += "13/21 "; }
+      else
+        { add -= 1; why += "against-13/21 "; }
+
+      if(InRibbon(bar, e13, e21))
+        {
+         if(dir > 0 && Close[bar] >= MathMin(e13, e21))
+           { add += 2; why += "ribbon-hold "; }
+         if(dir < 0 && Close[bar] <= MathMax(e13, e21))
+           { add += 2; why += "ribbon-reject "; }
+        }
+
+      // Fresh cross on this bar in the trade direction.
+      double p13 = EmaAt(EmaPeriodFast(), bar + 1);
+      double p21 = EmaAt(EmaPeriodSlow(), bar + 1);
+      if(dir > 0 && e13 > e21 && p13 <= p21)
+        { add += 1; why += "13/21-cross "; }
+      if(dir < 0 && e13 < e21 && p13 >= p21)
+        { add += 1; why += "13/21-cross "; }
+     }
+
+   if(InpUseEMA50 && InpUseEMA1321)
+     {
+      if(dir > 0 && e13 > e21 && e21 > e50 && Close[bar] > e50)
+        { add += 1; why += "stack "; }
+      if(dir < 0 && e13 < e21 && e21 < e50 && Close[bar] < e50)
+        { add += 1; why += "stack "; }
+     }
+
+   return(add);
+  }
+
+//+------------------------------------------------------------------+
 //| Confluence setups - how a discretionary PA trader times entries   |
 //+------------------------------------------------------------------+
 void ScoreSetups()
@@ -1454,12 +1641,36 @@ void ScoreSetups()
       bool atSup = false, atRes = false, atTLSup = false, atTLRes = false;
       NearLocation(i, atSup, atRes, atTLSup, atTLRes);
 
+      bool ema50BounceUp = false, ema50BounceDn = false;
+      bool ribbonHoldUp  = false, ribbonHoldDn  = false;
+      if(InpUseEMA50)
+        {
+         double e50 = EmaAt(EmaPeriod50(), i);
+         if(TouchedEma(i, e50) && Close[i] > Open[i] && Close[i] > e50)
+            ema50BounceUp = true;
+         if(TouchedEma(i, e50) && Close[i] < Open[i] && Close[i] < e50)
+            ema50BounceDn = true;
+        }
+      if(InpUseEMA1321)
+        {
+         double e13 = EmaAt(EmaPeriodFast(), i);
+         double e21 = EmaAt(EmaPeriodSlow(), i);
+         if(InRibbon(i, e13, e21) && Close[i] > Open[i] && e13 >= e21)
+            ribbonHoldUp = true;
+         if(InRibbon(i, e13, e21) && Close[i] < Open[i] && e13 <= e21)
+            ribbonHoldDn = true;
+        }
+
       int dir = 0;
       if(pat.valid && pat.dir != 0)
          dir = pat.dir;
       else if(atSup && Close[i] > Open[i])
          dir = 1;
       else if(atRes && Close[i] < Open[i])
+         dir = -1;
+      else if(ema50BounceUp || ribbonHoldUp)
+         dir = 1;
+      else if(ema50BounceDn || ribbonHoldDn)
          dir = -1;
 
       if(dir == 0)
@@ -1513,6 +1724,9 @@ void ScoreSetups()
       if((dir > 0 && g_lastBosDir > 0) || (dir < 0 && g_lastBosDir < 0))
         { score += 1; why += g_lastBos + " "; }
 
+      // 6. EMA 50 filter / bounce and optional 13/21 ribbon.
+      score += ApplyEmaScore(i, dir, why);
+
       if(score < InpMinSetupScore)
          continue;
 
@@ -1550,7 +1764,7 @@ void ScoreSetups()
      {
       Setup last = g_setups[g_setupCount - 1];
       g_lastSetup = (last.dir > 0 ? "LONG  " : "SHORT ") +
-                    IntegerToString(last.score) + "/12  " + last.reason;
+                    IntegerToString(last.score) + "pts  " + last.reason;
       MaybeAlert(last);
      }
   }
@@ -1607,14 +1821,31 @@ void FillBuffers(const int lookback)
   {
    int bars = Bars;
    int n = MathMin(lookback + 2, bars);
-   for(int i = 0; i < n; i++)
+   int p50 = EmaPeriod50();
+   int p13 = EmaPeriodFast();
+   int p21 = EmaPeriodSlow();
+   bool draw50 = InpShowEMA50;
+   bool drawRb = InpShowEMA1321;
+   int emaBars = bars;
+   if(emaBars > 5000)
+      emaBars = 5000;
+   if(emaBars < n)
+      emaBars = n;
+
+   for(int i = 0; i < emaBars; i++)
      {
-      BufLong[i]  = EMPTY_VALUE;
-      BufShort[i] = EMPTY_VALUE;
-      BufSup[i]   = (g_nearSup > 0.0 ? g_nearSup : EMPTY_VALUE);
-      BufRes[i]   = (g_nearRes > 0.0 ? g_nearRes : EMPTY_VALUE);
-      BufTrend[i] = (double)g_bias;
-      BufPat[i]   = 0;
+      if(i < n)
+        {
+         BufLong[i]  = EMPTY_VALUE;
+         BufShort[i] = EMPTY_VALUE;
+         BufSup[i]   = (g_nearSup > 0.0 ? g_nearSup : EMPTY_VALUE);
+         BufRes[i]   = (g_nearRes > 0.0 ? g_nearRes : EMPTY_VALUE);
+         BufTrend[i] = (double)g_bias;
+         BufPat[i]   = 0;
+        }
+      BufEMA50[i] = (draw50 ? EmaAt(p50, i) : EMPTY_VALUE);
+      BufEMA13[i] = (drawRb ? EmaAt(p13, i) : EMPTY_VALUE);
+      BufEMA21[i] = (drawRb ? EmaAt(p21, i) : EMPTY_VALUE);
      }
 
    for(int p = 0; p < g_patCount; p++)
@@ -1977,7 +2208,7 @@ void DrawDashboard()
      { corner = CORNER_RIGHT_LOWER; }
 
    int w = 268;
-   int h = 292;
+   int h = (EmaEnabled() ? 328 : 292);
 
    CreateRect("DASH_BG", x, y, w, h, corner, InpColDash, InpColBorder);
    CreateRect("DASH_HD", x, y, w, 28, corner, C'30,41,59', InpColBorder);
@@ -2000,6 +2231,16 @@ void DrawDashboard()
    ly += 20;
    DashLabel("L4", "EVENT",    x + 10, ly, corner, InpColMuted, 8, false);
    DashLabel("V4", g_lastBos,  x + 88, ly, corner, InpColEqual, 8, false);
+
+   if(EmaEnabled())
+     {
+      color emaCol = InpColMuted;
+      if(g_emaBias > 0) emaCol = InpColBull;
+      if(g_emaBias < 0) emaCol = InpColBear;
+      ly += 18;
+      DashLabel("L4B", "EMA",   x + 10, ly, corner, InpColMuted, 8, false);
+      DashLabel("V4B", g_emaTxt, x + 88, ly, corner, emaCol, 8, true);
+     }
 
    ly += 22;
    CreateRect("DASH_DIV1", x + 10, ly, w - 20, 1, corner, InpColBorder, InpColBorder);
