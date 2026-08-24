@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright   "Copyright 2026, Arena AI Trader"
 #property link        "https://arena.ai/trading"
-#property version     "3.00"
+#property version     "3.10"
 #property description "Institutional Price Action Strategy: 2L & 2S Failure Patterns"
 #property description "Combines Static S/R Mapping, Candle Rejection/Absorption, Market Structure (HH/HL/LH/LL), and 13/50 EMA Dynamic Confluence."
 #property indicator_chart_window
@@ -111,7 +111,7 @@ input bool                 InpRequireStrongClose   = true;            // 2L: Clo
 
 // --- 6. Risk Management & Targets (SL / TP) ---
 input string               Section_Risk            = "=== 6. RISK MANAGEMENT & TARGETS ==="; // --- SL / TP ---
-input bool                 InpShowSLTP             = true;            // Draw SL & TP Target Lines on Chart
+input bool                 InpShowSLTP             = false;           // Draw SL & TP Target Lines on Chart (Default false for clean chart)
 input double               InpRiskRewardRatio      = 2.0;             // Take Profit Risk:Reward Ratio (e.g. 1:2.0)
 input double               InpSLBufferPips         = 2.0;             // Stop Loss Buffer beyond Signal Wick (Pips)
 
@@ -164,14 +164,6 @@ struct SRLevel
 };
 SRLevel SR_Levels[];
 int     SR_Count = 0;
-
-// Structure for market structure swings
-struct SwingPoint
-{
-   double   price;
-   int      bar;
-   bool     isHigh;
-};
 
 //+------------------------------------------------------------------+
 //| Custom indicator initialization function                         |
@@ -888,30 +880,32 @@ void CreateSignalLabel(datetime t, double price, string text, color clr, bool is
 }
 
 //+------------------------------------------------------------------+
-//| Draw SL and TP Targets on Chart                                  |
+//| Draw SL and TP Targets on Chart (Strictly Non-Ray Bounded Lines) |
 //+------------------------------------------------------------------+
 void DrawSLTP(datetime t, double entry, double sl, double tp, bool isLong)
 {
    string nameSL = Prefix + "SL_" + TimeToString(t, TIME_DATE|TIME_MINUTES);
    string nameTP = Prefix + "TP_" + TimeToString(t, TIME_DATE|TIME_MINUTES);
 
-   datetime tEnd = t + (datetime)(PeriodSeconds() * 10);
+   datetime tEnd = t + (datetime)(PeriodSeconds() * 8);
 
-   // SL Line
+   // SL Line (Explicitly turn off rays to avoid vertical/infinite lines)
    ObjectCreate(0, nameSL, OBJ_TREND, 0, t, sl, tEnd, sl);
    ObjectSetInteger(0, nameSL, OBJPROP_COLOR, clrCrimson);
    ObjectSetInteger(0, nameSL, OBJPROP_STYLE, STYLE_DOT);
    ObjectSetInteger(0, nameSL, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, nameSL, OBJPROP_RAY, false);
    ObjectSetInteger(0, nameSL, OBJPROP_RAY_RIGHT, false);
    ObjectSetString(0, nameSL, OBJPROP_TOOLTIP, "Stop Loss: " + DoubleToString(sl, Digits));
 
-   // TP Line
+   // TP Line (Explicitly turn off rays)
    ObjectCreate(0, nameTP, OBJ_TREND, 0, t, tp, tEnd, tp);
    ObjectSetInteger(0, nameTP, OBJPROP_COLOR, clrLimeGreen);
    ObjectSetInteger(0, nameTP, OBJPROP_STYLE, STYLE_DOT);
    ObjectSetInteger(0, nameTP, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, nameTP, OBJPROP_RAY, false);
    ObjectSetInteger(0, nameTP, OBJPROP_RAY_RIGHT, false);
-   ObjectSetString(0, nameTP, OBJPROP_TOOLTIP, "Take Profit (1:" + DoubleToString(InpRiskRewardRatio, 1) + "): " + DoubleToString(tp, Digits));
+   ObjectSetString(0, nameTP, OBJPROP_TOOLTIP, "Take Profit: " + DoubleToString(tp, Digits));
 }
 
 //+------------------------------------------------------------------+
@@ -962,7 +956,6 @@ void UpdateDashboard(double curPrice, double fastEMA, double slowEMA, double fas
    int xOffset = 20;
    int yOffset = 30;
 
-   // 1. Background Box
    if(ObjectFind(0, bgName) < 0)
    {
       ObjectCreate(0, bgName, OBJ_RECTANGLE_LABEL, 0, 0, 0);
@@ -978,7 +971,6 @@ void UpdateDashboard(double curPrice, double fastEMA, double slowEMA, double fas
       ObjectSetInteger(0, bgName, OBJPROP_SELECTABLE, false);
    }
 
-   // Trend & Structure Evaluation
    string trendStr = "CHOP / CONSOLIDATION";
    color trendClr = clrGold;
    if(fastEMA > slowEMA && fastSlope > 0.2 && curPrice >= fastEMA - (2.0 * PipMultiplier))
@@ -992,21 +984,15 @@ void UpdateDashboard(double curPrice, double fastEMA, double slowEMA, double fas
       trendClr = clrCrimson;
    }
 
-   // Title Label
    CreateOrUpdateLabel(titleName, "  2L/2S PRICE ACTION PRO", xOffset + 12, yOffset + 10, clrDodgerBlue, 10, true);
-   
-   // Row 1: Trend & Structure
    CreateOrUpdateLabel(row1Name, "Trend: " + trendStr, xOffset + 12, yOffset + 35, trendClr, 8, false);
 
-   // Row 2: Dual EMA Confluence
    string emaText = StringFormat("13/50 EMA: %s / %s", DoubleToString(fastEMA, Digits), DoubleToString(slowEMA, Digits));
    CreateOrUpdateLabel(row2Name, emaText, xOffset + 12, yOffset + 55, clrLightSteelBlue, 8, false);
 
-   // Row 3: Static S/R Levels
    string srText = StringFormat("Static S/R: %d Active Zones Mapped", SR_Count);
    CreateOrUpdateLabel(row3Name, srText, xOffset + 12, yOffset + 75, clrWhite, 8, false);
 
-   // Row 4: Live Setup Status
    string ruleText = "Waiting for 2-Leg Pullback...";
    if(trendClr == clrLimeGreen) ruleText = "Scanning 2L Pullback to 13/50 EMA & Support";
    else if(trendClr == clrCrimson) ruleText = "Scanning 2S Pullback to 13/50 EMA & Resistance";
