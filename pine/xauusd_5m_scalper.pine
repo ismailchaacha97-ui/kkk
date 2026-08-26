@@ -1,0 +1,191 @@
+//@version=5
+// =====================================================================
+//  XAUUSD 5M Scalper — Regime-Based (Setup A: Trend Pullback,
+//  Setup B: Range Fade, Setup C: London Opening Range Breakout)
+//  مرافق لوثيقة XAUUSD-5M-Scalping-Strategy.md
+//  للأغراض التعليمية فقط — اختبره على حساب تجريبي.
+// =====================================================================
+indicator("XAUUSD 5M Scalper [Regime]", overlay=true, max_labels_count=500, max_lines_count=500)
+
+// ------------------------- المدخلات -------------------------
+grpF = "فلاتر النظام"
+atrLen      = input.int(14,  "ATR Length",              group=grpF)
+atrAvgLen   = input.int(50,  "ATR Average Length",      group=grpF)
+slopeLook   = input.int(10,  "EMA50 Slope Lookback",    group=grpF)
+trendSlope  = input.float(0.8, "عتبة ميل الاتجاه",      step=0.1, group=grpF)
+rangeSlope  = input.float(0.4, "عتبة ميل التذبذب",      step=0.1, group=grpF)
+deadVol     = input.float(0.6, "Vol_Ratio سوق ميت <",   step=0.05, group=grpF)
+chaosVol    = input.float(2.0, "Vol_Ratio فوضى >",      step=0.05, group=grpF)
+
+grpT = "النافذة الزمنية (GMT)"
+useSession  = input.bool(true, "تفعيل فلتر الجلسات", group=grpT)
+sessLondon  = input.session("0700-1100", "جلسة لندن",            group=grpT)
+sessOverlap = input.session("1230-1600", "تداخل لندن/نيويورك",   group=grpT)
+sessAsia    = input.session("0000-0600", "الجلسة الآسيوية (Range)", group=grpT)
+
+grpR = "المخاطرة"
+slAtrMultA  = input.float(0.5, "Setup A: مضاعف ATR للوقف", step=0.1, group=grpR)
+slAtrMultB  = input.float(1.0, "Setup B: مضاعف ATR للوقف", step=0.1, group=grpR)
+minSL       = input.float(1.5, "أدنى وقف بالدولار",        step=0.1, group=grpR)
+maxSL       = input.float(4.0, "أقصى وقف بالدولار",        step=0.1, group=grpR)
+
+grpS = "الإعدادات"
+useA = input.bool(true,  "تفعيل Setup A (Trend Pullback)", group=grpS)
+useB = input.bool(true,  "تفعيل Setup B (Range Fade)",     group=grpS)
+useC = input.bool(true,  "تفعيل Setup C (London ORB)",     group=grpS)
+rangeLook   = input.int(30,  "شموع تعريف النطاق",  group=grpS)
+minRangeUSD = input.float(3.0, "أدنى اتساع نطاق $", step=0.5, group=grpS)
+
+// ------------------------- المؤشرات -------------------------
+ema21  = ta.ema(close, 21)
+ema50  = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+atr    = ta.atr(atrLen)
+atrAvg = ta.sma(atr, atrAvgLen)
+rsi    = ta.rsi(close, 9)
+vwapV  = ta.vwap(hlc3)
+volAvg = ta.sma(volume, 20)
+
+// فريم أعلى M15
+htfClose = request.security(syminfo.tickerid, "15", close,          lookahead=barmerge.lookahead_off)
+htfEma50 = request.security(syminfo.tickerid, "15", ta.ema(close,50), lookahead=barmerge.lookahead_off)
+htfUp    = htfClose > htfEma50
+htfDn    = htfClose < htfEma50
+
+// ------------------------- فلتر النظام -------------------------
+volRatio  = atrAvg > 0 ? atr / atrAvg : 0.0
+emaSlope  = atr > 0 ? (ema50 - ema50[slopeLook]) / atr : 0.0
+
+isDead  = volRatio < deadVol
+isChaos = volRatio > chaosVol
+isTrend = not isDead and not isChaos and volRatio >= 1.0 and math.abs(emaSlope) >= trendSlope
+isRange = not isDead and not isChaos and volRatio >= 0.7 and volRatio <= 1.2 and math.abs(emaSlope) < rangeSlope
+
+regime = isDead ? "DEAD" : isChaos ? "CHAOS" : isTrend ? "TREND" : isRange ? "RANGE" : "NEUTRAL"
+
+// ------------------------- الجلسات -------------------------
+inSess(s) => not na(time(timeframe.period, s, "GMT"))
+inLondon  = inSess(sessLondon)
+inOverlap = inSess(sessOverlap)
+inAsia    = inSess(sessAsia)
+sessOKTrend = not useSession or (inLondon or inOverlap)
+sessOKRange = not useSession or (inLondon or inOverlap or inAsia)
+
+// ------------------------- Setup A: Trend Pullback -------------------------
+bullStack = ema21 > ema50 and ema50 > ema200
+bearStack = ema21 < ema50 and ema50 < ema200
+
+// لمس منطقة القيمة خلال آخر 3 شموع
+touchedUp = low  <= ema21 or low[1]  <= ema21[1]  or low[2]  <= ema21[2]
+touchedDn = high >= ema21 or high[1] >= ema21[1] or high[2] >= ema21[2]
+
+body      = math.abs(close - open)
+rangeBar  = math.max(high - low, syminfo.mintick)
+strongBull = close > open and body / rangeBar >= 0.5 and close > high[1]
+strongBear = close < open and body / rangeBar >= 0.5 and close < low[1]
+
+rsiReloadUp = ta.lowest(rsi, 3) < 45 and rsi > 50
+rsiReloadDn = ta.highest(rsi, 3) > 55 and rsi < 50
+
+longA  = useA and isTrend and sessOKTrend and bullStack and htfUp and close > vwapV and touchedUp and rsiReloadUp and strongBull
+shortA = useA and isTrend and sessOKTrend and bearStack and htfDn and close < vwapV and touchedDn and rsiReloadDn and strongBear
+
+slLongA  = math.min(ta.lowest(low, 3),  ema50) - slAtrMultA * atr
+slShortA = math.max(ta.highest(high, 3), ema50) + slAtrMultA * atr
+
+// ------------------------- Setup B: Range Fade -------------------------
+rHigh = ta.highest(high, rangeLook)
+rLow  = ta.lowest(low,  rangeLook)
+rMid  = (rHigh + rLow) / 2
+rSize = rHigh - rLow
+rangeValid = rSize >= minRangeUSD and rSize <= 2.5 * atr * 4  // نطاق معقول
+
+flatEma = math.abs(emaSlope) < rangeSlope
+rejLow  = low  <= rLow[1]  and close > rLow[1]  and rsi < 25
+rejHigh = high >= rHigh[1] and close < rHigh[1] and rsi > 75
+
+longB  = useB and isRange and sessOKRange and rangeValid and flatEma and rejLow  and close > open
+shortB = useB and isRange and sessOKRange and rangeValid and flatEma and rejHigh and close < open
+
+slLongB  = rLow  - slAtrMultB * atr
+slShortB = rHigh + slAtrMultB * atr
+
+// ------------------------- Setup C: London ORB -------------------------
+orSess = input.session("0700-0715", "نطاق افتتاح لندن", group=grpS)
+inOR   = inSess(orSess)
+var float orH = na
+var float orL = na
+var bool  orDone = false
+var int   orTrades = 0
+
+newDay = ta.change(time("D")) != 0
+if newDay
+    orH := na
+    orL := na
+    orDone := false
+    orTrades := 0
+
+if inOR
+    orH := na(orH) ? high : math.max(orH, high)
+    orL := na(orL) ? low  : math.min(orL, low)
+if not inOR and not na(orH)
+    orDone := true
+
+orWindow = inSess("0715-0900")
+volOK    = volume >= 1.5 * volAvg
+bodyOK   = body / rangeBar >= 0.6
+
+longC  = useC and orDone and orWindow and orTrades < 2 and close > orH and volOK and bodyOK and close > vwapV
+shortC = useC and orDone and orWindow and orTrades < 2 and close < orL and volOK and bodyOK and close < vwapV
+if longC or shortC
+    orTrades := orTrades + 1
+
+orRange  = na(orH) or na(orL) ? na : orH - orL
+slLongC  = na(orL) ? na : math.max(orL, close - 1.2 * atr)
+slShortC = na(orH) ? na : math.min(orH, close + 1.2 * atr)
+
+// ------------------------- تجميع الإشارات + فلتر الوقف -------------------------
+slValid(entry, sl) => na(sl) ? false : (math.abs(entry - sl) >= minSL and math.abs(entry - sl) <= maxSL)
+
+longSig  = (longA  and slValid(close, slLongA))  or (longB  and slValid(close, slLongB))  or (longC  and slValid(close, slLongC))
+shortSig = (shortA and slValid(close, slShortA)) or (shortB and slValid(close, slShortB)) or (shortC and slValid(close, slShortC))
+
+sigName  = longA or shortA ? "A" : longB or shortB ? "B" : "C"
+slUsed   = longA ? slLongA : shortA ? slShortA : longB ? slLongB : shortB ? slShortB : longC ? slLongC : shortC ? slShortC : na
+riskUsed = na(slUsed) ? na : math.abs(close - slUsed)
+tp1      = na(riskUsed) ? na : (longSig ? close + riskUsed : close - riskUsed)
+tp2      = na(riskUsed) ? na : (longSig ? close + 2*riskUsed : close - 2*riskUsed)
+
+// ------------------------- الرسم -------------------------
+plot(ema21,  "EMA21",  color.new(color.yellow, 0), 1)
+plot(ema50,  "EMA50",  color.new(color.orange, 0), 1)
+plot(ema200, "EMA200", color.new(color.red,    0), 2)
+plot(vwapV,  "VWAP",   color.new(color.aqua,  0), 1)
+
+bgcolor(isDead ? color.new(color.gray, 90) : isChaos ? color.new(color.purple, 90) : isTrend ? color.new(color.green, 93) : isRange ? color.new(color.blue, 93) : na)
+
+plotshape(longSig,  "BUY",  shape.labelup,   location.belowbar, color.new(color.green,0), text="BUY",  textcolor=color.white, size=size.small)
+plotshape(shortSig, "SELL", shape.labeldown, location.abovebar, color.new(color.red,0),   text="SELL", textcolor=color.white, size=size.small)
+
+if longSig or shortSig
+    lbl = label.new(bar_index, longSig ? low - atr : high + atr,
+       text = sigName + " | SL " + str.tostring(slUsed, "#.##") + " | TP1 " + str.tostring(tp1, "#.##") + " | TP2 " + str.tostring(tp2, "#.##"),
+       style = longSig ? label.style_label_up : label.style_label_down,
+       color = color.new(color.black, 20), textcolor = color.white, size = size.tiny)
+
+// لوحة الحالة
+var table pnl = table.new(position.top_right, 2, 5, border_width=1)
+if barstate.islast
+    table.cell(pnl, 0, 0, "النظام",     bgcolor=color.new(color.black,20), text_color=color.white, text_size=size.small)
+    table.cell(pnl, 1, 0, regime,       bgcolor=isTrend?color.new(color.green,40):isRange?color.new(color.blue,40):color.new(color.gray,40), text_color=color.white, text_size=size.small)
+    table.cell(pnl, 0, 1, "Vol_Ratio",  bgcolor=color.new(color.black,20), text_color=color.white, text_size=size.small)
+    table.cell(pnl, 1, 1, str.tostring(volRatio, "#.##"), bgcolor=color.new(color.black,40), text_color=color.white, text_size=size.small)
+    table.cell(pnl, 0, 2, "EMA Slope",  bgcolor=color.new(color.black,20), text_color=color.white, text_size=size.small)
+    table.cell(pnl, 1, 2, str.tostring(emaSlope, "#.##"), bgcolor=color.new(color.black,40), text_color=color.white, text_size=size.small)
+    table.cell(pnl, 0, 3, "ATR $",      bgcolor=color.new(color.black,20), text_color=color.white, text_size=size.small)
+    table.cell(pnl, 1, 3, str.tostring(atr, "#.##"),      bgcolor=color.new(color.black,40), text_color=color.white, text_size=size.small)
+    table.cell(pnl, 0, 4, "الجلسة",     bgcolor=color.new(color.black,20), text_color=color.white, text_size=size.small)
+    table.cell(pnl, 1, 4, inLondon?"LONDON":inOverlap?"OVERLAP":inAsia?"ASIA":"OFF", bgcolor=color.new(color.black,40), text_color=color.white, text_size=size.small)
+
+alertcondition(longSig,  "XAU Long",  "XAUUSD 5M: إشارة شراء")
+alertcondition(shortSig, "XAU Short", "XAUUSD 5M: إشارة بيع")
