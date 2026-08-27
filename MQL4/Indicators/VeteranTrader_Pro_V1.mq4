@@ -2,11 +2,11 @@
 //|                                        VeteranTrader_Pro_V1.mq4  |
 //|                       Veteran 30-Year Wall Street Trading Engine |
 //|                             Classical Multi-Confluence System    |
-//|         (Persistent Active Trade Tracker & Confidence Engine)    |
+//|         (Customizable MTF Matrix & Confidence Engine)            |
 //+------------------------------------------------------------------+
 #property copyright "Veteran Trader Institutional System"
 #property link      "https://arena.ai"
-#property version   "1.40"
+#property version   "1.50"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 5
@@ -29,66 +29,89 @@ double MedEMABuffer[];
 double SlowEMABuffer[];
 
 //+------------------------------------------------------------------+
+//| ENUM DEFINITIONS FOR CUSTOM MTF SELECTION                        |
+//+------------------------------------------------------------------+
+enum ENUM_CUSTOM_TF
+{
+   TF_M1  = PERIOD_M1,  // 1 Minute (M1)
+   TF_M5  = PERIOD_M5,  // 5 Minutes (M5)
+   TF_M15 = PERIOD_M15, // 15 Minutes (M15)
+   TF_M30 = PERIOD_M30, // 30 Minutes (M30)
+   TF_H1  = PERIOD_H1,  // 1 Hour (H1)
+   TF_H4  = PERIOD_H4,  // 4 Hours (H4)
+   TF_D1  = PERIOD_D1,  // Daily (D1)
+   TF_W1  = PERIOD_W1,  // Weekly (W1)
+   TF_MN1 = PERIOD_MN1  // Monthly (MN1)
+};
+
+//+------------------------------------------------------------------+
 //| INPUT PARAMETERS                                                 |
 //+------------------------------------------------------------------+
 //--- Trend Settings (Classical Dow Theory & Stage Analysis)
-input string   Group_Trend          = "=== TREND & REGIME SETTINGS ===";
-input int      InpEMAFast           = 20;          // Fast EMA (Tactical Momentum)
-input int      InpEMAMedium         = 50;          // Medium EMA (Institutional Pullback)
-input int      InpEMASlow           = 200;         // Slow EMA (Wall Street Baseline)
-input bool     InpShowEMAs          = true;        // Show EMA Lines on Chart
+input string         Group_Trend          = "=== TREND & REGIME SETTINGS ===";
+input int            InpEMAFast           = 20;          // Fast EMA (Tactical Momentum)
+input int            InpEMAMedium         = 50;          // Medium EMA (Institutional Pullback)
+input int            InpEMASlow           = 200;         // Slow EMA (Wall Street Baseline)
+input bool           InpShowEMAs          = true;        // Show EMA Lines on Chart
+
+//--- Customizable Multi-Timeframe (MTF) Settings
+input string         Group_MTF_Settings   = "=== CUSTOM MULTI-TIMEFRAME (MTF) MATRIX ===";
+input ENUM_CUSTOM_TF InpMTF_Slot1         = TF_M15;      // MTF Slot 1 (e.g. Scalp / Entry)
+input ENUM_CUSTOM_TF InpMTF_Slot2         = TF_H1;       // MTF Slot 2 (e.g. Intermediate)
+input ENUM_CUSTOM_TF InpMTF_Slot3         = TF_H4;       // MTF Slot 3 (e.g. Major Structure)
+input ENUM_CUSTOM_TF InpMTF_Slot4         = TF_D1;       // MTF Slot 4 (e.g. Macro Trend)
 
 //--- Anti-Chop & Range Suppression Filter
-input string   Group_Chop           = "=== ANTI-CHOP & RANGE FILTER ===";
-input bool     InpFilterChop        = true;        // Enable Anti-Chop Filter (Mute Range Signals)
-input int      InpADXPeriod         = 14;          // ADX Trend Strength Period
-input double   InpMinADX            = 22.0;        // Min ADX for Trending Market (>22 = Trend)
-input bool     InpFilterHTF         = true;        // Require Higher Timeframe Confirmation
+input string         Group_Chop           = "=== ANTI-CHOP & RANGE FILTER ===";
+input bool           InpFilterChop        = true;        // Enable Anti-Chop Filter (Mute Range Signals)
+input int            InpADXPeriod         = 14;          // ADX Trend Strength Period
+input double         InpMinADX            = 22.0;        // Min ADX for Trending Market (>22 = Trend)
+input bool           InpFilterHTF         = true;        // Require HTF Alignment with Slot 3
 
 //--- Clean Chart Signal Control (No Arrow Clutter)
-input string   Group_SignalControl  = "=== CLEAN CHART SIGNAL CONTROL ===";
-input bool     InpOneSignalPerTrend = true;        // Strict 1 Arrow per Trend Move
-input int      InpSignalCooldown    = 15;          // Minimum Bars Between Arrows
-input int      InpMaxHistoricalBars = 350;         // Max Historical Bars to Scan
+input string         Group_SignalControl  = "=== CLEAN CHART SIGNAL CONTROL ===";
+input bool           InpOneSignalPerTrend = true;        // Strict 1 Arrow per Trend Move
+input int            InpSignalCooldown    = 15;          // Minimum Bars Between Arrows
+input int            InpMaxHistoricalBars = 350;         // Max Historical Bars to Scan
 
 //--- Classical Floor Trader Pivots Settings
-input string   Group_Pivots         = "=== FLOOR TRADER PIVOTS (D1) ===";
-input bool     InpShowPivots        = true;        // Show Daily Floor Trader Pivots
-input color    InpColorPivot        = clrSilver;   // Pivot Point (PP) Color
-input color    InpColorR1           = clrOrangeRed;// Resistance 1 Color
-input color    InpColorR2           = clrRed;      // Resistance 2 Color
-input color    InpColorS1           = clrDeepSkyBlue; // Support 1 Color
-input color    InpColorS2           = clrDodgerBlue;  // Support 2 Color
+input string         Group_Pivots         = "=== FLOOR TRADER PIVOTS (D1) ===";
+input bool           InpShowPivots        = true;        // Show Daily Floor Trader Pivots
+input color          InpColorPivot        = clrSilver;   // Pivot Point (PP) Color
+input color          InpColorR1           = clrOrangeRed;// Resistance 1 Color
+input color          InpColorR2           = clrRed;      // Resistance 2 Color
+input color          InpColorS1           = clrDeepSkyBlue; // Support 1 Color
+input color          InpColorS2           = clrDodgerBlue;  // Support 2 Color
 
 //--- Confluence & Momentum (Wilder & Larry Williams)
-input string   Group_Momentum       = "=== MOMENTUM CONFLUENCE ===";
-input int      InpRSIPeriod         = 14;          // RSI Period
-input int      InpWilliamsPeriod    = 14;          // Larry Williams %R Period
-input int      InpATRPeriod         = 14;          // ATR Period (Volatility)
+input string         Group_Momentum       = "=== MOMENTUM CONFLUENCE ===";
+input int            InpRSIPeriod         = 14;          // RSI Period
+input int            InpWilliamsPeriod    = 14;          // Larry Williams %R Period
+input int            InpATRPeriod         = 14;          // ATR Period (Volatility)
 
 //--- Risk Management (ATR Multiplier & Target Ratios)
-input string   Group_Risk           = "=== RISK & TARGET MANAGEMENT ===";
-input double   InpRiskPercent       = 1.0;         // Account Risk % for Lot Size Calc
-input double   InpATRMorphSL        = 1.5;         // Stop Loss ATR Multiplier
-input double   InpTP1_RR            = 1.5;         // Take Profit 1 Risk:Reward
-input double   InpTP2_RR            = 2.5;         // Take Profit 2 Risk:Reward
-input bool     InpShowTradeLines    = true;        // Show Visual Persistent Lines (Entry/SL/TP)
+input string         Group_Risk           = "=== RISK & TARGET MANAGEMENT ===";
+input double         InpRiskPercent       = 1.0;         // Account Risk % for Lot Size Calc
+input double         InpATRMorphSL        = 1.5;         // Stop Loss ATR Multiplier
+input double         InpTP1_RR            = 1.5;         // Take Profit 1 Risk:Reward
+input double         InpTP2_RR            = 2.5;         // Take Profit 2 Risk:Reward
+input bool           InpShowTradeLines    = true;        // Show Visual Persistent Lines (Entry/SL/TP)
 
 //--- Dashboard HUD Settings
-input string   Group_Dashboard      = "=== INSTITUTIONAL DASHBOARD HUD ===";
-input bool     InpShowDashboard     = true;        // Enable On-Chart Dashboard
-input int      InpDashX             = 25;          // Dashboard X Position (Pixels)
-input int      InpDashY             = 35;          // Dashboard Y Position (Pixels)
-input int      InpFontSize          = 9;           // Base Font Size
-input string   InpFontName          = "Segoe UI";  // Dashboard Font
+input string         Group_Dashboard      = "=== INSTITUTIONAL DASHBOARD HUD ===";
+input bool           InpShowDashboard     = true;        // Enable On-Chart Dashboard
+input int            InpDashX             = 25;          // Dashboard X Position (Pixels)
+input int            InpDashY             = 35;          // Dashboard Y Position (Pixels)
+input int            InpFontSize          = 9;           // Base Font Size
+input string         InpFontName          = "Segoe UI";  // Dashboard Font
 
 //--- Alerts & Notifications
-input string   Group_Alerts         = "=== ALERTS & NOTIFICATIONS ===";
-input bool     InpPopupAlert        = true;        // Popup Alert on Chart
-input bool     InpSoundAlert        = true;        // Sound Alert
-input string   InpSoundFile         = "alert.wav"; // Alert Sound File
-input bool     InpPushAlert         = true;        // Push Notification to MT4 Mobile
-input bool     InpEmailAlert        = false;       // Send Email Alert
+input string         Group_Alerts         = "=== ALERTS & NOTIFICATIONS ===";
+input bool           InpPopupAlert        = true;        // Popup Alert on Chart
+input bool           InpSoundAlert        = true;        // Sound Alert
+input string         InpSoundFile         = "alert.wav"; // Alert Sound File
+input bool           InpPushAlert         = true;        // Push Notification to MT4 Mobile
+input bool           InpEmailAlert        = false;       // Send Email Alert
 
 //+------------------------------------------------------------------+
 //| GLOBAL CONSTANTS & VARIABLES                                     |
@@ -104,7 +127,7 @@ int      PipDigits     = 4;
 // Persistent active trade tracker structure
 struct ActiveTradeTracker
 {
-   bool     hasSetup;         // Is there any active/recent setup?
+   bool     hasSetup;
    int      signalType;       // 1 = BUY, -1 = SELL, 0 = NONE
    double   entryPrice;
    double   stopLoss;
@@ -133,7 +156,6 @@ void DrawPersistentTradeLines();
 void RenderDashboard();
 void HandleAlerts(datetime currentBarTime);
 string GetTimeframeString(int tf);
-int  GetHigherTimeframe(int currentTf);
 int  GetTimeframeTrend(int timeframe);
 bool IsMarketChoppy(int shift, double &adxOut);
 double CalculateLotSize(double slPips);
@@ -184,7 +206,6 @@ int OnInit()
    SetIndexStyle(4, InpShowEMAs ? DRAW_LINE : DRAW_NONE, STYLE_SOLID, 2, indicator_color5);
    SetIndexLabel(4, "Slow EMA (" + IntegerToString(InpEMASlow) + ")");
 
-   // Initialize active trade tracker
    activeTrade.hasSetup = false;
    activeTrade.signalType = 0;
    activeTrade.entryPrice = 0;
@@ -205,7 +226,7 @@ int OnInit()
    activeTrade.isChoppy = false;
    activeTrade.currentADX = 0;
 
-   IndicatorShortName("Veteran Trader Pro [Confidence Engine]");
+   IndicatorShortName("Veteran Trader Pro [Custom MTF Engine]");
    Comment("★ Veteran Trader Pro Active | Symbol: ", Symbol(), " ★");
 
    if(InpShowDashboard)
@@ -228,24 +249,6 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, PREFIX_TRADE);
    Comment("");
    ChartRedraw(0);
-}
-
-//+------------------------------------------------------------------+
-//| Get Higher Timeframe                                             |
-//+------------------------------------------------------------------+
-int GetHigherTimeframe(int currentTf)
-{
-   switch(currentTf)
-   {
-      case PERIOD_M1:  return PERIOD_M15;
-      case PERIOD_M5:  return PERIOD_H1;
-      case PERIOD_M15: return PERIOD_H1;
-      case PERIOD_M30: return PERIOD_H4;
-      case PERIOD_H1:  return PERIOD_H4;
-      case PERIOD_H4:  return PERIOD_D1;
-      case PERIOD_D1:  return PERIOD_W1;
-      default:         return PERIOD_D1;
-   }
 }
 
 //+------------------------------------------------------------------+
@@ -274,15 +277,17 @@ int GetTimeframeTrend(int timeframe)
 //+------------------------------------------------------------------+
 int CalculateConfidenceScore(int dir, int shift, double adxVal, double rsiVal)
 {
-   int score = 50; // Base score for any valid confirmed trigger
+   int score = 50;
 
-   // 1. Higher Timeframe Alignment (+20%)
-   int htf = GetHigherTimeframe(Period());
-   int htfTrend = GetTimeframeTrend(htf);
-   if(htfTrend == dir) score += 15;
+   // 1. Custom User MTF Confluence (+25%)
+   int t1 = GetTimeframeTrend(InpMTF_Slot1);
+   int t2 = GetTimeframeTrend(InpMTF_Slot2);
+   int t3 = GetTimeframeTrend(InpMTF_Slot3);
+   int t4 = GetTimeframeTrend(InpMTF_Slot4);
 
-   int d1Trend = GetTimeframeTrend(PERIOD_D1);
-   if(d1Trend == dir)  score += 10;
+   if(t2 == dir) score += 8;
+   if(t3 == dir) score += 10;
+   if(t4 == dir) score += 7;
 
    // 2. 200 EMA Baseline Alignment (+10%)
    double slowEMA = iMA(NULL, 0, InpEMASlow, 0, MODE_EMA, PRICE_CLOSE, shift);
@@ -317,7 +322,6 @@ int CalculateConfidenceScore(int dir, int shift, double adxVal, double rsiVal)
          score += 10;
    }
 
-   // Bound between 60% and 98%
    if(score > 98) score = 98;
    if(score < 60) score = 65;
 
@@ -469,7 +473,7 @@ void UpdateActiveTradeProgress()
 
    double curClose = Close[0];
 
-   if(activeTrade.signalType == 1) // BUY Trade
+   if(activeTrade.signalType == 1)
    {
       activeTrade.livePips = (curClose - activeTrade.entryPrice) / PipMultiplier;
 
@@ -503,7 +507,7 @@ void UpdateActiveTradeProgress()
          activeTrade.liveStatusText = StringFormat("🟢 RUNNING (%s%0.1f pips)", sign, activeTrade.livePips);
       }
    }
-   else if(activeTrade.signalType == -1) // SELL Trade
+   else if(activeTrade.signalType == -1)
    {
       activeTrade.livePips = (activeTrade.entryPrice - curClose) / PipMultiplier;
 
@@ -556,21 +560,17 @@ void DrawPersistentTradeLines()
    color entryClr = (activeTrade.signalType == 1) ? clrLimeGreen : clrCrimson;
    string dirText = (activeTrade.signalType == 1) ? "BUY" : "SELL";
 
-   // 1. Entry Line with Confidence Percentage
    string entryDesc = StringFormat("ENTRY [%s - %d%% CONFIDENCE]: %s", dirText, activeTrade.confidence, DoubleToString(activeTrade.entryPrice, Digits));
    DrawPriceLine(PREFIX_TRADE + "Entry", entryDesc, activeTrade.entryPrice, entryClr, STYLE_SOLID, 2, tStart, tEnd);
 
-   // 2. Stop Loss Line
    DrawPriceLine(PREFIX_TRADE + "SL", "STOP LOSS: " + DoubleToString(activeTrade.stopLoss, Digits) + " (" + DoubleToString(activeTrade.riskPips, 1) + " pips)",
                  activeTrade.stopLoss, clrRed, STYLE_DASH, 1, tStart, tEnd);
 
-   // 3. TP1 Line
    double tp1Pips = MathAbs(activeTrade.takeProfit1 - activeTrade.entryPrice) / PipMultiplier;
    color tp1Clr   = activeTrade.isTP1Hit ? clrGold : clrMediumSeaGreen;
    DrawPriceLine(PREFIX_TRADE + "TP1", "TARGET 1 (1:1.5): " + DoubleToString(activeTrade.takeProfit1, Digits) + " (+" + DoubleToString(tp1Pips, 1) + " pips)",
                  activeTrade.takeProfit1, tp1Clr, STYLE_DASHDOT, 1, tStart, tEnd);
 
-   // 4. TP2 Line
    double tp2Pips = MathAbs(activeTrade.takeProfit2 - activeTrade.entryPrice) / PipMultiplier;
    color tp2Clr   = activeTrade.isTP2Hit ? clrGold : clrDeepSkyBlue;
    DrawPriceLine(PREFIX_TRADE + "TP2", "TARGET 2 (1:2.5): " + DoubleToString(activeTrade.takeProfit2, Digits) + " (+" + DoubleToString(tp2Pips, 1) + " pips)",
@@ -627,7 +627,6 @@ int OnCalculate(const int rates_total,
    if(counted_bars > 0) limit++;
    if(limit > rates_total - 1) limit = rates_total - 1;
 
-   // 1. Calculate EMAs and Clear Buffer points
    for(int i = limit; i >= 0; i--)
    {
       FastEMABuffer[i] = iMA(NULL, 0, InpEMAFast, 0, MODE_EMA, PRICE_CLOSE, i);
@@ -637,17 +636,13 @@ int OnCalculate(const int rates_total,
       SellSignalBuffer[i] = EMPTY_VALUE;
    }
 
-   // Higher Timeframe check
-   int htf = GetHigherTimeframe(Period());
-   int htfTrend = InpFilterHTF ? GetTimeframeTrend(htf) : 0;
+   // Higher Timeframe check based on user-selected Slot 3 (Major Structure)
+   int htfTrend = InpFilterHTF ? GetTimeframeTrend(InpMTF_Slot3) : 0;
 
-   // Scan for Clean, Non-Repainting Signals
    int scanLimit = MathMin(rates_total - 1, InpMaxHistoricalBars);
-   
    int lastSignalBar = 9999;
    int lastSignalDir = 0;
 
-   // Scan chronologically backwards (oldest to newest)
    for(int i = scanLimit; i >= 1; i--)
    {
       double fastEMA = FastEMABuffer[i];
@@ -670,7 +665,6 @@ int OnCalculate(const int rates_total,
       double prevH = High[i+1];
       double prevL = Low[i+1];
 
-      // Chop & Consolidation Check
       double adxVal = 0;
       bool isChop = IsMarketChoppy(i, adxVal);
 
@@ -683,7 +677,6 @@ int OnCalculate(const int rates_total,
       if(isChop && InpFilterChop)
          continue;
 
-      // Classical Stage Analysis Trend
       bool isBullishRegime = (cVal > slowEMA && fastEMA > medEMA && cVal > medEMA);
       bool isBearishRegime = (cVal < slowEMA && fastEMA < medEMA && cVal < medEMA);
 
@@ -693,7 +686,6 @@ int OnCalculate(const int rates_total,
          if(htfTrend == 1)  isBearishRegime = false;
       }
 
-      // High-Precision Pullback Trigger
       bool buyRaw = isBullishRegime &&
                     (lVal <= fastEMA || prevL <= fastEMA || lVal <= medEMA) &&
                     (cVal > oVal) &&
@@ -717,7 +709,6 @@ int OnCalculate(const int rates_total,
 
          if(i == 1 && Time[0] != lastAlertTime)
          {
-            // Lock new active trade setup
             activeTrade.hasSetup = true;
             activeTrade.signalType = 1;
             activeTrade.entryPrice = Close[1];
@@ -744,7 +735,6 @@ int OnCalculate(const int rates_total,
 
          if(i == 1 && Time[0] != lastAlertTime)
          {
-            // Lock new active trade setup
             activeTrade.hasSetup = true;
             activeTrade.signalType = -1;
             activeTrade.entryPrice = Close[1];
@@ -765,7 +755,6 @@ int OnCalculate(const int rates_total,
       }
    }
 
-   // 2. Fallback lookback to lock latest signal if active setup is empty
    if(!activeTrade.hasSetup || activeTrade.setupTime == 0)
    {
       for(int k = 1; k <= MathMin(scanLimit, 100); k++)
@@ -828,17 +817,11 @@ int OnCalculate(const int rates_total,
       }
    }
 
-   // 3. Update Real-Time Live Status of Trade
    UpdateActiveTradeProgress();
-
-   // 4. Render Visual Components & Persistent Lines
    CalculateAndDrawPivots();
    DrawPersistentTradeLines();
-
-   // 5. Alerts Trigger on Bar 1 Confirmation
    HandleAlerts(Time[0]);
 
-   // 6. Render Executive Dashboard
    if(InpShowDashboard)
    {
       RenderDashboard();
@@ -938,39 +921,44 @@ void RenderDashboard()
    CreateRectLabel(PREFIX_DASH + "BG", x, y, width, height, bgClr, borderClr, 2);
 
    // Header
-   CreateLabel(PREFIX_DASH + "H1", x + 12, y + 8, "★ VETERAN TRADER PRO (CONFIDENCE)", headerClr, InpFontSize + 1, true);
-   CreateLabel(PREFIX_DASH + "H2", x + 12, y + 26, "Live Active Setup Tracker & Multi-Confluence", subClr, InpFontSize - 2, false);
+   CreateLabel(PREFIX_DASH + "H1", x + 12, y + 8, "★ VETERAN TRADER PRO (CUSTOM MTF)", headerClr, InpFontSize + 1, true);
+   CreateLabel(PREFIX_DASH + "H2", x + 12, y + 26, "Custom MTF Matrix & Confidence Engine", subClr, InpFontSize - 2, false);
 
    // Divider 1
    CreateLine(PREFIX_DASH + "Div1", x + 10, y + 42, width - 20, borderClr);
 
-   // Asset & Volatility Info
+   // Asset Info
    double currentSpread = (double)MarketInfo(Symbol(), MODE_SPREAD);
    if(Digits == 3 || Digits == 5) currentSpread = currentSpread / 10.0;
    string assetInfo = StringFormat("Asset: %s (%s)  |  Spread: %0.1f pips", Symbol(), GetTimeframeString(Period()), currentSpread);
    CreateLabel(PREFIX_DASH + "Asset", x + 12, y + 48, assetInfo, textClr, InpFontSize - 1, false);
 
-   // Multi-Timeframe Alignment
-   int trendM15 = GetTimeframeTrend(PERIOD_M15);
-   int trendH1  = GetTimeframeTrend(PERIOD_H1);
-   int trendH4  = GetTimeframeTrend(PERIOD_H4);
-   int trendD1  = GetTimeframeTrend(PERIOD_D1);
+   // User-Customized Multi-Timeframe Matrix
+   int trend1 = GetTimeframeTrend(InpMTF_Slot1);
+   int trend2 = GetTimeframeTrend(InpMTF_Slot2);
+   int trend3 = GetTimeframeTrend(InpMTF_Slot3);
+   int trend4 = GetTimeframeTrend(InpMTF_Slot4);
 
-   string iconM15 = (trendM15 == 1) ? "[▲ M15]" : (trendM15 == -1) ? "[▼ M15]" : "[— M15]";
-   string iconH1  = (trendH1 == 1)  ? "[▲ H1]"  : (trendH1 == -1)  ? "[▼ H1]"  : "[— H1]";
-   string iconH4  = (trendH4 == 1)  ? "[▲ H4]"  : (trendH4 == -1)  ? "[▼ H4]"  : "[— H4]";
-   string iconD1  = (trendD1 == 1)  ? "[▲ D1]"  : (trendD1 == -1)  ? "[▼ D1]"  : "[— D1]";
+   string sTf1 = GetTimeframeString(InpMTF_Slot1);
+   string sTf2 = GetTimeframeString(InpMTF_Slot2);
+   string sTf3 = GetTimeframeString(InpMTF_Slot3);
+   string sTf4 = GetTimeframeString(InpMTF_Slot4);
+
+   string icon1 = (trend1 == 1) ? StringFormat("[▲ %s]", sTf1) : (trend1 == -1) ? StringFormat("[▼ %s]", sTf1) : StringFormat("[— %s]", sTf1);
+   string icon2 = (trend2 == 1) ? StringFormat("[▲ %s]", sTf2) : (trend2 == -1) ? StringFormat("[▼ %s]", sTf2) : StringFormat("[— %s]", sTf2);
+   string icon3 = (trend3 == 1) ? StringFormat("[▲ %s]", sTf3) : (trend3 == -1) ? StringFormat("[▼ %s]", sTf3) : StringFormat("[— %s]", sTf3);
+   string icon4 = (trend4 == 1) ? StringFormat("[▲ %s]", sTf4) : (trend4 == -1) ? StringFormat("[▼ %s]", sTf4) : StringFormat("[— %s]", sTf4);
 
    int score = 0;
-   if(trendM15 == 1) score += 25; else if(trendM15 == -1) score -= 25;
-   if(trendH1 == 1)  score += 25; else if(trendH1 == -1) score -= 25;
-   if(trendH4 == 1)  score += 25; else if(trendH4 == -1) score -= 25;
-   if(trendD1 == 1)  score += 25; else if(trendD1 == -1) score -= 25;
+   if(trend1 == 1) score += 25; else if(trend1 == -1) score -= 25;
+   if(trend2 == 1) score += 25; else if(trend2 == -1) score -= 25;
+   if(trend3 == 1) score += 25; else if(trend3 == -1) score -= 25;
+   if(trend4 == 1) score += 25; else if(trend4 == -1) score -= 25;
 
    color mtfClr = (score >= 50) ? greenClr : (score <= -50) ? redClr : yellowClr;
 
    CreateLabel(PREFIX_DASH + "MTF_Label", x + 12, y + 68, "MTF Flow:", subClr, InpFontSize - 1, false);
-   CreateLabel(PREFIX_DASH + "MTF_Icons", x + 85, y + 68, StringFormat("%s  %s  %s  %s", iconM15, iconH1, iconH4, iconD1), mtfClr, InpFontSize - 1, true);
+   CreateLabel(PREFIX_DASH + "MTF_Icons", x + 85, y + 68, StringFormat("%s  %s  %s  %s", icon1, icon2, icon3, icon4), mtfClr, InpFontSize - 1, true);
 
    // Market Regime & ADX Chop Status
    string chopStatusStr = activeTrade.isChoppy ? "🚫 CHOP / RANGE (MUTED)" : "✅ ACTIVE TRENDING";
@@ -1128,7 +1116,7 @@ void CreateLine(string name, int x, int y, int w, color clr)
       ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
       ObjectSetInteger(0, name, OBJPROP_YSIZE, 1);
       ObjectSetInteger(0, name, OBJPROP_BGCOLOR, clr);
-      ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, clr);
+      ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, borderClr);
       ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, name, OBJPROP_BACK, false);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
