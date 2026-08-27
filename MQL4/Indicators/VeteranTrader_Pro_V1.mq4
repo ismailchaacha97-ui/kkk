@@ -2,11 +2,11 @@
 //|                                        VeteranTrader_Pro_V1.mq4  |
 //|                       Veteran 30-Year Wall Street Trading Engine |
 //|                             Classical Multi-Confluence System    |
-//|                      (No Social-Media SMC/ICT Hype - Pure Math)  |
+//|               (Persistent Active Trade Tracker & Anti-Chop)      |
 //+------------------------------------------------------------------+
 #property copyright "Veteran Trader Institutional System"
 #property link      "https://arena.ai"
-#property version   "1.20"
+#property version   "1.30"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 5
@@ -43,13 +43,13 @@ input string   Group_Chop           = "=== ANTI-CHOP & RANGE FILTER ===";
 input bool     InpFilterChop        = true;        // Enable Anti-Chop Filter (Mute Range Signals)
 input int      InpADXPeriod         = 14;          // ADX Trend Strength Period
 input double   InpMinADX            = 22.0;        // Min ADX for Trending Market (>22 = Trend)
-input bool     InpFilterHTF         = true;        // Require Higher Timeframe Confirmation (Elder Triple Screen)
+input bool     InpFilterHTF         = true;        // Require Higher Timeframe Confirmation
 
 //--- Clean Chart Signal Control (No Arrow Clutter)
 input string   Group_SignalControl  = "=== CLEAN CHART SIGNAL CONTROL ===";
-input bool     InpOneSignalPerTrend = true;        // Strict 1 Arrow per Trend Phase (No spam)
+input bool     InpOneSignalPerTrend = true;        // Strict 1 Arrow per Trend Move
 input int      InpSignalCooldown    = 15;          // Minimum Bars Between Arrows
-input int      InpMaxHistoricalBars = 300;         // Max Historical Bars to Process
+input int      InpMaxHistoricalBars = 350;         // Max Historical Bars to Scan
 
 //--- Classical Floor Trader Pivots Settings
 input string   Group_Pivots         = "=== FLOOR TRADER PIVOTS (D1) ===";
@@ -68,27 +68,27 @@ input int      InpATRPeriod         = 14;          // ATR Period (Volatility)
 
 //--- Risk Management (ATR Multiplier & Target Ratios)
 input string   Group_Risk           = "=== RISK & TARGET MANAGEMENT ===";
-input double   InpRiskPercent       = 1.0;         // Account Risk % for Lot Size Calc
-input double   InpATRMorphSL        = 1.5;         // Stop Loss ATR Multiplier
-input double   InpTP1_RR            = 1.5;         // Take Profit 1 Risk:Reward
-input double   InpTP2_RR            = 2.5;         // Take Profit 2 Risk:Reward
-input bool     InpShowTradeLines    = true;        // Show Visual Entry/SL/TP Lines
+input double   InpRiskPercent     = 1.0;         // Account Risk % for Lot Size Calc
+input double   InpATRMorphSL      = 1.5;         // Stop Loss ATR Multiplier
+input double   InpTP1_RR          = 1.5;         // Take Profit 1 Risk:Reward
+input double   InpTP2_RR          = 2.5;         // Take Profit 2 Risk:Reward
+input bool     InpShowTradeLines  = true;        // Show Visual Persistent Lines (Entry/SL/TP)
 
 //--- Dashboard HUD Settings
-input string   Group_Dashboard      = "=== INSTITUTIONAL DASHBOARD HUD ===";
-input bool     InpShowDashboard     = true;        // Enable On-Chart Dashboard
-input int      InpDashX             = 25;          // Dashboard X Position (Pixels)
-input int      InpDashY             = 35;          // Dashboard Y Position (Pixels)
-input int      InpFontSize          = 9;           // Base Font Size
-input string   InpFontName          = "Segoe UI";  // Dashboard Font
+input string   Group_Dashboard    = "=== INSTITUTIONAL DASHBOARD HUD ===";
+input bool     InpShowDashboard   = true;        // Enable On-Chart Dashboard
+input int      InpDashX           = 25;          // Dashboard X Position (Pixels)
+input int      InpDashY           = 35;          // Dashboard Y Position (Pixels)
+input int      InpFontSize        = 9;           // Base Font Size
+input string   InpFontName        = "Segoe UI";  // Dashboard Font
 
 //--- Alerts & Notifications
-input string   Group_Alerts         = "=== ALERTS & NOTIFICATIONS ===";
-input bool     InpPopupAlert        = true;        // Popup Alert on Chart
-input bool     InpSoundAlert        = true;        // Sound Alert
-input string   InpSoundFile         = "alert.wav"; // Alert Sound File
-input bool     InpPushAlert         = true;        // Push Notification to MT4 Mobile
-input bool     InpEmailAlert        = false;       // Send Email Alert
+input string   Group_Alerts       = "=== ALERTS & NOTIFICATIONS ===";
+input bool     InpPopupAlert      = true;        // Popup Alert on Chart
+input bool     InpSoundAlert      = true;        // Sound Alert
+input string   InpSoundFile       = "alert.wav"; // Alert Sound File
+input bool     InpPushAlert       = true;        // Push Notification to MT4 Mobile
+input bool     InpEmailAlert      = false;       // Send Email Alert
 
 //+------------------------------------------------------------------+
 //| GLOBAL CONSTANTS & VARIABLES                                     |
@@ -101,9 +101,10 @@ datetime lastAlertTime = 0;
 double   PipMultiplier = 0.0001;
 int      PipDigits     = 4;
 
-// Global trade structure for latest setup
-struct TradeSetup
+// Persistent active trade tracker structure
+struct ActiveTradeTracker
 {
+   bool     hasSetup;         // Is there any active/recent setup?
    int      signalType;       // 1 = BUY, -1 = SELL, 0 = NONE
    double   entryPrice;
    double   stopLoss;
@@ -111,18 +112,23 @@ struct TradeSetup
    double   takeProfit2;
    double   riskPips;
    double   recLotSize;
-   double   confluence;
    datetime setupTime;
+   int      setupBarIndex;
+   bool     isSLHit;
+   bool     isTP1Hit;
+   bool     isTP2Hit;
+   double   livePips;
+   string   liveStatusText;
    string   marketRegime;
    bool     isChoppy;
    double   currentADX;
 };
 
-TradeSetup currentSetup;
+ActiveTradeTracker activeTrade;
 
 // Forward Declarations
 void CalculateAndDrawPivots();
-void DrawTradeSetupLines();
+void DrawPersistentTradeLines();
 void RenderDashboard();
 void HandleAlerts(datetime currentBarTime);
 string GetTimeframeString(int tf);
@@ -130,6 +136,7 @@ int  GetHigherTimeframe(int currentTf);
 int  GetTimeframeTrend(int timeframe);
 bool IsMarketChoppy(int shift, double &adxOut);
 double CalculateLotSize(double slPips);
+void UpdateActiveTradeProgress();
 void CreateRectLabel(string name, int x, int y, int w, int h, color bgClr, color borderClr, int borderWidth);
 void CreateLabel(string name, int x, int y, string text, color clr, int fontSize, bool isBold);
 void CreateLine(string name, int x, int y, int w, color clr);
@@ -141,7 +148,6 @@ void DrawPriceLine(string name, string text, double price, color clr, int style,
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // Determine Pip Size based on Digits
    if(Digits == 3 || Digits == 5)
    {
       PipMultiplier = 10.0 * Point;
@@ -153,15 +159,14 @@ int OnInit()
       PipDigits = Digits;
    }
 
-   // Set Buffers
    SetIndexBuffer(0, BuySignalBuffer);
    SetIndexStyle(0, DRAW_ARROW, STYLE_SOLID, 3, indicator_color1);
-   SetIndexArrow(0, 233); // Bold Up Arrow (Wingdings 233)
+   SetIndexArrow(0, 233);
    SetIndexLabel(0, "Veteran Prime Buy");
 
    SetIndexBuffer(1, SellSignalBuffer);
    SetIndexStyle(1, DRAW_ARROW, STYLE_SOLID, 3, indicator_color2);
-   SetIndexArrow(1, 234); // Bold Down Arrow (Wingdings 234)
+   SetIndexArrow(1, 234);
    SetIndexLabel(1, "Veteran Prime Sell");
 
    SetIndexBuffer(2, FastEMABuffer);
@@ -176,27 +181,29 @@ int OnInit()
    SetIndexStyle(4, InpShowEMAs ? DRAW_LINE : DRAW_NONE, STYLE_SOLID, 2, indicator_color5);
    SetIndexLabel(4, "Slow EMA (" + IntegerToString(InpEMASlow) + ")");
 
-   // Initialize current setup
-   currentSetup.signalType = 0;
-   currentSetup.entryPrice = 0;
-   currentSetup.stopLoss = 0;
-   currentSetup.takeProfit1 = 0;
-   currentSetup.takeProfit2 = 0;
-   currentSetup.riskPips = 0;
-   currentSetup.recLotSize = 0.01;
-   currentSetup.confluence = 0;
-   currentSetup.setupTime = 0;
-   currentSetup.marketRegime = "INITIALIZING...";
-   currentSetup.isChoppy = false;
-   currentSetup.currentADX = 0;
+   // Initialize active trade tracker
+   activeTrade.hasSetup = false;
+   activeTrade.signalType = 0;
+   activeTrade.entryPrice = 0;
+   activeTrade.stopLoss = 0;
+   activeTrade.takeProfit1 = 0;
+   activeTrade.takeProfit2 = 0;
+   activeTrade.riskPips = 0;
+   activeTrade.recLotSize = 0.01;
+   activeTrade.setupTime = 0;
+   activeTrade.setupBarIndex = 0;
+   activeTrade.isSLHit = false;
+   activeTrade.isTP1Hit = false;
+   activeTrade.isTP2Hit = false;
+   activeTrade.livePips = 0;
+   activeTrade.liveStatusText = "SCANNING MARKET...";
+   activeTrade.marketRegime = "INITIALIZING...";
+   activeTrade.isChoppy = false;
+   activeTrade.currentADX = 0;
 
-   // Indicator Short Name
-   IndicatorShortName("Veteran Trader Pro [Clean Institutional System]");
+   IndicatorShortName("Veteran Trader Pro [Persistent System]");
+   Comment("★ Veteran Trader Pro Active | Symbol: ", Symbol(), " ★");
 
-   // Set top-left chart status
-   Comment("★ Veteran Trader Pro Active | Clean Filter Mode ON | Symbol: ", Symbol(), " ★");
-
-   // Render Dashboard and Pivots immediately on Init
    if(InpShowDashboard)
    {
       RenderDashboard();
@@ -220,7 +227,7 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
-//| Get Higher Timeframe for Triple Screen Confirmation              |
+//| Get Higher Timeframe                                             |
 //+------------------------------------------------------------------+
 int GetHigherTimeframe(int currentTf)
 {
@@ -250,14 +257,12 @@ int GetTimeframeTrend(int timeframe)
    if(ema20 <= 0 || ema50 <= 0 || ema200 <= 0 || close1 <= 0)
       return 0;
 
-   // Bullish: Price > 200 EMA and 20 EMA > 50 EMA
    if(close1 > ema200 && ema20 > ema50 && close1 > ema50)
       return 1;
-   // Bearish: Price < 200 EMA and 20 EMA < 50 EMA
    if(close1 < ema200 && ema20 < ema50 && close1 < ema50)
       return -1;
 
-   return 0; // Range / Neutral
+   return 0;
 }
 
 //+------------------------------------------------------------------+
@@ -266,15 +271,13 @@ int GetTimeframeTrend(int timeframe)
 bool IsMarketChoppy(int shift, double &adxOut)
 {
    adxOut = iADX(NULL, 0, InpADXPeriod, PRICE_CLOSE, MODE_MAIN, shift);
-   if(adxOut <= 0) adxOut = 25.0; // fallback
+   if(adxOut <= 0) adxOut = 25.0;
 
    if(!InpFilterChop) return false;
 
-   // 1. ADX Threshold: If ADX is below threshold, market is strictly ranging/choppy
    if(adxOut < InpMinADX)
       return true;
 
-   // 2. EMA Compression / Entanglement Check:
    double fastEMA = iMA(NULL, 0, InpEMAFast, 0, MODE_EMA, PRICE_CLOSE, shift);
    double medEMA  = iMA(NULL, 0, InpEMAMedium, 0, MODE_EMA, PRICE_CLOSE, shift);
    double slowEMA = iMA(NULL, 0, InpEMASlow, 0, MODE_EMA, PRICE_CLOSE, shift);
@@ -282,11 +285,9 @@ bool IsMarketChoppy(int shift, double &adxOut)
    double atr = iATR(NULL, 0, InpATRPeriod, shift);
    if(atr <= 0) atr = 10 * PipMultiplier;
 
-   // If 20 EMA and 50 EMA are squeezed within 0.5x ATR, price is dead/chopping
    if(MathAbs(fastEMA - medEMA) < (atr * 0.4))
       return true;
 
-   // If price is oscillating right through 200 EMA back and forth
    if(MathAbs(Close[shift] - slowEMA) < (atr * 0.3) && MathAbs(fastEMA - slowEMA) < (atr * 0.6))
       return true;
 
@@ -398,39 +399,124 @@ void DrawPivotLine(string objName, string desc, double price, color clr, int sty
 }
 
 //+------------------------------------------------------------------+
-//| Draw visual Entry / Stop Loss / Take Profit Lines                |
+//| Track Live Trade Progress (SL/TP Hits & Live Pips)               |
 //+------------------------------------------------------------------+
-void DrawTradeSetupLines()
+void UpdateActiveTradeProgress()
 {
-   if(!InpShowTradeLines || currentSetup.signalType == 0)
+   if(!activeTrade.hasSetup || activeTrade.signalType == 0) return;
+
+   int startBar = activeTrade.setupBarIndex;
+   if(startBar < 0 || startBar >= Bars) startBar = 1;
+
+   double curClose = Close[0];
+
+   if(activeTrade.signalType == 1) // BUY Trade
+   {
+      activeTrade.livePips = (curClose - activeTrade.entryPrice) / PipMultiplier;
+
+      // Find highest high and lowest low since signal bar
+      double highestHigh = High[0];
+      double lowestLow   = Low[0];
+      for(int b = 0; b <= startBar; b++)
+      {
+         if(High[b] > highestHigh) highestHigh = High[b];
+         if(Low[b] < lowestLow)   lowestLow = Low[b];
+      }
+
+      if(lowestLow <= activeTrade.stopLoss)
+      {
+         activeTrade.isSLHit = true;
+         activeTrade.liveStatusText = "❌ SL HIT — TRADE CLOSED";
+      }
+      else if(highestHigh >= activeTrade.takeProfit2)
+      {
+         activeTrade.isTP2Hit = true;
+         activeTrade.isTP1Hit = true;
+         activeTrade.liveStatusText = StringFormat("🎯 TP2 HIT (+%0.1f pips) — FULL TARGET!", (activeTrade.takeProfit2 - activeTrade.entryPrice)/PipMultiplier);
+      }
+      else if(highestHigh >= activeTrade.takeProfit1)
+      {
+         activeTrade.isTP1Hit = true;
+         activeTrade.liveStatusText = StringFormat("✅ TP1 HIT (+%0.1f pips) — SL TO BREAKEVEN!", (activeTrade.takeProfit1 - activeTrade.entryPrice)/PipMultiplier);
+      }
+      else
+      {
+         string sign = (activeTrade.livePips >= 0) ? "+" : "";
+         activeTrade.liveStatusText = StringFormat("🟢 RUNNING (%s%0.1f pips)", sign, activeTrade.livePips);
+      }
+   }
+   else if(activeTrade.signalType == -1) // SELL Trade
+   {
+      activeTrade.livePips = (activeTrade.entryPrice - curClose) / PipMultiplier;
+
+      double highestHigh = High[0];
+      double lowestLow   = Low[0];
+      for(int b = 0; b <= startBar; b++)
+      {
+         if(High[b] > highestHigh) highestHigh = High[b];
+         if(Low[b] < lowestLow)   lowestLow = Low[b];
+      }
+
+      if(highestHigh >= activeTrade.stopLoss)
+      {
+         activeTrade.isSLHit = true;
+         activeTrade.liveStatusText = "❌ SL HIT — TRADE CLOSED";
+      }
+      else if(lowestLow <= activeTrade.takeProfit2)
+      {
+         activeTrade.isTP2Hit = true;
+         activeTrade.isTP1Hit = true;
+         activeTrade.liveStatusText = StringFormat("🎯 TP2 HIT (+%0.1f pips) — FULL TARGET!", (activeTrade.entryPrice - activeTrade.takeProfit2)/PipMultiplier);
+      }
+      else if(lowestLow <= activeTrade.takeProfit1)
+      {
+         activeTrade.isTP1Hit = true;
+         activeTrade.liveStatusText = StringFormat("✅ TP1 HIT (+%0.1f pips) — SL TO BREAKEVEN!", (activeTrade.entryPrice - activeTrade.takeProfit1)/PipMultiplier);
+      }
+      else
+      {
+         string sign = (activeTrade.livePips >= 0) ? "+" : "";
+         activeTrade.liveStatusText = StringFormat("🔴 RUNNING (%s%0.1f pips)", sign, activeTrade.livePips);
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Draw Persistent Visual Entry / SL / TP Lines                     |
+//+------------------------------------------------------------------+
+void DrawPersistentTradeLines()
+{
+   if(!InpShowTradeLines || !activeTrade.hasSetup || activeTrade.signalType == 0)
    {
       ObjectsDeleteAll(0, PREFIX_TRADE);
       return;
    }
 
-   datetime tStart = currentSetup.setupTime > 0 ? currentSetup.setupTime : Time[0];
+   datetime tStart = activeTrade.setupTime > 0 ? activeTrade.setupTime : Time[0];
    datetime tEnd   = Time[0] + (Period() * 60 * 30);
 
-   color entryClr = (currentSetup.signalType == 1) ? clrLimeGreen : clrCrimson;
-   string dirText = (currentSetup.signalType == 1) ? "BUY" : "SELL";
+   color entryClr = (activeTrade.signalType == 1) ? clrLimeGreen : clrCrimson;
+   string dirText = (activeTrade.signalType == 1) ? "BUY" : "SELL";
 
-   // Entry Line
-   DrawPriceLine(PREFIX_TRADE + "Entry", "ENTRY [" + dirText + "]: " + DoubleToString(currentSetup.entryPrice, Digits),
-                 currentSetup.entryPrice, entryClr, STYLE_SOLID, 2, tStart, tEnd);
+   // 1. Entry Line
+   DrawPriceLine(PREFIX_TRADE + "Entry", "ENTRY [" + dirText + "]: " + DoubleToString(activeTrade.entryPrice, Digits),
+                 activeTrade.entryPrice, entryClr, STYLE_SOLID, 2, tStart, tEnd);
 
-   // Stop Loss Line
-   DrawPriceLine(PREFIX_TRADE + "SL", "STOP LOSS: " + DoubleToString(currentSetup.stopLoss, Digits) + " (" + DoubleToString(currentSetup.riskPips, 1) + " pips)",
-                 currentSetup.stopLoss, clrRed, STYLE_DASH, 1, tStart, tEnd);
+   // 2. Stop Loss Line
+   DrawPriceLine(PREFIX_TRADE + "SL", "STOP LOSS: " + DoubleToString(activeTrade.stopLoss, Digits) + " (" + DoubleToString(activeTrade.riskPips, 1) + " pips)",
+                 activeTrade.stopLoss, clrRed, STYLE_DASH, 1, tStart, tEnd);
 
-   // TP1 Line
-   double tp1Pips = MathAbs(currentSetup.takeProfit1 - currentSetup.entryPrice) / PipMultiplier;
-   DrawPriceLine(PREFIX_TRADE + "TP1", "TARGET 1 (1:1.5): " + DoubleToString(currentSetup.takeProfit1, Digits) + " (+" + DoubleToString(tp1Pips, 1) + " pips)",
-                 currentSetup.takeProfit1, clrMediumSeaGreen, STYLE_DASHDOT, 1, tStart, tEnd);
+   // 3. TP1 Line
+   double tp1Pips = MathAbs(activeTrade.takeProfit1 - activeTrade.entryPrice) / PipMultiplier;
+   color tp1Clr   = activeTrade.isTP1Hit ? clrGold : clrMediumSeaGreen;
+   DrawPriceLine(PREFIX_TRADE + "TP1", "TARGET 1 (1:1.5): " + DoubleToString(activeTrade.takeProfit1, Digits) + " (+" + DoubleToString(tp1Pips, 1) + " pips)",
+                 activeTrade.takeProfit1, tp1Clr, STYLE_DASHDOT, 1, tStart, tEnd);
 
-   // TP2 Line
-   double tp2Pips = MathAbs(currentSetup.takeProfit2 - currentSetup.entryPrice) / PipMultiplier;
-   DrawPriceLine(PREFIX_TRADE + "TP2", "TARGET 2 (1:2.5): " + DoubleToString(currentSetup.takeProfit2, Digits) + " (+" + DoubleToString(tp2Pips, 1) + " pips)",
-                 currentSetup.takeProfit2, clrDeepSkyBlue, STYLE_SOLID, 1, tStart, tEnd);
+   // 4. TP2 Line
+   double tp2Pips = MathAbs(activeTrade.takeProfit2 - activeTrade.entryPrice) / PipMultiplier;
+   color tp2Clr   = activeTrade.isTP2Hit ? clrGold : clrDeepSkyBlue;
+   DrawPriceLine(PREFIX_TRADE + "TP2", "TARGET 2 (1:2.5): " + DoubleToString(activeTrade.takeProfit2, Digits) + " (+" + DoubleToString(tp2Pips, 1) + " pips)",
+                 activeTrade.takeProfit2, tp2Clr, STYLE_SOLID, 1, tStart, tEnd);
 }
 
 //+------------------------------------------------------------------+
@@ -451,13 +537,16 @@ void DrawPriceLine(string name, string text, double price, color clr, int style,
    }
    else
    {
-      ObjectSetDouble(0, name, OBJPROP_PRICE1, price);
+      ObjectSetDouble(0, objNameOrDefault(name), OBJPROP_PRICE1, price);
       ObjectSetDouble(0, name, OBJPROP_PRICE2, price);
       ObjectSetInteger(0, name, OBJPROP_TIME1, t1);
       ObjectSetInteger(0, name, OBJPROP_TIME2, t2);
+      ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
       ObjectSetString(0, name, OBJPROP_TEXT, text);
    }
 }
+
+string objNameOrDefault(string n) { return n; }
 
 //+------------------------------------------------------------------+
 //| Custom indicator iteration function                              |
@@ -498,9 +587,9 @@ int OnCalculate(const int rates_total,
    int scanLimit = MathMin(rates_total - 1, InpMaxHistoricalBars);
    
    int lastSignalBar = 9999;
-   int lastSignalDir = 0; // 1 = BUY, -1 = SELL
+   int lastSignalDir = 0;
 
-   // Scan chronologically backwards (from oldest bar to newest bar 1) to apply signal cooldown
+   // Scan chronologically backwards (oldest to newest) to correctly position arrows
    for(int i = scanLimit; i >= 1; i--)
    {
       double fastEMA = FastEMABuffer[i];
@@ -527,14 +616,12 @@ int OnCalculate(const int rates_total,
       double adxVal = 0;
       bool isChop = IsMarketChoppy(i, adxVal);
 
-      // Record live status for Bar 1
       if(i == 1)
       {
-         currentSetup.isChoppy = isChop;
-         currentSetup.currentADX = adxVal;
+         activeTrade.isChoppy = isChop;
+         activeTrade.currentADX = adxVal;
       }
 
-      // If Market is in Chop/Range, SUPPRESS ALL SIGNALS!
       if(isChop && InpFilterChop)
          continue;
 
@@ -542,14 +629,13 @@ int OnCalculate(const int rates_total,
       bool isBullishRegime = (cVal > slowEMA && fastEMA > medEMA && cVal > medEMA);
       bool isBearishRegime = (cVal < slowEMA && fastEMA < medEMA && cVal < medEMA);
 
-      // Apply HTF filter if enabled
       if(InpFilterHTF && htfTrend != 0)
       {
-         if(htfTrend == -1) isBullishRegime = false; // HTF is bearish, no Buy
-         if(htfTrend == 1)  isBearishRegime = false; // HTF is bullish, no Sell
+         if(htfTrend == -1) isBullishRegime = false;
+         if(htfTrend == 1)  isBearishRegime = false;
       }
 
-      // High-Precision Pullback Trigger (Value Zone Rejection)
+      // High-Precision Pullback Trigger
       bool buyRaw = isBullishRegime &&
                     (lVal <= fastEMA || prevL <= fastEMA || lVal <= medEMA) &&
                     (cVal > oVal) &&
@@ -560,7 +646,6 @@ int OnCalculate(const int rates_total,
                      (cVal < oVal) &&
                      (cVal < prevL || (rsi < 50 && prevRSI >= 50) || (wpr < -50 && prevWPR >= -50));
 
-      // Cooldown and Anti-Spam (Only 1 clean arrow per move)
       int barsSinceLastSignal = MathAbs(lastSignalBar - i);
 
       bool allowBuy = buyRaw && (!InpOneSignalPerTrend || lastSignalDir != 1 || barsSinceLastSignal >= InpSignalCooldown);
@@ -572,18 +657,24 @@ int OnCalculate(const int rates_total,
          lastSignalBar = i;
          lastSignalDir = 1;
 
-         if(i == 1)
+         if(i == 1 && Time[0] != lastAlertTime)
          {
-            currentSetup.signalType = 1;
-            currentSetup.entryPrice = Close[1];
+            // Lock new active trade setup
+            activeTrade.hasSetup = true;
+            activeTrade.signalType = 1;
+            activeTrade.entryPrice = Close[1];
             double slDistance = MathMax((Close[1] - Low[1]) + (atr * InpATRMorphSL), atr * 1.2);
-            currentSetup.stopLoss = Close[1] - slDistance;
-            currentSetup.riskPips = slDistance / PipMultiplier;
-            currentSetup.recLotSize = CalculateLotSize(currentSetup.riskPips);
-            currentSetup.takeProfit1 = Close[1] + (slDistance * InpTP1_RR);
-            currentSetup.takeProfit2 = Close[1] + (slDistance * InpTP2_RR);
-            currentSetup.setupTime = Time[1];
-            currentSetup.marketRegime = "STAGE 2: BULLISH EXPANSION";
+            activeTrade.stopLoss = Close[1] - slDistance;
+            activeTrade.riskPips = slDistance / PipMultiplier;
+            activeTrade.recLotSize = CalculateLotSize(activeTrade.riskPips);
+            activeTrade.takeProfit1 = Close[1] + (slDistance * InpTP1_RR);
+            activeTrade.takeProfit2 = Close[1] + (slDistance * InpTP2_RR);
+            activeTrade.setupTime = Time[1];
+            activeTrade.setupBarIndex = 1;
+            activeTrade.isSLHit = false;
+            activeTrade.isTP1Hit = false;
+            activeTrade.isTP2Hit = false;
+            activeTrade.marketRegime = "STAGE 2: BULLISH EXPANSION";
          }
       }
       else if(allowSell && !buyRaw)
@@ -592,36 +683,97 @@ int OnCalculate(const int rates_total,
          lastSignalBar = i;
          lastSignalDir = -1;
 
-         if(i == 1)
+         if(i == 1 && Time[0] != lastAlertTime)
          {
-            currentSetup.signalType = -1;
-            currentSetup.entryPrice = Close[1];
+            // Lock new active trade setup
+            activeTrade.hasSetup = true;
+            activeTrade.signalType = -1;
+            activeTrade.entryPrice = Close[1];
             double slDistance = MathMax((High[1] - Close[1]) + (atr * InpATRMorphSL), atr * 1.2);
-            currentSetup.stopLoss = Close[1] + slDistance;
-            currentSetup.riskPips = slDistance / PipMultiplier;
-            currentSetup.recLotSize = CalculateLotSize(currentSetup.riskPips);
-            currentSetup.takeProfit1 = Close[1] - (slDistance * InpTP1_RR);
-            currentSetup.takeProfit2 = Close[1] - (slDistance * InpTP2_RR);
-            currentSetup.setupTime = Time[1];
-            currentSetup.marketRegime = "STAGE 4: BEARISH DISTRIBUTION";
+            activeTrade.stopLoss = Close[1] + slDistance;
+            activeTrade.riskPips = slDistance / PipMultiplier;
+            activeTrade.recLotSize = CalculateLotSize(activeTrade.riskPips);
+            activeTrade.takeProfit1 = Close[1] - (slDistance * InpTP1_RR);
+            activeTrade.takeProfit2 = Close[1] - (slDistance * InpTP2_RR);
+            activeTrade.setupTime = Time[1];
+            activeTrade.setupBarIndex = 1;
+            activeTrade.isSLHit = false;
+            activeTrade.isTP1Hit = false;
+            activeTrade.isTP2Hit = false;
+            activeTrade.marketRegime = "STAGE 4: BEARISH DISTRIBUTION";
          }
       }
    }
 
-   // Update Regime Status if Choppy
-   if(currentSetup.isChoppy)
+   // 2. If no active setup was set this tick, look back and lock the MOST RECENT confirmed signal
+   if(!activeTrade.hasSetup || activeTrade.setupTime == 0)
    {
-      currentSetup.marketRegime = "CONSOLIDATION / RANGE (CHOP)";
+      for(int k = 1; k <= MathMin(scanLimit, 100); k++)
+      {
+         if(BuySignalBuffer[k] != EMPTY_VALUE && BuySignalBuffer[k] > 0)
+         {
+            double atrK = iATR(NULL, 0, InpATRPeriod, k);
+            if(atrK <= 0) atrK = 10 * PipMultiplier;
+            double slDist = MathMax((Close[k] - Low[k]) + (atrK * InpATRMorphSL), atrK * 1.2);
+
+            activeTrade.hasSetup = true;
+            activeTrade.signalType = 1;
+            activeTrade.entryPrice = Close[k];
+            activeTrade.stopLoss = Close[k] - slDist;
+            activeTrade.riskPips = slDist / PipMultiplier;
+            activeTrade.recLotSize = CalculateLotSize(activeTrade.riskPips);
+            activeTrade.takeProfit1 = Close[k] + (slDist * InpTP1_RR);
+            activeTrade.takeProfit2 = Close[k] + (slDist * InpTP2_RR);
+            activeTrade.setupTime = Time[k];
+            activeTrade.setupBarIndex = k;
+            activeTrade.marketRegime = "STAGE 2: BULLISH EXPANSION";
+            break;
+         }
+         else if(SellSignalBuffer[k] != EMPTY_VALUE && SellSignalBuffer[k] > 0)
+         {
+            double atrK = iATR(NULL, 0, InpATRPeriod, k);
+            if(atrK <= 0) atrK = 10 * PipMultiplier;
+            double slDist = MathMax((High[k] - Close[k]) + (atrK * InpATRMorphSL), atrK * 1.2);
+
+            activeTrade.hasSetup = true;
+            activeTrade.signalType = -1;
+            activeTrade.entryPrice = Close[k];
+            activeTrade.stopLoss = Close[k] + slDist;
+            activeTrade.riskPips = slDist / PipMultiplier;
+            activeTrade.recLotSize = CalculateLotSize(activeTrade.riskPips);
+            activeTrade.takeProfit1 = Close[k] - (slDist * InpTP1_RR);
+            activeTrade.takeProfit2 = Close[k] - (slDist * InpTP2_RR);
+            activeTrade.setupTime = Time[k];
+            activeTrade.setupBarIndex = k;
+            activeTrade.marketRegime = "STAGE 4: BEARISH DISTRIBUTION";
+            break;
+         }
+      }
+   }
+   else
+   {
+      // Update setupBarIndex dynamically as new bars form
+      for(int k = 1; k <= MathMin(scanLimit, 100); k++)
+      {
+         if(Time[k] == activeTrade.setupTime)
+         {
+            activeTrade.setupBarIndex = k;
+            break;
+         }
+      }
    }
 
-   // 3. Render Visual Components
-   CalculateAndDrawPivots();
-   DrawTradeSetupLines();
+   // 3. Update Real-Time Live Status of Trade
+   UpdateActiveTradeProgress();
 
-   // 4. Alerts Trigger
+   // 4. Render Visual Components & Persistent Lines
+   CalculateAndDrawPivots();
+   DrawPersistentTradeLines();
+
+   // 5. Alerts Trigger on Bar 1 Confirmation
    HandleAlerts(Time[0]);
 
-   // 5. Render Executive Dashboard
+   // 6. Render Executive Dashboard
    if(InpShowDashboard)
    {
       RenderDashboard();
@@ -643,11 +795,11 @@ void HandleAlerts(datetime currentBarTime)
       lastAlertTime = currentBarTime;
       string msg = StringFormat("[VETERAN TRADER PRO] 🟢 PRIME BUY SIGNAL\nSymbol: %s | Timeframe: %s\nEntry: %s | SL: %s (%0.1f pips)\nTP1: %s | TP2: %s\nRec Lot: %0.2f (at %0.1f%% risk)\nRule: Check High-Impact News Before Entry!",
                                 Symbol(), GetTimeframeString(Period()),
-                                DoubleToString(currentSetup.entryPrice, Digits),
-                                DoubleToString(currentSetup.stopLoss, Digits), currentSetup.riskPips,
-                                DoubleToString(currentSetup.takeProfit1, Digits),
-                                DoubleToString(currentSetup.takeProfit2, Digits),
-                                currentSetup.recLotSize, InpRiskPercent);
+                                DoubleToString(activeTrade.entryPrice, Digits),
+                                DoubleToString(activeTrade.stopLoss, Digits), activeTrade.riskPips,
+                                DoubleToString(activeTrade.takeProfit1, Digits),
+                                DoubleToString(activeTrade.takeProfit2, Digits),
+                                activeTrade.recLotSize, InpRiskPercent);
 
       if(InpPopupAlert) Alert(msg);
       if(InpSoundAlert) PlaySound(InpSoundFile);
@@ -659,11 +811,11 @@ void HandleAlerts(datetime currentBarTime)
       lastAlertTime = currentBarTime;
       string msg = StringFormat("[VETERAN TRADER PRO] 🔴 PRIME SELL SIGNAL\nSymbol: %s | Timeframe: %s\nEntry: %s | SL: %s (%0.1f pips)\nTP1: %s | TP2: %s\nRec Lot: %0.2f (at %0.1f%% risk)\nRule: Check High-Impact News Before Entry!",
                                 Symbol(), GetTimeframeString(Period()),
-                                DoubleToString(currentSetup.entryPrice, Digits),
-                                DoubleToString(currentSetup.stopLoss, Digits), currentSetup.riskPips,
-                                DoubleToString(currentSetup.takeProfit1, Digits),
-                                DoubleToString(currentSetup.takeProfit2, Digits),
-                                currentSetup.recLotSize, InpRiskPercent);
+                                DoubleToString(activeTrade.entryPrice, Digits),
+                                DoubleToString(activeTrade.stopLoss, Digits), activeTrade.riskPips,
+                                DoubleToString(activeTrade.takeProfit1, Digits),
+                                DoubleToString(activeTrade.takeProfit2, Digits),
+                                activeTrade.recLotSize, InpRiskPercent);
 
       if(InpPopupAlert) Alert(msg);
       if(InpSoundAlert) PlaySound(InpSoundFile);
@@ -699,9 +851,9 @@ void RenderDashboard()
 {
    int x = InpDashX;
    int y = InpDashY;
-   int width = 325;
+   int width = 330;
    int rowH = 18;
-   int totalRows = 19;
+   int totalRows = 20;
    int height = (totalRows * rowH) + 25;
 
    color bgClr     = C'18,22,28';
@@ -717,8 +869,8 @@ void RenderDashboard()
    CreateRectLabel(PREFIX_DASH + "BG", x, y, width, height, bgClr, borderClr, 2);
 
    // Header
-   CreateLabel(PREFIX_DASH + "H1", x + 12, y + 8, "★ VETERAN TRADER PRO (CLEAN ENGINE)", headerClr, InpFontSize + 1, true);
-   CreateLabel(PREFIX_DASH + "H2", x + 12, y + 26, "Wall Street Anti-Chop Confluence (No SMC/ICT)", subClr, InpFontSize - 2, false);
+   CreateLabel(PREFIX_DASH + "H1", x + 12, y + 8, "★ VETERAN TRADER PRO (PERSISTENT)", headerClr, InpFontSize + 1, true);
+   CreateLabel(PREFIX_DASH + "H2", x + 12, y + 26, "Live Active Setup Tracker & Anti-Chop Engine", subClr, InpFontSize - 2, false);
 
    // Divider 1
    CreateLine(PREFIX_DASH + "Div1", x + 10, y + 42, width - 20, borderClr);
@@ -752,9 +904,9 @@ void RenderDashboard()
    CreateLabel(PREFIX_DASH + "MTF_Icons", x + 85, y + 68, StringFormat("%s  %s  %s  %s", iconM15, iconH1, iconH4, iconD1), mtfClr, InpFontSize - 1, true);
 
    // Market Regime & ADX Chop Status
-   string chopStatusStr = currentSetup.isChoppy ? "🚫 CHOP / RANGE (MUTED)" : "✅ ACTIVE TRENDING";
-   color chopStatusClr  = currentSetup.isChoppy ? yellowClr : greenClr;
-   string adxText = StringFormat("ADX: %0.1f  |  Regime: %s", currentSetup.currentADX, chopStatusStr);
+   string chopStatusStr = activeTrade.isChoppy ? "🚫 CHOP / RANGE (MUTED)" : "✅ ACTIVE TRENDING";
+   color chopStatusClr  = activeTrade.isChoppy ? yellowClr : greenClr;
+   string adxText = StringFormat("ADX: %0.1f  |  Regime: %s", activeTrade.currentADX, chopStatusStr);
    CreateLabel(PREFIX_DASH + "ADX_Label", x + 12, y + 88, "Market State:", subClr, InpFontSize - 1, false);
    CreateLabel(PREFIX_DASH + "ADX_Val",   x + 92, y + 88, adxText, chopStatusClr, InpFontSize - 1, true);
 
@@ -770,51 +922,55 @@ void RenderDashboard()
    string actionText = "WAIT / LOOKING FOR SETUP";
    color actionClr   = clrDarkGray;
 
-   if(currentSetup.isChoppy)
+   if(activeTrade.hasSetup && activeTrade.signalType == 1)
+   {
+      actionText = "★ ACTIVE BUY SETUP (TRACKED) ★";
+      actionClr  = greenClr;
+   }
+   else if(activeTrade.hasSetup && activeTrade.signalType == -1)
+   {
+      actionText = "★ ACTIVE SELL SETUP (TRACKED) ★";
+      actionClr  = redClr;
+   }
+   else if(activeTrade.isChoppy)
    {
       actionText = "⚠️ MARKET IN RANGE — DO NOT TRADE";
       actionClr  = yellowClr;
    }
-   else if(currentSetup.signalType == 1)
-   {
-      actionText = "★ PRIME BUY ENTRY ACTIVE ★";
-      actionClr  = greenClr;
-   }
-   else if(currentSetup.signalType == -1)
-   {
-      actionText = "★ PRIME SELL ENTRY ACTIVE ★";
-      actionClr  = redClr;
-   }
 
-   CreateLabel(PREFIX_DASH + "Act_Title", x + 12, y + 135, "INSTITUTIONAL ACTION:", headerClr, InpFontSize - 1, true);
+   CreateLabel(PREFIX_DASH + "Act_Title", x + 12, y + 135, "TRADE MONITOR:", headerClr, InpFontSize - 1, true);
    CreateLabel(PREFIX_DASH + "Act_Val",   x + 12, y + 153, actionText, actionClr, InpFontSize + 1, true);
 
+   // Live Status (Pips / TP hit status)
+   color liveClr = (activeTrade.livePips >= 0) ? greenClr : redClr;
+   if(activeTrade.isTP1Hit || activeTrade.isTP2Hit) liveClr = headerClr;
+   CreateLabel(PREFIX_DASH + "Trd_Live",  x + 12, y + 175, StringFormat("Status: %s", activeTrade.liveStatusText), liveClr, InpFontSize, true);
+
    // Trade Parameters (Entry, SL, TP1, TP2, Lot Size)
-   if(currentSetup.signalType != 0 && !currentSetup.isChoppy)
+   if(activeTrade.hasSetup && activeTrade.signalType != 0)
    {
-      CreateLabel(PREFIX_DASH + "Trd_Entry", x + 12, y + 175, StringFormat("Entry: %s", DoubleToString(currentSetup.entryPrice, Digits)), textClr, InpFontSize - 1, true);
-      CreateLabel(PREFIX_DASH + "Trd_SL",    x + 12, y + 193, StringFormat("Stop Loss: %s  (%0.1f pips)", DoubleToString(currentSetup.stopLoss, Digits), currentSetup.riskPips), redClr, InpFontSize - 1, true);
-      CreateLabel(PREFIX_DASH + "Trd_TP1",   x + 12, y + 211, StringFormat("Target TP1 (1:1.5): %s", DoubleToString(currentSetup.takeProfit1, Digits)), greenClr, InpFontSize - 1, true);
-      CreateLabel(PREFIX_DASH + "Trd_TP2",   x + 12, y + 229, StringFormat("Target TP2 (1:2.5): %s", DoubleToString(currentSetup.takeProfit2, Digits)), greenClr, InpFontSize - 1, true);
-      CreateLabel(PREFIX_DASH + "Trd_Lot",   x + 12, y + 247, StringFormat("Calculated Lot (%0.1f%% Risk): %0.2f Lots", InpRiskPercent, currentSetup.recLotSize), headerClr, InpFontSize - 1, true);
+      CreateLabel(PREFIX_DASH + "Trd_Entry", x + 12, y + 195, StringFormat("Entry: %s", DoubleToString(activeTrade.entryPrice, Digits)), textClr, InpFontSize - 1, true);
+      CreateLabel(PREFIX_DASH + "Trd_SL",    x + 12, y + 213, StringFormat("Stop Loss: %s  (%0.1f pips)", DoubleToString(activeTrade.stopLoss, Digits), activeTrade.riskPips), redClr, InpFontSize - 1, true);
+      CreateLabel(PREFIX_DASH + "Trd_TP1",   x + 12, y + 231, StringFormat("Target TP1 (1:1.5): %s", DoubleToString(activeTrade.takeProfit1, Digits)), greenClr, InpFontSize - 1, true);
+      CreateLabel(PREFIX_DASH + "Trd_TP2",   x + 12, y + 249, StringFormat("Target TP2 (1:2.5): %s", DoubleToString(activeTrade.takeProfit2, Digits)), greenClr, InpFontSize - 1, true);
+      CreateLabel(PREFIX_DASH + "Trd_Lot",   x + 12, y + 267, StringFormat("Calculated Lot (%0.1f%% Risk): %0.2f Lots", InpRiskPercent, activeTrade.recLotSize), headerClr, InpFontSize - 1, true);
    }
    else
    {
-      string rangeSub = currentSetup.isChoppy ? "Suppressed: Waiting for Range Breakout..." : "Waiting for 20/50 EMA Pullback...";
-      CreateLabel(PREFIX_DASH + "Trd_Entry", x + 12, y + 175, "Entry: " + rangeSub, subClr, InpFontSize - 1, false);
-      CreateLabel(PREFIX_DASH + "Trd_SL",    x + 12, y + 193, "Stop Loss: Dynamic ATR Floor", subClr, InpFontSize - 1, false);
-      CreateLabel(PREFIX_DASH + "Trd_TP1",   x + 12, y + 211, "Target TP1: Minimum 1:1.5 RR", subClr, InpFontSize - 1, false);
-      CreateLabel(PREFIX_DASH + "Trd_TP2",   x + 12, y + 229, "Target TP2: Expansion 1:2.5 RR", subClr, InpFontSize - 1, false);
-      CreateLabel(PREFIX_DASH + "Trd_Lot",   x + 12, y + 247, StringFormat("Lot Size: Auto-calculated at %0.1f%% risk", InpRiskPercent), subClr, InpFontSize - 1, false);
+      CreateLabel(PREFIX_DASH + "Trd_Entry", x + 12, y + 195, "Entry: Waiting for 20/50 EMA Pullback...", subClr, InpFontSize - 1, false);
+      CreateLabel(PREFIX_DASH + "Trd_SL",    x + 12, y + 213, "Stop Loss: Dynamic ATR Floor", subClr, InpFontSize - 1, false);
+      CreateLabel(PREFIX_DASH + "Trd_TP1",   x + 12, y + 231, "Target TP1: Minimum 1:1.5 RR", subClr, InpFontSize - 1, false);
+      CreateLabel(PREFIX_DASH + "Trd_TP2",   x + 12, y + 249, "Target TP2: Expansion 1:2.5 RR", subClr, InpFontSize - 1, false);
+      CreateLabel(PREFIX_DASH + "Trd_Lot",   x + 12, y + 267, StringFormat("Lot Size: Auto-calculated at %0.1f%% risk", InpRiskPercent), subClr, InpFontSize - 1, false);
    }
 
    // Divider 3
-   CreateLine(PREFIX_DASH + "Div3", x + 10, y + 268, width - 20, borderClr);
+   CreateLine(PREFIX_DASH + "Div3", x + 10, y + 288, width - 20, borderClr);
 
    // Institutional Rules
-   CreateLabel(PREFIX_DASH + "Rule1", x + 12, y + 274, "⚠️ 1. NEVER TRADE 15 MIN AROUND HIGH-IMPACT NEWS", clrOrange, InpFontSize - 2, true);
-   CreateLabel(PREFIX_DASH + "Rule2", x + 12, y + 290, "🛡️ 2. Max 1% Risk per Trade | 1 Arrow per Trend Leg", subClr, InpFontSize - 2, false);
-   CreateLabel(PREFIX_DASH + "Rule3", x + 12, y + 306, "🎯 3. Lock 50% Profit at TP1 & Move SL to Breakeven", subClr, InpFontSize - 2, false);
+   CreateLabel(PREFIX_DASH + "Rule1", x + 12, y + 294, "⚠️ 1. NEVER TRADE 15 MIN AROUND HIGH-IMPACT NEWS", clrOrange, InpFontSize - 2, true);
+   CreateLabel(PREFIX_DASH + "Rule2", x + 12, y + 310, "🛡️ 2. Max 1% Risk per Trade | Setup Locked Live", subClr, InpFontSize - 2, false);
+   CreateLabel(PREFIX_DASH + "Rule3", x + 12, y + 326, "🎯 3. Lock 50% Profit at TP1 & Move SL to Breakeven", subClr, InpFontSize - 2, false);
 }
 
 //+------------------------------------------------------------------+
