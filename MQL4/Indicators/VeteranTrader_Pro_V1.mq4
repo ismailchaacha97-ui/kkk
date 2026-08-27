@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Veteran Trader Institutional System"
 #property link      "https://arena.ai"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 5
@@ -15,6 +15,11 @@
 #property indicator_color3  clrDodgerBlue     // Fast EMA (20)
 #property indicator_color4  clrDarkOrange     // Medium EMA (50)
 #property indicator_color5  clrGold           // Slow EMA (200 - Baseline)
+#property indicator_width1  3
+#property indicator_width2  3
+#property indicator_width3  1
+#property indicator_width4  1
+#property indicator_width5  2
 
 //--- Indicator Buffers
 double BuySignalBuffer[];
@@ -59,8 +64,8 @@ input bool     InpShowTradeLines  = true;        // Show Visual Entry/SL/TP Line
 //--- Dashboard HUD Settings
 input string   Group_Dashboard    = "=== INSTITUTIONAL DASHBOARD HUD ===";
 input bool     InpShowDashboard   = true;        // Enable On-Chart Dashboard
-input int      InpDashX           = 20;          // Dashboard X Position (Pixels)
-input int      InpDashY           = 30;          // Dashboard Y Position (Pixels)
+input int      InpDashX           = 25;          // Dashboard X Position (Pixels)
+input int      InpDashY           = 35;          // Dashboard Y Position (Pixels)
 input int      InpFontSize        = 9;           // Base Font Size
 input string   InpFontName        = "Segoe UI";  // Dashboard Font
 
@@ -100,6 +105,20 @@ struct TradeSetup
 
 TradeSetup currentSetup;
 
+// Forward Declarations
+void CalculateAndDrawPivots();
+void DrawTradeSetupLines();
+void RenderDashboard();
+void HandleAlerts(datetime currentBarTime);
+string GetTimeframeString(int tf);
+int  GetTimeframeTrend(int timeframe);
+double CalculateLotSize(double slPips);
+void CreateRectLabel(string name, int x, int y, int w, int h, color bgClr, color borderClr, int borderWidth);
+void CreateLabel(string name, int x, int y, string text, color clr, int fontSize, bool isBold);
+void CreateLine(string name, int x, int y, int w, color clr);
+void DrawPivotLine(string objName, string desc, double price, color clr, int style, datetime tStart, datetime tEnd);
+void DrawPriceLine(string name, string text, double price, color clr, int style, int width, datetime t1, datetime t2);
+
 //+------------------------------------------------------------------+
 //| Custom indicator initialization function                         |
 //+------------------------------------------------------------------+
@@ -119,13 +138,13 @@ int OnInit()
 
    // Set Buffers
    SetIndexBuffer(0, BuySignalBuffer);
-   SetIndexStyle(0, DRAW_ARROW, STYLE_SOLID, 2, indicator_color1);
-   SetIndexArrow(0, 233); // Up arrow (Wingdings 233)
+   SetIndexStyle(0, DRAW_ARROW, STYLE_SOLID, 3, indicator_color1);
+   SetIndexArrow(0, 233); // Wingdings 233 (Bold Up Arrow)
    SetIndexLabel(0, "Veteran Buy Signal");
 
    SetIndexBuffer(1, SellSignalBuffer);
-   SetIndexStyle(1, DRAW_ARROW, STYLE_SOLID, 2, indicator_color2);
-   SetIndexArrow(1, 234); // Down arrow (Wingdings 234)
+   SetIndexStyle(1, DRAW_ARROW, STYLE_SOLID, 3, indicator_color2);
+   SetIndexArrow(1, 234); // Wingdings 234 (Bold Down Arrow)
    SetIndexLabel(1, "Veteran Sell Signal");
 
    SetIndexBuffer(2, FastEMABuffer);
@@ -140,7 +159,7 @@ int OnInit()
    SetIndexStyle(4, InpShowEMAs ? DRAW_LINE : DRAW_NONE, STYLE_SOLID, 2, indicator_color5);
    SetIndexLabel(4, "Slow EMA (" + IntegerToString(InpEMASlow) + ")");
 
-   // Initialize current setup
+   // Initialize current setup defaults
    currentSetup.signalType = 0;
    currentSetup.entryPrice = 0;
    currentSetup.stopLoss = 0;
@@ -150,10 +169,21 @@ int OnInit()
    currentSetup.recLotSize = 0.01;
    currentSetup.confluence = 0;
    currentSetup.setupTime = 0;
-   currentSetup.marketRegime = "INITIALIZING...";
+   currentSetup.marketRegime = "SCANNING MARKET...";
 
    // Indicator Short Name
    IndicatorShortName("Veteran Trader Pro [30-Yr Institutional System]");
+
+   // Set clean chart comment to verify indicator is loaded
+   Comment("★ Veteran Trader Pro Active | Symbol: ", Symbol(), " | Timeframe: ", GetTimeframeString(Period()), " ★");
+
+   // Immediately render Dashboard and Pivots on Init (even before ticks arrive)
+   if(InpShowDashboard)
+   {
+      RenderDashboard();
+   }
+   CalculateAndDrawPivots();
+   ChartRedraw(0);
 
    return(INIT_SUCCEEDED);
 }
@@ -167,6 +197,7 @@ void OnDeinit(const int reason)
    ObjectsDeleteAll(0, PREFIX_DASH);
    ObjectsDeleteAll(0, PREFIX_PIVOT);
    ObjectsDeleteAll(0, PREFIX_TRADE);
+   Comment("");
    ChartRedraw(0);
 }
 
@@ -179,6 +210,9 @@ int GetTimeframeTrend(int timeframe)
    double ema50  = iMA(NULL, timeframe, InpEMAMedium, 0, MODE_EMA, PRICE_CLOSE, 1);
    double ema200 = iMA(NULL, timeframe, InpEMASlow, 0, MODE_EMA, PRICE_CLOSE, 1);
    double close1 = iClose(NULL, timeframe, 1);
+
+   if(ema20 <= 0 || ema50 <= 0 || ema200 <= 0 || close1 <= 0)
+      return 0; // Data not yet loaded for this timeframe
 
    // Strong Bullish: Price > 200 EMA and 20 EMA > 50 EMA and Close > 50 EMA
    if(close1 > ema200 && ema20 > ema50 && close1 > ema50)
@@ -198,17 +232,20 @@ double CalculateLotSize(double slPips)
    if(slPips <= 0) return 0.01;
 
    double balance = AccountBalance();
-   if(balance <= 0) balance = 10000.0; // fallback preview
+   if(balance <= 0) balance = 10000.0; // fallback preview for offline/demo
 
    double riskMoney = balance * (InpRiskPercent / 100.0);
    double tickValue = MarketInfo(Symbol(), MODE_TICKVALUE);
    double tickSize  = MarketInfo(Symbol(), MODE_TICKSIZE);
-   double pointVal  = Point;
 
-   if(tickSize <= 0 || tickValue <= 0) return 0.01;
+   if(tickSize <= 0 || tickValue <= 0)
+   {
+      // Fallback calculation for standard currency pairs
+      return NormalizeDouble((riskMoney / (slPips * 10.0)), 2);
+   }
 
    double pipValuePerStandardLot = (tickValue / tickSize) * PipMultiplier;
-   if(pipValuePerStandardLot <= 0) pipValuePerStandardLot = 10.0; // default for 1 standard lot on USD
+   if(pipValuePerStandardLot <= 0) pipValuePerStandardLot = 10.0;
 
    double lots = riskMoney / (slPips * pipValuePerStandardLot);
 
@@ -223,7 +260,7 @@ double CalculateLotSize(double slPips)
    lots = MathFloor(lots / lotStep) * lotStep;
    lots = MathMax(minLot, MathMin(maxLot, lots));
 
-   return lots;
+   return NormalizeDouble(lots, 2);
 }
 
 //+------------------------------------------------------------------+
@@ -242,6 +279,14 @@ void CalculateAndDrawPivots()
    double dLow   = iLow(NULL, PERIOD_D1, 1);
    double dClose = iClose(NULL, PERIOD_D1, 1);
 
+   // If D1 data not ready, fallback to looking back on current chart bars
+   if(dHigh <= 0 || dLow <= 0 || dClose <= 0)
+   {
+      dHigh  = High[iHighest(NULL, 0, MODE_HIGH, MathMin(Bars - 1, 24), 1)];
+      dLow   = Low[iLowest(NULL, 0, MODE_LOW, MathMin(Bars - 1, 24), 1)];
+      dClose = Close[1];
+   }
+
    if(dHigh <= 0 || dLow <= 0 || dClose <= 0) return;
 
    // Classical Floor Trader Pivot Formula
@@ -251,9 +296,9 @@ void CalculateAndDrawPivots()
    double r2 = pp + (dHigh - dLow);
    double s2 = pp - (dHigh - dLow);
 
-   // Draw or Update Pivot Lines for today
-   datetime todayStart = iTime(NULL, PERIOD_D1, 0);
-   datetime todayEnd   = todayStart + 86400; // 24 hours
+   // Draw or Update Pivot Lines
+   datetime todayStart = Time[MathMin(Bars - 1, 50)];
+   datetime todayEnd   = Time[0] + (Period() * 60 * 30); // 30 candles forward
 
    DrawPivotLine(PREFIX_PIVOT + "PP",  "Daily Pivot (PP)", pp, InpColorPivot, STYLE_SOLID, todayStart, todayEnd);
    DrawPivotLine(PREFIX_PIVOT + "R1",  "Resistance 1 (R1)", r1, InpColorR1, STYLE_DASH, todayStart, todayEnd);
@@ -270,7 +315,7 @@ void DrawPivotLine(string objName, string desc, double price, color clr, int sty
    if(ObjectFind(0, objName) < 0)
    {
       ObjectCreate(0, objName, OBJ_TREND, 0, tStart, price, tEnd, price);
-      ObjectSetInteger(0, objName, OBJPROP_RAY_RIGHT, false);
+      ObjectSetInteger(0, objName, OBJPROP_RAY_RIGHT, true);
       ObjectSetInteger(0, objName, OBJPROP_STYLE, style);
       ObjectSetInteger(0, objName, OBJPROP_WIDTH, 1);
       ObjectSetInteger(0, objName, OBJPROP_COLOR, clr);
@@ -299,8 +344,8 @@ void DrawTradeSetupLines()
       return;
    }
 
-   datetime tStart = currentSetup.setupTime;
-   datetime tEnd   = TimeCurrent() + (Period() * 60 * 30); // 30 candles into future
+   datetime tStart = currentSetup.setupTime > 0 ? currentSetup.setupTime : Time[0];
+   datetime tEnd   = Time[0] + (Period() * 60 * 30);
 
    color entryClr = (currentSetup.signalType == 1) ? clrLimeGreen : clrCrimson;
    string dirText = (currentSetup.signalType == 1) ? "BUY" : "SELL";
@@ -364,14 +409,14 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
-   if(rates_total < InpEMASlow + 50)
-      return(0);
+   int counted_bars = prev_calculated;
+   if(rates_total < 30) return(0);
 
-   int limit = rates_total - prev_calculated;
-   if(prev_calculated > 0)
-      limit++;
+   int limit = rates_total - counted_bars;
+   if(counted_bars > 0) limit++;
+   if(limit > rates_total - 1) limit = rates_total - 1;
 
-   // Calculate EMAs and Signal Buffers
+   // 1. Calculate EMAs and Clear Buffer points
    for(int i = limit; i >= 0; i--)
    {
       FastEMABuffer[i] = iMA(NULL, 0, InpEMAFast, 0, MODE_EMA, PRICE_CLOSE, i);
@@ -381,15 +426,13 @@ int OnCalculate(const int rates_total,
       SellSignalBuffer[i] = EMPTY_VALUE;
    }
 
-   // Signal Detection Loop (Historical and Live on completed bars)
-   for(int i = limit; i >= 1; i--)
+   // 2. Scan for Non-Repainting Signals on closed bars (i = 1 to limit)
+   int scanLimit = MathMin(limit, 500); // Scan up to 500 historical bars
+   for(int i = scanLimit; i >= 1; i--)
    {
       double fastEMA   = FastEMABuffer[i];
       double medEMA    = MedEMABuffer[i];
       double slowEMA   = SlowEMABuffer[i];
-
-      double prevFast  = FastEMABuffer[i + 1];
-      double prevMed   = MedEMABuffer[i + 1];
 
       double rsi       = iRSI(NULL, 0, InpRSIPeriod, PRICE_CLOSE, i);
       double prevRSI   = iRSI(NULL, 0, InpRSIPeriod, PRICE_CLOSE, i + 1);
@@ -398,87 +441,82 @@ int OnCalculate(const int rates_total,
       double prevWPR   = iWPR(NULL, 0, InpWilliamsPeriod, i + 1);
 
       double atr       = iATR(NULL, 0, InpATRPeriod, i);
+      if(atr <= 0) atr = 10 * PipMultiplier;
+
+      double cVal = Close[i];
+      double oVal = Open[i];
+      double hVal = High[i];
+      double lVal = Low[i];
+      double prevH = High[i+1];
+      double prevL = Low[i+1];
 
       // Classical Stage Analysis / Dow Trend Condition:
-      bool isBullishRegime = (close[i] > slowEMA && fastEMA > medEMA);
-      bool isBearishRegime = (close[i] < slowEMA && fastEMA < medEMA);
+      bool isBullishRegime = (cVal > slowEMA && fastEMA > medEMA);
+      bool isBearishRegime = (cVal < slowEMA && fastEMA < medEMA);
 
       // Classical High-Probability Pullback & Momentum Trigger:
-      // Bullish:
-      // 1. Regime is Bullish (Price above 200 EMA, Fast > Medium)
-      // 2. Bar touched or pulled back near 20/50 EMA (Low[i] <= fastEMA * 1.0015 or Low[i+1] <= medEMA)
-      // 3. Momentum confirmation: Close[i] > Open[i] (bullish candle) and RSI crosses above 50 or recovers from oversold
-      // 4. Williams %R recovers from oversold (< -50 crossing up)
+      // Bullish Setup
       bool buyCondition = isBullishRegime &&
-                          (low[i] <= fastEMA || low[i+1] <= fastEMA || low[i] <= medEMA) &&
-                          (close[i] > open[i]) &&
-                          (close[i] > high[i+1] || (rsi > 50 && prevRSI <= 50) || (wpr > -50 && prevWPR <= -50));
+                          (lVal <= fastEMA || prevL <= fastEMA || lVal <= medEMA) &&
+                          (cVal > oVal) &&
+                          (cVal > prevH || (rsi > 50 && prevRSI <= 50) || (wpr > -50 && prevWPR <= -50));
 
-      // Bearish:
-      // 1. Regime is Bearish (Price below 200 EMA, Fast < Medium)
-      // 2. Bar touched or pulled back near 20/50 EMA (High[i] >= fastEMA * 0.9985 or High[i+1] >= medEMA)
-      // 3. Momentum confirmation: Close[i] < Open[i] (bearish candle) and RSI crosses below 50
-      // 4. Williams %R falls from overbought (> -50 crossing down)
+      // Bearish Setup
       bool sellCondition = isBearishRegime &&
-                           (high[i] >= fastEMA || high[i+1] >= fastEMA || high[i] >= medEMA) &&
-                           (close[i] < open[i]) &&
-                           (close[i] < low[i+1] || (rsi < 50 && prevRSI >= 50) || (wpr < -50 && prevWPR >= -50));
+                           (hVal >= fastEMA || prevH >= fastEMA || hVal >= medEMA) &&
+                           (cVal < oVal) &&
+                           (cVal < prevL || (rsi < 50 && prevRSI >= 50) || (wpr < -50 && prevWPR >= -50));
 
       if(buyCondition && !sellCondition)
       {
-         BuySignalBuffer[i] = low[i] - (atr * 0.5);
-         // If this is the most recent closed bar (i == 1)
+         BuySignalBuffer[i] = lVal - (atr * 0.4);
          if(i == 1)
          {
             currentSetup.signalType = 1;
-            currentSetup.entryPrice = close[1];
-            // Stop loss placed below signal candle low - ATR buffer
-            double slDistance = MathMax((close[1] - low[1]) + (atr * InpATRMorphSL), atr * 1.2);
-            currentSetup.stopLoss = close[1] - slDistance;
+            currentSetup.entryPrice = Close[1];
+            double slDistance = MathMax((Close[1] - Low[1]) + (atr * InpATRMorphSL), atr * 1.2);
+            currentSetup.stopLoss = Close[1] - slDistance;
             currentSetup.riskPips = slDistance / PipMultiplier;
             currentSetup.recLotSize = CalculateLotSize(currentSetup.riskPips);
-            currentSetup.takeProfit1 = close[1] + (slDistance * InpTP1_RR);
-            currentSetup.takeProfit2 = close[1] + (slDistance * InpTP2_RR);
-            currentSetup.setupTime = time[1];
+            currentSetup.takeProfit1 = Close[1] + (slDistance * InpTP1_RR);
+            currentSetup.takeProfit2 = Close[1] + (slDistance * InpTP2_RR);
+            currentSetup.setupTime = Time[1];
             currentSetup.marketRegime = "STAGE 2: INSTITUTIONAL BULLISH EXPANSION";
          }
       }
       else if(sellCondition && !buyCondition)
       {
-         SellSignalBuffer[i] = high[i] + (atr * 0.5);
-         // If this is the most recent closed bar (i == 1)
+         SellSignalBuffer[i] = hVal + (atr * 0.4);
          if(i == 1)
          {
             currentSetup.signalType = -1;
-            currentSetup.entryPrice = close[1];
-            // Stop loss placed above signal candle high + ATR buffer
-            double slDistance = MathMax((high[1] - close[1]) + (atr * InpATRMorphSL), atr * 1.2);
-            currentSetup.stopLoss = close[1] + slDistance;
+            currentSetup.entryPrice = Close[1];
+            double slDistance = MathMax((High[1] - Close[1]) + (atr * InpATRMorphSL), atr * 1.2);
+            currentSetup.stopLoss = Close[1] + slDistance;
             currentSetup.riskPips = slDistance / PipMultiplier;
             currentSetup.recLotSize = CalculateLotSize(currentSetup.riskPips);
-            currentSetup.takeProfit1 = close[1] - (slDistance * InpTP1_RR);
-            currentSetup.takeProfit2 = close[1] - (slDistance * InpTP2_RR);
-            currentSetup.setupTime = time[1];
+            currentSetup.takeProfit1 = Close[1] - (slDistance * InpTP1_RR);
+            currentSetup.takeProfit2 = Close[1] - (slDistance * InpTP2_RR);
+            currentSetup.setupTime = Time[1];
             currentSetup.marketRegime = "STAGE 4: INSTITUTIONAL BEARISH DISTRIBUTION";
          }
       }
    }
 
-   // Floor Trader Pivots calculation & display
+   // 3. Render Visual Components
    CalculateAndDrawPivots();
-
-   // Draw visual Entry/SL/TP target lines
    DrawTradeSetupLines();
 
-   // Handle Alerts on Bar 1 Confirmation
-   HandleAlerts(time[0]);
+   // 4. Alerts Trigger
+   HandleAlerts(Time[0]);
 
-   // Render Executive Institutional Dashboard
+   // 5. Render Executive Dashboard
    if(InpShowDashboard)
    {
       RenderDashboard();
    }
 
+   ChartRedraw(0);
    return(rates_total);
 }
 
@@ -608,9 +646,9 @@ void RenderDashboard()
 
    // Regime Analysis
    double ema200Now = iMA(NULL, 0, InpEMASlow, 0, MODE_EMA, PRICE_CLOSE, 0);
-   double closeNow  = Close[0];
-   string regimeStr = (closeNow > ema200Now) ? "Bullish (Stage 2 Markup)" : "Bearish (Stage 4 Markdown)";
-   color regimeClr  = (closeNow > ema200Now) ? greenClr : redClr;
+   double closeNow  = (Bars > 0) ? Close[0] : 0;
+   string regimeStr = (closeNow > ema200Now && ema200Now > 0) ? "Bullish (Stage 2 Markup)" : "Bearish (Stage 4 Markdown)";
+   color regimeClr  = (closeNow > ema200Now && ema200Now > 0) ? greenClr : redClr;
 
    CreateLabel(PREFIX_DASH + "Reg_Label", x + 12, y + 108, "200 EMA:", subClr, InpFontSize - 1, false);
    CreateLabel(PREFIX_DASH + "Reg_Val",   x + 85, y + 108, regimeStr, regimeClr, InpFontSize - 1, true);
@@ -682,6 +720,7 @@ void CreateRectLabel(string name, int x, int y, int w, int h, color bgClr, color
       ObjectSetInteger(0, name, OBJPROP_WIDTH, borderWidth);
       ObjectSetInteger(0, name, OBJPROP_BACK, false);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
    }
    else
    {
@@ -689,6 +728,7 @@ void CreateRectLabel(string name, int x, int y, int w, int h, color bgClr, color
       ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
       ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
       ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
+      ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bgClr);
    }
 }
 
@@ -709,6 +749,7 @@ void CreateLabel(string name, int x, int y, string text, color clr, int fontSize
       ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
       ObjectSetInteger(0, name, OBJPROP_BACK, false);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
    }
    else
    {
@@ -738,6 +779,7 @@ void CreateLine(string name, int x, int y, int w, color clr)
       ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, name, OBJPROP_BACK, false);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
    }
    else
    {
