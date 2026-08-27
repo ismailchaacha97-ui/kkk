@@ -1116,7 +1116,7 @@ void CreateLine(string name, int x, int y, int w, color clr)
       ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
       ObjectSetInteger(0, name, OBJPROP_YSIZE, 1);
       ObjectSetInteger(0, name, OBJPROP_BGCOLOR, clr);
-      ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, borderClr);
+      ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, clr);
       ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, name, OBJPROP_BACK, false);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
@@ -1127,6 +1127,8 @@ void CreateLine(string name, int x, int y, int w, color clr)
       ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
       ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
       ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
+      ObjectSetInteger(0, name, OBJPROP_BGCOLOR, clr);
+      ObjectSetInteger(0, name, OBJPROP_BORDER_COLOR, clr);
    }
 }
 //+------------------------------------------------------------------+
