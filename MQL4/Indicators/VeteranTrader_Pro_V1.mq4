@@ -2,11 +2,11 @@
 //|                                        VeteranTrader_Pro_V1.mq4  |
 //|                       Veteran 30-Year Wall Street Trading Engine |
 //|                             Classical Multi-Confluence System    |
-//|               (Persistent Active Trade Tracker & Anti-Chop)      |
+//|         (Persistent Active Trade Tracker & Confidence Engine)    |
 //+------------------------------------------------------------------+
 #property copyright "Veteran Trader Institutional System"
 #property link      "https://arena.ai"
-#property version   "1.30"
+#property version   "1.40"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 5
@@ -68,27 +68,27 @@ input int      InpATRPeriod         = 14;          // ATR Period (Volatility)
 
 //--- Risk Management (ATR Multiplier & Target Ratios)
 input string   Group_Risk           = "=== RISK & TARGET MANAGEMENT ===";
-input double   InpRiskPercent     = 1.0;         // Account Risk % for Lot Size Calc
-input double   InpATRMorphSL      = 1.5;         // Stop Loss ATR Multiplier
-input double   InpTP1_RR          = 1.5;         // Take Profit 1 Risk:Reward
-input double   InpTP2_RR          = 2.5;         // Take Profit 2 Risk:Reward
-input bool     InpShowTradeLines  = true;        // Show Visual Persistent Lines (Entry/SL/TP)
+input double   InpRiskPercent       = 1.0;         // Account Risk % for Lot Size Calc
+input double   InpATRMorphSL        = 1.5;         // Stop Loss ATR Multiplier
+input double   InpTP1_RR            = 1.5;         // Take Profit 1 Risk:Reward
+input double   InpTP2_RR            = 2.5;         // Take Profit 2 Risk:Reward
+input bool     InpShowTradeLines    = true;        // Show Visual Persistent Lines (Entry/SL/TP)
 
 //--- Dashboard HUD Settings
-input string   Group_Dashboard    = "=== INSTITUTIONAL DASHBOARD HUD ===";
-input bool     InpShowDashboard   = true;        // Enable On-Chart Dashboard
-input int      InpDashX           = 25;          // Dashboard X Position (Pixels)
-input int      InpDashY           = 35;          // Dashboard Y Position (Pixels)
-input int      InpFontSize        = 9;           // Base Font Size
-input string   InpFontName        = "Segoe UI";  // Dashboard Font
+input string   Group_Dashboard      = "=== INSTITUTIONAL DASHBOARD HUD ===";
+input bool     InpShowDashboard     = true;        // Enable On-Chart Dashboard
+input int      InpDashX             = 25;          // Dashboard X Position (Pixels)
+input int      InpDashY             = 35;          // Dashboard Y Position (Pixels)
+input int      InpFontSize          = 9;           // Base Font Size
+input string   InpFontName          = "Segoe UI";  // Dashboard Font
 
 //--- Alerts & Notifications
-input string   Group_Alerts       = "=== ALERTS & NOTIFICATIONS ===";
-input bool     InpPopupAlert      = true;        // Popup Alert on Chart
-input bool     InpSoundAlert      = true;        // Sound Alert
-input string   InpSoundFile       = "alert.wav"; // Alert Sound File
-input bool     InpPushAlert       = true;        // Push Notification to MT4 Mobile
-input bool     InpEmailAlert      = false;       // Send Email Alert
+input string   Group_Alerts         = "=== ALERTS & NOTIFICATIONS ===";
+input bool     InpPopupAlert        = true;        // Popup Alert on Chart
+input bool     InpSoundAlert        = true;        // Sound Alert
+input string   InpSoundFile         = "alert.wav"; // Alert Sound File
+input bool     InpPushAlert         = true;        // Push Notification to MT4 Mobile
+input bool     InpEmailAlert        = false;       // Send Email Alert
 
 //+------------------------------------------------------------------+
 //| GLOBAL CONSTANTS & VARIABLES                                     |
@@ -112,6 +112,7 @@ struct ActiveTradeTracker
    double   takeProfit2;
    double   riskPips;
    double   recLotSize;
+   int      confidence;       // 0 - 100%
    datetime setupTime;
    int      setupBarIndex;
    bool     isSLHit;
@@ -136,12 +137,14 @@ int  GetHigherTimeframe(int currentTf);
 int  GetTimeframeTrend(int timeframe);
 bool IsMarketChoppy(int shift, double &adxOut);
 double CalculateLotSize(double slPips);
+int  CalculateConfidenceScore(int dir, int shift, double adxVal, double rsiVal);
 void UpdateActiveTradeProgress();
 void CreateRectLabel(string name, int x, int y, int w, int h, color bgClr, color borderClr, int borderWidth);
 void CreateLabel(string name, int x, int y, string text, color clr, int fontSize, bool isBold);
 void CreateLine(string name, int x, int y, int w, color clr);
 void DrawPivotLine(string objName, string desc, double price, color clr, int style, datetime tStart, datetime tEnd);
 void DrawPriceLine(string name, string text, double price, color clr, int style, int width, datetime t1, datetime t2);
+string objNameOrDefault(string n);
 
 //+------------------------------------------------------------------+
 //| Custom indicator initialization function                         |
@@ -190,6 +193,7 @@ int OnInit()
    activeTrade.takeProfit2 = 0;
    activeTrade.riskPips = 0;
    activeTrade.recLotSize = 0.01;
+   activeTrade.confidence = 0;
    activeTrade.setupTime = 0;
    activeTrade.setupBarIndex = 0;
    activeTrade.isSLHit = false;
@@ -201,7 +205,7 @@ int OnInit()
    activeTrade.isChoppy = false;
    activeTrade.currentADX = 0;
 
-   IndicatorShortName("Veteran Trader Pro [Persistent System]");
+   IndicatorShortName("Veteran Trader Pro [Confidence Engine]");
    Comment("★ Veteran Trader Pro Active | Symbol: ", Symbol(), " ★");
 
    if(InpShowDashboard)
@@ -263,6 +267,61 @@ int GetTimeframeTrend(int timeframe)
       return -1;
 
    return 0;
+}
+
+//+------------------------------------------------------------------+
+//| Multi-Factor Institutional Confidence Score Calculator           |
+//+------------------------------------------------------------------+
+int CalculateConfidenceScore(int dir, int shift, double adxVal, double rsiVal)
+{
+   int score = 50; // Base score for any valid confirmed trigger
+
+   // 1. Higher Timeframe Alignment (+20%)
+   int htf = GetHigherTimeframe(Period());
+   int htfTrend = GetTimeframeTrend(htf);
+   if(htfTrend == dir) score += 15;
+
+   int d1Trend = GetTimeframeTrend(PERIOD_D1);
+   if(d1Trend == dir)  score += 10;
+
+   // 2. 200 EMA Baseline Alignment (+10%)
+   double slowEMA = iMA(NULL, 0, InpEMASlow, 0, MODE_EMA, PRICE_CLOSE, shift);
+   if(dir == 1 && Close[shift] > slowEMA)  score += 10;
+   if(dir == -1 && Close[shift] < slowEMA) score += 10;
+
+   // 3. ADX Trend Strength (+15%)
+   if(adxVal >= 35.0)      score += 15;
+   else if(adxVal >= 25.0) score += 10;
+   else if(adxVal >= 22.0) score += 5;
+
+   // 4. Momentum Precision Zone (RSI) (+10%)
+   if(dir == 1 && rsiVal >= 50.0 && rsiVal <= 68.0) score += 10;
+   if(dir == -1 && rsiVal <= 50.0 && rsiVal >= 32.0) score += 10;
+
+   // 5. Floor Trader Pivot Proximity (+10%)
+   double dHigh  = iHigh(NULL, PERIOD_D1, 1);
+   double dLow   = iLow(NULL, PERIOD_D1, 1);
+   double dClose = iClose(NULL, PERIOD_D1, 1);
+   if(dHigh > 0 && dLow > 0 && dClose > 0)
+   {
+      double pp = (dHigh + dLow + dClose) / 3.0;
+      double s1 = (2.0 * pp) - dHigh;
+      double r1 = (2.0 * pp) - dLow;
+
+      double atr = iATR(NULL, 0, InpATRPeriod, shift);
+      if(atr <= 0) atr = 10 * PipMultiplier;
+
+      if(dir == 1 && (MathAbs(Low[shift] - pp) <= atr || MathAbs(Low[shift] - s1) <= atr))
+         score += 10;
+      if(dir == -1 && (MathAbs(High[shift] - pp) <= atr || MathAbs(High[shift] - r1) <= atr))
+         score += 10;
+   }
+
+   // Bound between 60% and 98%
+   if(score > 98) score = 98;
+   if(score < 60) score = 65;
+
+   return score;
 }
 
 //+------------------------------------------------------------------+
@@ -414,7 +473,6 @@ void UpdateActiveTradeProgress()
    {
       activeTrade.livePips = (curClose - activeTrade.entryPrice) / PipMultiplier;
 
-      // Find highest high and lowest low since signal bar
       double highestHigh = High[0];
       double lowestLow   = Low[0];
       for(int b = 0; b <= startBar; b++)
@@ -498,9 +556,9 @@ void DrawPersistentTradeLines()
    color entryClr = (activeTrade.signalType == 1) ? clrLimeGreen : clrCrimson;
    string dirText = (activeTrade.signalType == 1) ? "BUY" : "SELL";
 
-   // 1. Entry Line
-   DrawPriceLine(PREFIX_TRADE + "Entry", "ENTRY [" + dirText + "]: " + DoubleToString(activeTrade.entryPrice, Digits),
-                 activeTrade.entryPrice, entryClr, STYLE_SOLID, 2, tStart, tEnd);
+   // 1. Entry Line with Confidence Percentage
+   string entryDesc = StringFormat("ENTRY [%s - %d%% CONFIDENCE]: %s", dirText, activeTrade.confidence, DoubleToString(activeTrade.entryPrice, Digits));
+   DrawPriceLine(PREFIX_TRADE + "Entry", entryDesc, activeTrade.entryPrice, entryClr, STYLE_SOLID, 2, tStart, tEnd);
 
    // 2. Stop Loss Line
    DrawPriceLine(PREFIX_TRADE + "SL", "STOP LOSS: " + DoubleToString(activeTrade.stopLoss, Digits) + " (" + DoubleToString(activeTrade.riskPips, 1) + " pips)",
@@ -589,7 +647,7 @@ int OnCalculate(const int rates_total,
    int lastSignalBar = 9999;
    int lastSignalDir = 0;
 
-   // Scan chronologically backwards (oldest to newest) to correctly position arrows
+   // Scan chronologically backwards (oldest to newest)
    for(int i = scanLimit; i >= 1; i--)
    {
       double fastEMA = FastEMABuffer[i];
@@ -667,6 +725,7 @@ int OnCalculate(const int rates_total,
             activeTrade.stopLoss = Close[1] - slDistance;
             activeTrade.riskPips = slDistance / PipMultiplier;
             activeTrade.recLotSize = CalculateLotSize(activeTrade.riskPips);
+            activeTrade.confidence = CalculateConfidenceScore(1, 1, adxVal, rsi);
             activeTrade.takeProfit1 = Close[1] + (slDistance * InpTP1_RR);
             activeTrade.takeProfit2 = Close[1] + (slDistance * InpTP2_RR);
             activeTrade.setupTime = Time[1];
@@ -693,6 +752,7 @@ int OnCalculate(const int rates_total,
             activeTrade.stopLoss = Close[1] + slDistance;
             activeTrade.riskPips = slDistance / PipMultiplier;
             activeTrade.recLotSize = CalculateLotSize(activeTrade.riskPips);
+            activeTrade.confidence = CalculateConfidenceScore(-1, 1, adxVal, rsi);
             activeTrade.takeProfit1 = Close[1] - (slDistance * InpTP1_RR);
             activeTrade.takeProfit2 = Close[1] - (slDistance * InpTP2_RR);
             activeTrade.setupTime = Time[1];
@@ -705,7 +765,7 @@ int OnCalculate(const int rates_total,
       }
    }
 
-   // 2. If no active setup was set this tick, look back and lock the MOST RECENT confirmed signal
+   // 2. Fallback lookback to lock latest signal if active setup is empty
    if(!activeTrade.hasSetup || activeTrade.setupTime == 0)
    {
       for(int k = 1; k <= MathMin(scanLimit, 100); k++)
@@ -715,6 +775,8 @@ int OnCalculate(const int rates_total,
             double atrK = iATR(NULL, 0, InpATRPeriod, k);
             if(atrK <= 0) atrK = 10 * PipMultiplier;
             double slDist = MathMax((Close[k] - Low[k]) + (atrK * InpATRMorphSL), atrK * 1.2);
+            double adxK = iADX(NULL, 0, InpADXPeriod, PRICE_CLOSE, MODE_MAIN, k);
+            double rsiK = iRSI(NULL, 0, InpRSIPeriod, PRICE_CLOSE, k);
 
             activeTrade.hasSetup = true;
             activeTrade.signalType = 1;
@@ -722,6 +784,7 @@ int OnCalculate(const int rates_total,
             activeTrade.stopLoss = Close[k] - slDist;
             activeTrade.riskPips = slDist / PipMultiplier;
             activeTrade.recLotSize = CalculateLotSize(activeTrade.riskPips);
+            activeTrade.confidence = CalculateConfidenceScore(1, k, adxK, rsiK);
             activeTrade.takeProfit1 = Close[k] + (slDist * InpTP1_RR);
             activeTrade.takeProfit2 = Close[k] + (slDist * InpTP2_RR);
             activeTrade.setupTime = Time[k];
@@ -734,6 +797,8 @@ int OnCalculate(const int rates_total,
             double atrK = iATR(NULL, 0, InpATRPeriod, k);
             if(atrK <= 0) atrK = 10 * PipMultiplier;
             double slDist = MathMax((High[k] - Close[k]) + (atrK * InpATRMorphSL), atrK * 1.2);
+            double adxK = iADX(NULL, 0, InpADXPeriod, PRICE_CLOSE, MODE_MAIN, k);
+            double rsiK = iRSI(NULL, 0, InpRSIPeriod, PRICE_CLOSE, k);
 
             activeTrade.hasSetup = true;
             activeTrade.signalType = -1;
@@ -741,6 +806,7 @@ int OnCalculate(const int rates_total,
             activeTrade.stopLoss = Close[k] + slDist;
             activeTrade.riskPips = slDist / PipMultiplier;
             activeTrade.recLotSize = CalculateLotSize(activeTrade.riskPips);
+            activeTrade.confidence = CalculateConfidenceScore(-1, k, adxK, rsiK);
             activeTrade.takeProfit1 = Close[k] - (slDist * InpTP1_RR);
             activeTrade.takeProfit2 = Close[k] - (slDist * InpTP2_RR);
             activeTrade.setupTime = Time[k];
@@ -752,7 +818,6 @@ int OnCalculate(const int rates_total,
    }
    else
    {
-      // Update setupBarIndex dynamically as new bars form
       for(int k = 1; k <= MathMin(scanLimit, 100); k++)
       {
          if(Time[k] == activeTrade.setupTime)
@@ -793,8 +858,10 @@ void HandleAlerts(datetime currentBarTime)
    if(BuySignalBuffer[1] != EMPTY_VALUE && BuySignalBuffer[1] > 0)
    {
       lastAlertTime = currentBarTime;
-      string msg = StringFormat("[VETERAN TRADER PRO] 🟢 PRIME BUY SIGNAL\nSymbol: %s | Timeframe: %s\nEntry: %s | SL: %s (%0.1f pips)\nTP1: %s | TP2: %s\nRec Lot: %0.2f (at %0.1f%% risk)\nRule: Check High-Impact News Before Entry!",
+      string msg = StringFormat("[VETERAN TRADER PRO] 🟢 PRIME BUY SIGNAL (Confidence: %d%%)\nSymbol: %s | Timeframe: %s\nConfidence: %d%% [INSTITUTIONAL GRADE-A]\nEntry: %s | SL: %s (%0.1f pips)\nTP1: %s | TP2: %s\nRec Lot: %0.2f (at %0.1f%% risk)\nRule: Check High-Impact News Before Entry!",
+                                activeTrade.confidence,
                                 Symbol(), GetTimeframeString(Period()),
+                                activeTrade.confidence,
                                 DoubleToString(activeTrade.entryPrice, Digits),
                                 DoubleToString(activeTrade.stopLoss, Digits), activeTrade.riskPips,
                                 DoubleToString(activeTrade.takeProfit1, Digits),
@@ -804,13 +871,15 @@ void HandleAlerts(datetime currentBarTime)
       if(InpPopupAlert) Alert(msg);
       if(InpSoundAlert) PlaySound(InpSoundFile);
       if(InpPushAlert)  SendNotification(msg);
-      if(InpEmailAlert) SendMail("Veteran Trader Alert - BUY " + Symbol(), msg);
+      if(InpEmailAlert) SendMail(StringFormat("Veteran Trader Alert - BUY %s (%d%% Confidence)", Symbol(), activeTrade.confidence), msg);
    }
    else if(SellSignalBuffer[1] != EMPTY_VALUE && SellSignalBuffer[1] > 0)
    {
       lastAlertTime = currentBarTime;
-      string msg = StringFormat("[VETERAN TRADER PRO] 🔴 PRIME SELL SIGNAL\nSymbol: %s | Timeframe: %s\nEntry: %s | SL: %s (%0.1f pips)\nTP1: %s | TP2: %s\nRec Lot: %0.2f (at %0.1f%% risk)\nRule: Check High-Impact News Before Entry!",
+      string msg = StringFormat("[VETERAN TRADER PRO] 🔴 PRIME SELL SIGNAL (Confidence: %d%%)\nSymbol: %s | Timeframe: %s\nConfidence: %d%% [INSTITUTIONAL GRADE-A]\nEntry: %s | SL: %s (%0.1f pips)\nTP1: %s | TP2: %s\nRec Lot: %0.2f (at %0.1f%% risk)\nRule: Check High-Impact News Before Entry!",
+                                activeTrade.confidence,
                                 Symbol(), GetTimeframeString(Period()),
+                                activeTrade.confidence,
                                 DoubleToString(activeTrade.entryPrice, Digits),
                                 DoubleToString(activeTrade.stopLoss, Digits), activeTrade.riskPips,
                                 DoubleToString(activeTrade.takeProfit1, Digits),
@@ -820,7 +889,7 @@ void HandleAlerts(datetime currentBarTime)
       if(InpPopupAlert) Alert(msg);
       if(InpSoundAlert) PlaySound(InpSoundFile);
       if(InpPushAlert)  SendNotification(msg);
-      if(InpEmailAlert) SendMail("Veteran Trader Alert - SELL " + Symbol(), msg);
+      if(InpEmailAlert) SendMail(StringFormat("Veteran Trader Alert - SELL %s (%d%% Confidence)", Symbol(), activeTrade.confidence), msg);
    }
 }
 
@@ -853,7 +922,7 @@ void RenderDashboard()
    int y = InpDashY;
    int width = 330;
    int rowH = 18;
-   int totalRows = 20;
+   int totalRows = 21;
    int height = (totalRows * rowH) + 25;
 
    color bgClr     = C'18,22,28';
@@ -869,8 +938,8 @@ void RenderDashboard()
    CreateRectLabel(PREFIX_DASH + "BG", x, y, width, height, bgClr, borderClr, 2);
 
    // Header
-   CreateLabel(PREFIX_DASH + "H1", x + 12, y + 8, "★ VETERAN TRADER PRO (PERSISTENT)", headerClr, InpFontSize + 1, true);
-   CreateLabel(PREFIX_DASH + "H2", x + 12, y + 26, "Live Active Setup Tracker & Anti-Chop Engine", subClr, InpFontSize - 2, false);
+   CreateLabel(PREFIX_DASH + "H1", x + 12, y + 8, "★ VETERAN TRADER PRO (CONFIDENCE)", headerClr, InpFontSize + 1, true);
+   CreateLabel(PREFIX_DASH + "H2", x + 12, y + 26, "Live Active Setup Tracker & Multi-Confluence", subClr, InpFontSize - 2, false);
 
    // Divider 1
    CreateLine(PREFIX_DASH + "Div1", x + 10, y + 42, width - 20, borderClr);
@@ -910,9 +979,9 @@ void RenderDashboard()
    CreateLabel(PREFIX_DASH + "ADX_Label", x + 12, y + 88, "Market State:", subClr, InpFontSize - 1, false);
    CreateLabel(PREFIX_DASH + "ADX_Val",   x + 92, y + 88, adxText, chopStatusClr, InpFontSize - 1, true);
 
-   // Confluence Score
+   // Confluence Score & Trend Bias
    string scoreText = (score > 0) ? StringFormat("+%d%% (BULLISH CONFLUENCE)", score) : (score < 0) ? StringFormat("%d%% (BEARISH CONFLUENCE)", score) : "0% (CHOP / NEUTRAL)";
-   CreateLabel(PREFIX_DASH + "Conf_Label", x + 12, y + 108, "Score:", subClr, InpFontSize - 1, false);
+   CreateLabel(PREFIX_DASH + "Conf_Label", x + 12, y + 108, "Trend Bias:", subClr, InpFontSize - 1, false);
    CreateLabel(PREFIX_DASH + "Conf_Val",   x + 85, y + 108, scoreText, mtfClr, InpFontSize - 1, true);
 
    // Divider 2
@@ -941,36 +1010,48 @@ void RenderDashboard()
    CreateLabel(PREFIX_DASH + "Act_Title", x + 12, y + 135, "TRADE MONITOR:", headerClr, InpFontSize - 1, true);
    CreateLabel(PREFIX_DASH + "Act_Val",   x + 12, y + 153, actionText, actionClr, InpFontSize + 1, true);
 
+   // Confidence Percentage Display (Highlight)
+   if(activeTrade.hasSetup && activeTrade.signalType != 0)
+   {
+      color confClr = (activeTrade.confidence >= 85) ? greenClr : (activeTrade.confidence >= 75) ? headerClr : yellowClr;
+      string qualityGrade = (activeTrade.confidence >= 85) ? "HIGH (GRADE A+)" : (activeTrade.confidence >= 75) ? "MODERATE (GRADE B)" : "CAUTION";
+      CreateLabel(PREFIX_DASH + "Trd_Conf", x + 12, y + 175, StringFormat("🎯 CONFIDENCE: %d%%  [%s]", activeTrade.confidence, qualityGrade), confClr, InpFontSize, true);
+   }
+   else
+   {
+      CreateLabel(PREFIX_DASH + "Trd_Conf", x + 12, y + 175, "🎯 CONFIDENCE: Waiting for Confirmed Setup...", subClr, InpFontSize - 1, false);
+   }
+
    // Live Status (Pips / TP hit status)
    color liveClr = (activeTrade.livePips >= 0) ? greenClr : redClr;
    if(activeTrade.isTP1Hit || activeTrade.isTP2Hit) liveClr = headerClr;
-   CreateLabel(PREFIX_DASH + "Trd_Live",  x + 12, y + 175, StringFormat("Status: %s", activeTrade.liveStatusText), liveClr, InpFontSize, true);
+   CreateLabel(PREFIX_DASH + "Trd_Live",  x + 12, y + 195, StringFormat("Status: %s", activeTrade.liveStatusText), liveClr, InpFontSize - 1, true);
 
    // Trade Parameters (Entry, SL, TP1, TP2, Lot Size)
    if(activeTrade.hasSetup && activeTrade.signalType != 0)
    {
-      CreateLabel(PREFIX_DASH + "Trd_Entry", x + 12, y + 195, StringFormat("Entry: %s", DoubleToString(activeTrade.entryPrice, Digits)), textClr, InpFontSize - 1, true);
-      CreateLabel(PREFIX_DASH + "Trd_SL",    x + 12, y + 213, StringFormat("Stop Loss: %s  (%0.1f pips)", DoubleToString(activeTrade.stopLoss, Digits), activeTrade.riskPips), redClr, InpFontSize - 1, true);
-      CreateLabel(PREFIX_DASH + "Trd_TP1",   x + 12, y + 231, StringFormat("Target TP1 (1:1.5): %s", DoubleToString(activeTrade.takeProfit1, Digits)), greenClr, InpFontSize - 1, true);
-      CreateLabel(PREFIX_DASH + "Trd_TP2",   x + 12, y + 249, StringFormat("Target TP2 (1:2.5): %s", DoubleToString(activeTrade.takeProfit2, Digits)), greenClr, InpFontSize - 1, true);
-      CreateLabel(PREFIX_DASH + "Trd_Lot",   x + 12, y + 267, StringFormat("Calculated Lot (%0.1f%% Risk): %0.2f Lots", InpRiskPercent, activeTrade.recLotSize), headerClr, InpFontSize - 1, true);
+      CreateLabel(PREFIX_DASH + "Trd_Entry", x + 12, y + 213, StringFormat("Entry: %s", DoubleToString(activeTrade.entryPrice, Digits)), textClr, InpFontSize - 1, true);
+      CreateLabel(PREFIX_DASH + "Trd_SL",    x + 12, y + 231, StringFormat("Stop Loss: %s  (%0.1f pips)", DoubleToString(activeTrade.stopLoss, Digits), activeTrade.riskPips), redClr, InpFontSize - 1, true);
+      CreateLabel(PREFIX_DASH + "Trd_TP1",   x + 12, y + 249, StringFormat("Target TP1 (1:1.5): %s", DoubleToString(activeTrade.takeProfit1, Digits)), greenClr, InpFontSize - 1, true);
+      CreateLabel(PREFIX_DASH + "Trd_TP2",   x + 12, y + 267, StringFormat("Target TP2 (1:2.5): %s", DoubleToString(activeTrade.takeProfit2, Digits)), greenClr, InpFontSize - 1, true);
+      CreateLabel(PREFIX_DASH + "Trd_Lot",   x + 12, y + 285, StringFormat("Calculated Lot (%0.1f%% Risk): %0.2f Lots", InpRiskPercent, activeTrade.recLotSize), headerClr, InpFontSize - 1, true);
    }
    else
    {
-      CreateLabel(PREFIX_DASH + "Trd_Entry", x + 12, y + 195, "Entry: Waiting for 20/50 EMA Pullback...", subClr, InpFontSize - 1, false);
-      CreateLabel(PREFIX_DASH + "Trd_SL",    x + 12, y + 213, "Stop Loss: Dynamic ATR Floor", subClr, InpFontSize - 1, false);
-      CreateLabel(PREFIX_DASH + "Trd_TP1",   x + 12, y + 231, "Target TP1: Minimum 1:1.5 RR", subClr, InpFontSize - 1, false);
-      CreateLabel(PREFIX_DASH + "Trd_TP2",   x + 12, y + 249, "Target TP2: Expansion 1:2.5 RR", subClr, InpFontSize - 1, false);
-      CreateLabel(PREFIX_DASH + "Trd_Lot",   x + 12, y + 267, StringFormat("Lot Size: Auto-calculated at %0.1f%% risk", InpRiskPercent), subClr, InpFontSize - 1, false);
+      CreateLabel(PREFIX_DASH + "Trd_Entry", x + 12, y + 213, "Entry: Waiting for 20/50 EMA Pullback...", subClr, InpFontSize - 1, false);
+      CreateLabel(PREFIX_DASH + "Trd_SL",    x + 12, y + 231, "Stop Loss: Dynamic ATR Floor", subClr, InpFontSize - 1, false);
+      CreateLabel(PREFIX_DASH + "Trd_TP1",   x + 12, y + 249, "Target TP1: Minimum 1:1.5 RR", subClr, InpFontSize - 1, false);
+      CreateLabel(PREFIX_DASH + "Trd_TP2",   x + 12, y + 267, "Target TP2: Expansion 1:2.5 RR", subClr, InpFontSize - 1, false);
+      CreateLabel(PREFIX_DASH + "Trd_Lot",   x + 12, y + 285, StringFormat("Lot Size: Auto-calculated at %0.1f%% risk", InpRiskPercent), subClr, InpFontSize - 1, false);
    }
 
    // Divider 3
-   CreateLine(PREFIX_DASH + "Div3", x + 10, y + 288, width - 20, borderClr);
+   CreateLine(PREFIX_DASH + "Div3", x + 10, y + 306, width - 20, borderClr);
 
    // Institutional Rules
-   CreateLabel(PREFIX_DASH + "Rule1", x + 12, y + 294, "⚠️ 1. NEVER TRADE 15 MIN AROUND HIGH-IMPACT NEWS", clrOrange, InpFontSize - 2, true);
-   CreateLabel(PREFIX_DASH + "Rule2", x + 12, y + 310, "🛡️ 2. Max 1% Risk per Trade | Setup Locked Live", subClr, InpFontSize - 2, false);
-   CreateLabel(PREFIX_DASH + "Rule3", x + 12, y + 326, "🎯 3. Lock 50% Profit at TP1 & Move SL to Breakeven", subClr, InpFontSize - 2, false);
+   CreateLabel(PREFIX_DASH + "Rule1", x + 12, y + 312, "⚠️ 1. NEVER TRADE 15 MIN AROUND HIGH-IMPACT NEWS", clrOrange, InpFontSize - 2, true);
+   CreateLabel(PREFIX_DASH + "Rule2", x + 12, y + 328, "🛡️ 2. Max 1% Risk per Trade | Setup Locked Live", subClr, InpFontSize - 2, false);
+   CreateLabel(PREFIX_DASH + "Rule3", x + 12, y + 344, "🎯 3. Lock 50% Profit at TP1 & Move SL to Breakeven", subClr, InpFontSize - 2, false);
 }
 
 //+------------------------------------------------------------------+
