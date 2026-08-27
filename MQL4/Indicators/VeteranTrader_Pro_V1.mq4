@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Veteran Trader Institutional System"
 #property link      "https://arena.ai"
-#property version   "1.50"
+#property version   "1.55"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 5
@@ -227,7 +227,7 @@ int OnInit()
    activeTrade.currentADX = 0;
 
    IndicatorShortName("Veteran Trader Pro [Custom MTF Engine]");
-   Comment("★ Veteran Trader Pro Active | Symbol: ", Symbol(), " ★");
+   Comment("[VTP] Veteran Trader Pro Active | Symbol: ", Symbol(), " | TF: ", GetTimeframeString(Period()));
 
    if(InpShowDashboard)
    {
@@ -488,23 +488,23 @@ void UpdateActiveTradeProgress()
       if(lowestLow <= activeTrade.stopLoss)
       {
          activeTrade.isSLHit = true;
-         activeTrade.liveStatusText = "❌ SL HIT — TRADE CLOSED";
+         activeTrade.liveStatusText = "SL HIT - TRADE CLOSED";
       }
       else if(highestHigh >= activeTrade.takeProfit2)
       {
          activeTrade.isTP2Hit = true;
          activeTrade.isTP1Hit = true;
-         activeTrade.liveStatusText = StringFormat("🎯 TP2 HIT (+%0.1f pips) — FULL TARGET!", (activeTrade.takeProfit2 - activeTrade.entryPrice)/PipMultiplier);
+         activeTrade.liveStatusText = StringFormat("TP2 HIT (+%0.1f pips) - FULL TARGET!", (activeTrade.takeProfit2 - activeTrade.entryPrice)/PipMultiplier);
       }
       else if(highestHigh >= activeTrade.takeProfit1)
       {
          activeTrade.isTP1Hit = true;
-         activeTrade.liveStatusText = StringFormat("✅ TP1 HIT (+%0.1f pips) — SL TO BREAKEVEN!", (activeTrade.takeProfit1 - activeTrade.entryPrice)/PipMultiplier);
+         activeTrade.liveStatusText = StringFormat("TP1 HIT (+%0.1f pips) - MOVE SL TO BE!", (activeTrade.takeProfit1 - activeTrade.entryPrice)/PipMultiplier);
       }
       else
       {
          string sign = (activeTrade.livePips >= 0) ? "+" : "";
-         activeTrade.liveStatusText = StringFormat("🟢 RUNNING (%s%0.1f pips)", sign, activeTrade.livePips);
+         activeTrade.liveStatusText = StringFormat("RUNNING (%s%0.1f pips)", sign, activeTrade.livePips);
       }
    }
    else if(activeTrade.signalType == -1)
@@ -522,23 +522,23 @@ void UpdateActiveTradeProgress()
       if(highestHigh >= activeTrade.stopLoss)
       {
          activeTrade.isSLHit = true;
-         activeTrade.liveStatusText = "❌ SL HIT — TRADE CLOSED";
+         activeTrade.liveStatusText = "SL HIT - TRADE CLOSED";
       }
       else if(lowestLow <= activeTrade.takeProfit2)
       {
          activeTrade.isTP2Hit = true;
          activeTrade.isTP1Hit = true;
-         activeTrade.liveStatusText = StringFormat("🎯 TP2 HIT (+%0.1f pips) — FULL TARGET!", (activeTrade.entryPrice - activeTrade.takeProfit2)/PipMultiplier);
+         activeTrade.liveStatusText = StringFormat("TP2 HIT (+%0.1f pips) - FULL TARGET!", (activeTrade.entryPrice - activeTrade.takeProfit2)/PipMultiplier);
       }
       else if(lowestLow <= activeTrade.takeProfit1)
       {
          activeTrade.isTP1Hit = true;
-         activeTrade.liveStatusText = StringFormat("✅ TP1 HIT (+%0.1f pips) — SL TO BREAKEVEN!", (activeTrade.entryPrice - activeTrade.takeProfit1)/PipMultiplier);
+         activeTrade.liveStatusText = StringFormat("TP1 HIT (+%0.1f pips) - MOVE SL TO BE!", (activeTrade.entryPrice - activeTrade.takeProfit1)/PipMultiplier);
       }
       else
       {
          string sign = (activeTrade.livePips >= 0) ? "+" : "";
-         activeTrade.liveStatusText = StringFormat("🔴 RUNNING (%s%0.1f pips)", sign, activeTrade.livePips);
+         activeTrade.liveStatusText = StringFormat("RUNNING (%s%0.1f pips)", sign, activeTrade.livePips);
       }
    }
 }
@@ -636,7 +636,6 @@ int OnCalculate(const int rates_total,
       SellSignalBuffer[i] = EMPTY_VALUE;
    }
 
-   // Higher Timeframe check based on user-selected Slot 3 (Major Structure)
    int htfTrend = InpFilterHTF ? GetTimeframeTrend(InpMTF_Slot3) : 0;
 
    int scanLimit = MathMin(rates_total - 1, InpMaxHistoricalBars);
@@ -841,7 +840,7 @@ void HandleAlerts(datetime currentBarTime)
    if(BuySignalBuffer[1] != EMPTY_VALUE && BuySignalBuffer[1] > 0)
    {
       lastAlertTime = currentBarTime;
-      string msg = StringFormat("[VETERAN TRADER PRO] 🟢 PRIME BUY SIGNAL (Confidence: %d%%)\nSymbol: %s | Timeframe: %s\nConfidence: %d%% [INSTITUTIONAL GRADE-A]\nEntry: %s | SL: %s (%0.1f pips)\nTP1: %s | TP2: %s\nRec Lot: %0.2f (at %0.1f%% risk)\nRule: Check High-Impact News Before Entry!",
+      string msg = StringFormat("[VETERAN TRADER PRO] PRIME BUY SIGNAL (Confidence: %d%%)\nSymbol: %s | Timeframe: %s\nConfidence: %d%% [INSTITUTIONAL GRADE-A]\nEntry: %s | SL: %s (%0.1f pips)\nTP1: %s | TP2: %s\nRec Lot: %0.2f (at %0.1f%% risk)\nRule: Check High-Impact News Before Entry!",
                                 activeTrade.confidence,
                                 Symbol(), GetTimeframeString(Period()),
                                 activeTrade.confidence,
@@ -859,7 +858,7 @@ void HandleAlerts(datetime currentBarTime)
    else if(SellSignalBuffer[1] != EMPTY_VALUE && SellSignalBuffer[1] > 0)
    {
       lastAlertTime = currentBarTime;
-      string msg = StringFormat("[VETERAN TRADER PRO] 🔴 PRIME SELL SIGNAL (Confidence: %d%%)\nSymbol: %s | Timeframe: %s\nConfidence: %d%% [INSTITUTIONAL GRADE-A]\nEntry: %s | SL: %s (%0.1f pips)\nTP1: %s | TP2: %s\nRec Lot: %0.2f (at %0.1f%% risk)\nRule: Check High-Impact News Before Entry!",
+      string msg = StringFormat("[VETERAN TRADER PRO] PRIME SELL SIGNAL (Confidence: %d%%)\nSymbol: %s | Timeframe: %s\nConfidence: %d%% [INSTITUTIONAL GRADE-A]\nEntry: %s | SL: %s (%0.1f pips)\nTP1: %s | TP2: %s\nRec Lot: %0.2f (at %0.1f%% risk)\nRule: Check High-Impact News Before Entry!",
                                 activeTrade.confidence,
                                 Symbol(), GetTimeframeString(Period()),
                                 activeTrade.confidence,
@@ -921,7 +920,7 @@ void RenderDashboard()
    CreateRectLabel(PREFIX_DASH + "BG", x, y, width, height, bgClr, borderClr, 2);
 
    // Header
-   CreateLabel(PREFIX_DASH + "H1", x + 12, y + 8, "★ VETERAN TRADER PRO (CUSTOM MTF)", headerClr, InpFontSize + 1, true);
+   CreateLabel(PREFIX_DASH + "H1", x + 12, y + 8, "VETERAN TRADER PRO [CUSTOM MTF]", headerClr, InpFontSize + 1, true);
    CreateLabel(PREFIX_DASH + "H2", x + 12, y + 26, "Custom MTF Matrix & Confidence Engine", subClr, InpFontSize - 2, false);
 
    // Divider 1
@@ -933,7 +932,7 @@ void RenderDashboard()
    string assetInfo = StringFormat("Asset: %s (%s)  |  Spread: %0.1f pips", Symbol(), GetTimeframeString(Period()), currentSpread);
    CreateLabel(PREFIX_DASH + "Asset", x + 12, y + 48, assetInfo, textClr, InpFontSize - 1, false);
 
-   // User-Customized Multi-Timeframe Matrix
+   // User-Customized Multi-Timeframe Matrix (Using Universal ANSI Labels)
    int trend1 = GetTimeframeTrend(InpMTF_Slot1);
    int trend2 = GetTimeframeTrend(InpMTF_Slot2);
    int trend3 = GetTimeframeTrend(InpMTF_Slot3);
@@ -944,10 +943,10 @@ void RenderDashboard()
    string sTf3 = GetTimeframeString(InpMTF_Slot3);
    string sTf4 = GetTimeframeString(InpMTF_Slot4);
 
-   string icon1 = (trend1 == 1) ? StringFormat("[▲ %s]", sTf1) : (trend1 == -1) ? StringFormat("[▼ %s]", sTf1) : StringFormat("[— %s]", sTf1);
-   string icon2 = (trend2 == 1) ? StringFormat("[▲ %s]", sTf2) : (trend2 == -1) ? StringFormat("[▼ %s]", sTf2) : StringFormat("[— %s]", sTf2);
-   string icon3 = (trend3 == 1) ? StringFormat("[▲ %s]", sTf3) : (trend3 == -1) ? StringFormat("[▼ %s]", sTf3) : StringFormat("[— %s]", sTf3);
-   string icon4 = (trend4 == 1) ? StringFormat("[▲ %s]", sTf4) : (trend4 == -1) ? StringFormat("[▼ %s]", sTf4) : StringFormat("[— %s]", sTf4);
+   string icon1 = (trend1 == 1) ? StringFormat("[UP %s]", sTf1) : (trend1 == -1) ? StringFormat("[DN %s]", sTf1) : StringFormat("[-- %s]", sTf1);
+   string icon2 = (trend2 == 1) ? StringFormat("[UP %s]", sTf2) : (trend2 == -1) ? StringFormat("[DN %s]", sTf2) : StringFormat("[-- %s]", sTf2);
+   string icon3 = (trend3 == 1) ? StringFormat("[UP %s]", sTf3) : (trend3 == -1) ? StringFormat("[DN %s]", sTf3) : StringFormat("[-- %s]", sTf3);
+   string icon4 = (trend4 == 1) ? StringFormat("[UP %s]", sTf4) : (trend4 == -1) ? StringFormat("[DN %s]", sTf4) : StringFormat("[-- %s]", sTf4);
 
    int score = 0;
    if(trend1 == 1) score += 25; else if(trend1 == -1) score -= 25;
@@ -961,7 +960,7 @@ void RenderDashboard()
    CreateLabel(PREFIX_DASH + "MTF_Icons", x + 85, y + 68, StringFormat("%s  %s  %s  %s", icon1, icon2, icon3, icon4), mtfClr, InpFontSize - 1, true);
 
    // Market Regime & ADX Chop Status
-   string chopStatusStr = activeTrade.isChoppy ? "🚫 CHOP / RANGE (MUTED)" : "✅ ACTIVE TRENDING";
+   string chopStatusStr = activeTrade.isChoppy ? "[CHOP / RANGE - MUTED]" : "[ACTIVE TRENDING]";
    color chopStatusClr  = activeTrade.isChoppy ? yellowClr : greenClr;
    string adxText = StringFormat("ADX: %0.1f  |  Regime: %s", activeTrade.currentADX, chopStatusStr);
    CreateLabel(PREFIX_DASH + "ADX_Label", x + 12, y + 88, "Market State:", subClr, InpFontSize - 1, false);
@@ -981,17 +980,17 @@ void RenderDashboard()
 
    if(activeTrade.hasSetup && activeTrade.signalType == 1)
    {
-      actionText = "★ ACTIVE BUY SETUP (TRACKED) ★";
+      actionText = "[ACTIVE BUY SETUP (TRACKED)]";
       actionClr  = greenClr;
    }
    else if(activeTrade.hasSetup && activeTrade.signalType == -1)
    {
-      actionText = "★ ACTIVE SELL SETUP (TRACKED) ★";
+      actionText = "[ACTIVE SELL SETUP (TRACKED)]";
       actionClr  = redClr;
    }
    else if(activeTrade.isChoppy)
    {
-      actionText = "⚠️ MARKET IN RANGE — DO NOT TRADE";
+      actionText = "[!] MARKET IN RANGE - DO NOT TRADE";
       actionClr  = yellowClr;
    }
 
@@ -1003,11 +1002,11 @@ void RenderDashboard()
    {
       color confClr = (activeTrade.confidence >= 85) ? greenClr : (activeTrade.confidence >= 75) ? headerClr : yellowClr;
       string qualityGrade = (activeTrade.confidence >= 85) ? "HIGH (GRADE A+)" : (activeTrade.confidence >= 75) ? "MODERATE (GRADE B)" : "CAUTION";
-      CreateLabel(PREFIX_DASH + "Trd_Conf", x + 12, y + 175, StringFormat("🎯 CONFIDENCE: %d%%  [%s]", activeTrade.confidence, qualityGrade), confClr, InpFontSize, true);
+      CreateLabel(PREFIX_DASH + "Trd_Conf", x + 12, y + 175, StringFormat("CONFIDENCE: %d%%  [%s]", activeTrade.confidence, qualityGrade), confClr, InpFontSize, true);
    }
    else
    {
-      CreateLabel(PREFIX_DASH + "Trd_Conf", x + 12, y + 175, "🎯 CONFIDENCE: Waiting for Confirmed Setup...", subClr, InpFontSize - 1, false);
+      CreateLabel(PREFIX_DASH + "Trd_Conf", x + 12, y + 175, "CONFIDENCE: Waiting for Confirmed Setup...", subClr, InpFontSize - 1, false);
    }
 
    // Live Status (Pips / TP hit status)
@@ -1037,9 +1036,9 @@ void RenderDashboard()
    CreateLine(PREFIX_DASH + "Div3", x + 10, y + 306, width - 20, borderClr);
 
    // Institutional Rules
-   CreateLabel(PREFIX_DASH + "Rule1", x + 12, y + 312, "⚠️ 1. NEVER TRADE 15 MIN AROUND HIGH-IMPACT NEWS", clrOrange, InpFontSize - 2, true);
-   CreateLabel(PREFIX_DASH + "Rule2", x + 12, y + 328, "🛡️ 2. Max 1% Risk per Trade | Setup Locked Live", subClr, InpFontSize - 2, false);
-   CreateLabel(PREFIX_DASH + "Rule3", x + 12, y + 344, "🎯 3. Lock 50% Profit at TP1 & Move SL to Breakeven", subClr, InpFontSize - 2, false);
+   CreateLabel(PREFIX_DASH + "Rule1", x + 12, y + 312, "[!] 1. NEVER TRADE 15 MIN AROUND HIGH-IMPACT NEWS", clrOrange, InpFontSize - 2, true);
+   CreateLabel(PREFIX_DASH + "Rule2", x + 12, y + 328, "[#] 2. Max 1% Risk per Trade | Setup Locked Live", subClr, InpFontSize - 2, false);
+   CreateLabel(PREFIX_DASH + "Rule3", x + 12, y + 344, "[>] 3. Lock 50% Profit at TP1 & Move SL to Breakeven", subClr, InpFontSize - 2, false);
 }
 
 //+------------------------------------------------------------------+
