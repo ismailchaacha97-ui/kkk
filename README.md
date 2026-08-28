@@ -40,6 +40,8 @@ an extreme overbought state. Three engines are built in (`InpMode`):
 * **BUY:** %K crosses **above** %D while %K was below the oversold level (20) — buys
   the low *after* upward confirmation.
 * **SELL:** %K crosses **below** %D while %K was above the overbought level (80).
+* Uses the Low/High price field (`STO_LOWHIGH`), i.e. the same values as MT4's
+  standard Stochastic oscillator with default settings.
 
 ### Mode 3 — `Z-Score`
 * Z = (close − rolling mean) / rolling std-dev over `InpZWindow` bars.

@@ -177,10 +177,10 @@ int OnCalculate(const int rates_total,
 
          case SIG_STOCH:   // %K crosses %D while leaving an extreme zone
           {
-           double k0 = iStochastic(NULL, 0, InpStochK, InpStochD, InpStochSlowing, MODE_SMA, PRICE_CLOSE, MODE_MAIN,   i);
-           double d0 = iStochastic(NULL, 0, InpStochK, InpStochD, InpStochSlowing, MODE_SMA, PRICE_CLOSE, MODE_SIGNAL, i);
-           double k1 = iStochastic(NULL, 0, InpStochK, InpStochD, InpStochSlowing, MODE_SMA, PRICE_CLOSE, MODE_MAIN,   i + 1);
-           double d1 = iStochastic(NULL, 0, InpStochK, InpStochD, InpStochSlowing, MODE_SMA, PRICE_CLOSE, MODE_SIGNAL, i + 1);
+           double k0 = iStochastic(NULL, 0, InpStochK, InpStochD, InpStochSlowing, MODE_SMA, STO_LOWHIGH, MODE_MAIN,   i);
+           double d0 = iStochastic(NULL, 0, InpStochK, InpStochD, InpStochSlowing, MODE_SMA, STO_LOWHIGH, MODE_SIGNAL, i);
+           double k1 = iStochastic(NULL, 0, InpStochK, InpStochD, InpStochSlowing, MODE_SMA, STO_LOWHIGH, MODE_MAIN,   i + 1);
+           double d1 = iStochastic(NULL, 0, InpStochK, InpStochD, InpStochSlowing, MODE_SMA, STO_LOWHIGH, MODE_SIGNAL, i + 1);
 
            bool crossUp   = (k0 > d0 && k1 <= d1);
            bool crossDown = (k0 < d0 && k1 >= d1);
