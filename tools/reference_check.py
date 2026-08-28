@@ -225,6 +225,134 @@ def close(a, b, tol=1e-9):
     return a is not None and abs(a - b) <= tol
 
 
+# ---------------------------------------------------------------------------
+# 5. integer-only rewrites: floor division, measured bar length, no narrowing
+# ---------------------------------------------------------------------------
+
+def vvp_floor_div(a, b):
+    """port of MQL4 VVPFloorDiv: MQL truncates towards zero, we want a floor"""
+    q = abs(a) // b * (1 if a >= 0 else -1)      # C-style truncation
+    if a < 0 and q * b != a:
+        q -= 1
+    return q
+
+
+def vvp_weekday_of(t):
+    """0 = Monday .. 6 = Sunday"""
+    return dt.datetime.fromtimestamp(t, dt.timezone.utc).weekday() + 1 % 7 if False else \
+        (dt.datetime.fromtimestamp(t, dt.timezone.utc).weekday() + 1) % 7   # 0=Sun
+
+
+def section_floor_div():
+    print("\n[integer floor division - replaces (int)MathFloor on Time[] maths]")
+    bad = 0
+    for a in range(-300000, 300001, 3571):
+        for b in (86400, 7, 12, 3600):
+            if vvp_floor_div(a, b) != a // b:
+                bad += 1
+    ok(bad == 0, "VVPFloorDiv matches true floor over +/-300000 (bad=%d)" % bad)
+    for a in (-1, -7, -8, 86399, 86400, 86401, -86401):
+        ok(vvp_floor_div(a, 86400) == a // 86400, "floor div exact at boundary a=%d" % a)
+    off_h = 2
+    for t in (ts(2026, 8, 24), ts(2026, 8, 24, 1, 59), ts(2026, 8, 24, 2, 0),
+              ts(2026, 8, 25), ts(2023, 1, 1)):
+        ok(session_id(t, "daily", off_h=off_h) == vvp_floor_div(t - off_h * 3600, DAY),
+           "integer day index == model day for t=%d" % t)
+    # weekly grouping must survive the integer rewrite too
+    for wd in (0, 1, 7):
+        ok(session_id(ts(2026, 8, 24), "weekly", weekday=wd) ==
+           vvp_floor_div(vvp_floor_div(ts(2026, 8, 24), DAY) -
+                         (((vvp_floor_div(ts(2026, 8, 24), DAY) + 4) % 7 + 7) % 7 -
+                           wd % 7 + 7) % 7, 7),
+           "weekly key from pure integer division matches the model (weekday=%d)" % wd)
+
+
+def vvp_period_from_times(times, limit=20):
+    """port of VVPPeriodSeconds: smallest positive gap, newest bar first"""
+    best = 0
+    n = len(times) - 1
+    if n > limit:
+        n = limit
+    for k in range(1, n + 1):
+        g = times[k - 1] - times[k]
+        if g > 0 and (best == 0 or g < best):
+            best = g
+    return best if best > 0 else 60
+
+
+def section_period_measurement():
+    print("\n[bar length measured from Time[] instead of the predefined Period int]")
+    base = ts(2026, 8, 24)
+    ok(vvp_period_from_times([base - 300 * i for i in range(40)]) == 300,
+       "M5 gap measured as 300s")
+    ok(vvp_period_from_times([base - 3600 * i for i in range(40)]) == 3600,
+       "H1 gap measured as 3600s")
+    ok(vvp_period_from_times([base - 60 * i for i in range(250)]) == 60,
+       "M1 gap measured as 60s, and the scan stops after 20 bars")
+    days = [base - 86400 * i for i in range(6)]
+    ok(vvp_period_from_times(days) == 86400, "D1 measured as 86400s")
+    wknd = sorted([base, base - 86400, base - 86400 * 2, base - 86400 * 3,
+                   base - 86400 * 4 - 86400 * 2, base - 86400 * 5 - 86400 * 2],
+                  reverse=True)
+    ok(vvp_period_from_times(wknd) == 86400,
+       "D1 with a weekend hole (172800s jump) still measures 86400s")
+    ok(vvp_period_from_times([base]) == 60, "single bar falls back to 60s")
+    ok(vvp_period_from_times([base, base, base]) == 60, "no positive gap -> 60s")
+    ok(vvp_period_from_times([base, base, base - 60, base - 120]) == 60,
+       "zero gaps are skipped, the real 60s gap is found")
+    sess = []
+    for d in range(10):
+        for hr in range(17, 24):
+            sess.append(base - (d * 86400 + (23 - hr) * 3600))
+    ok(vvp_period_from_times(sorted(sess, reverse=True)) == 3600,
+       "session chart with an overnight jump measures 3600s, not the jump")
+    ok(vvp_period_from_times([base]) > 0, "never returns 0, so t1 + rows * s stays safe")
+    # the guard in start() keys off the same number
+    ok(vvp_period_from_times(days) >= 86400,
+       "a daily chart is still recognised as >= 86400s (session-profile guard)")
+
+
+def section_no_narrowing(src):
+    print("\n[no double->int at call sites, no predefined Period, no cast noise]")
+    ok("MathFloor(" not in src and "MathRound(" not in src,
+       "no MathFloor/MathRound in the indicator: every narrowing goes through "
+       "VVPFloorToInt/VPVRoundToInt")
+    ok(not re.search(r'[^A-Za-z_0-9."]Period[^A-Za-z_0-9.]', src),
+       "the predefined `Period` identifier is never read (that is what broke the build)")
+    ok("long VVPPeriodSeconds()" in src and "int VVPPeriodSeconds()" not in src,
+       "VVPPeriodSeconds returns long, so nothing narrows near it")
+    ok("long VVPSessionId(" in src, "VVPSessionId returns a long session key")
+    ok("long     g_sSid[];" in src, "session keys are stored as longs")
+    ok("long tl;" in src, "the key swap in BuildSessions uses a long temp")
+    bad = [l.strip() for l in src.splitlines() if "(int)" in l and "Math" in l]
+    ok(not bad, "no (int) cast is ever applied to a Math*() result at a call site "
+                "(found: %s)" % bad[:2])
+    allowed = ("(int)clr", "(int)base", "int n = (int)v;", "(int)(a % 10)")
+    stray = [l.strip() for l in src.splitlines()
+             if "(int)" in l and not any(x in l for x in allowed)]
+    ok(not stray,
+       "every remaining (int) cast is one of: color<->int (same 32 bits), the single "
+       "double->int inside VVPFloorToInt, or a 0..9 digit (stray: %s)" % stray[:2])
+    ok(not re.search(r"IntegerToString\s*\(\s*(g_sSid|key|s\s*/)", src),
+       "IntegerToString() is never handed a long directly (VVPIntString does that)")
+    ok("string VVPIntString(const long v)" in src, "long -> string helper exists")
+    ok("(int)MathMin(255.0" not in src and "(int)MathMax(255.0" not in src,
+       "colour mixing rounds through VPVRoundToInt instead of casting inline")
+    uncast = [l.strip() for l in src.splitlines()
+              if re.search(r"Time\[[^\]]*\]\s*[-+]\s*(?!\(datetime\))[A-Za-z_]*\(", l)
+              # a long/int target is the honest way to do time arithmetic
+              and not re.match(r"^(long|int|double)\b", l.strip())
+              and "(long)Time[" not in l]
+    ok(not uncast,
+       "every Time[] offset stored back into a datetime is explicitly cast "
+       "(found: %s)" % uncast[:2])
+    ok("int rows = VPVRoundToInt(frac * (double)width)" in src,
+       "the row count comes from the rounding helper")
+    ok("int n = (int)v;" in src, "the only double->int cast sits inside VVPFloorToInt")
+    ok("VVP_ANCHOR_MONTHLY" in src and "TimeYear(" in src and "TimeMonth(" in src,
+       "monthly keys still use TimeYear/TimeMonth (int-returning, no cast needed)")
+
+
 def main():
     raw = read_src()
     src = code_only(raw)          # comments/strings removed: no prose false positives
@@ -265,13 +393,16 @@ def main():
                                 "mql4_lint.py"), SRC], capture_output=True, text=True)
     ok(lint.returncode == 0 and "no static errors" in lint.stdout,
        "tools/mql4_lint.py reports no static errors (arities, scopes, MQL5 leakage)")
+    ok(not [l for l in lint.stdout.splitlines() if "warn :" in l],
+       "tools/mql4_lint.py reports no warnings either (no fragile constructs)")
     if lint.returncode != 0:
         for l in lint.stdout.splitlines():
             if "ERROR" in l:
                 print("     " + l.strip())
-    # datetime arithmetic must not lean on implicit int->datetime conversions
-    ok(not re.search(r"Time\[[^\]]*\]\s*\+\s*VVPPeriodSeconds\(\)", src),
-       "datetime offsets are explicitly cast, so no 'possible loss of data' warnings")
+    # datetime offsets stay 64-bit: the helper returns long, so no cast is needed
+    # and adding one would be noise (this used to assert the opposite)
+    ok("long VVPPeriodSeconds()" in src,
+       "the bar length is computed in 64-bit integers, so nothing narrows")
     ok(re.search(r"int minMs = 50;", src) is not None,
        "tick throttle uses ints, not MathMax(double)")
     for prop in ["OBJPROP_COLOR", "OBJPROP_STYLE", "OBJPROP_WIDTH", "OBJPROP_BACK",
@@ -438,6 +569,10 @@ def main():
     ok("double pad   = g_pBinPx * (1.0 - VVPRowHeight())" not in src,
        "the inverted (1.0 - pct) pad formula is gone")
     ok("VVP_OBJ_BUDGET  2400" in src, "chart object budget is capped")
+
+    section_floor_div()
+    section_period_measurement()
+    section_no_narrowing(src)
 
     print("\n" + ("ALL CHECKS PASSED" if not FAILS else f"{len(FAILS)} FAILURE(S):"))
     for f in FAILS:

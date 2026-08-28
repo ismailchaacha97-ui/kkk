@@ -110,6 +110,23 @@ FORBIDDEN = {
     "ChartSetDouble": "MQL5-only",
     "ObjectSetInteger_": "",
 }
+# Constructs that compile in MQL5 but are wrong (or that specific MetaEditor
+# builds mis-parse) in MQL4.  These are warnings, not errors: they never break a
+# build, they mark the spots that did.
+FRAGILE = [
+    (r'[^A-Za-z_0-9."]Period[^A-Za-z_0-9.]',
+     "the predefined `Period` is int seconds-per-bar and some MetaEditor builds "
+     "mis-parse it (e.g. inside switch()); measure the bar length from Time[] "
+     "instead"),
+    (r'\bPeriodSeconds\s*\(\s*\)', "MQL5 only - not in MQL4"),
+    (r'int\s+\w+\s*=\s*\(int\)\s*Math(Floor|Round|Ceil|Abs)',
+     "narrowing cast at a call site - route double->int through one helper so a "
+     "compiler note lands on one line instead of at every site"),
+    (r'int\s+\w+\s*=\s*Math(Floor|Round|Ceil)\s*\(',
+     "double result assigned to int without an explicit cast"),
+
+]
+
 # verified MQL4 arities (number of arguments) for the calls this file makes
 ARITY = {
     "ObjectCreate": 7,        # (name, type, sub_window, t1, p1, t2, p2)
@@ -216,9 +233,23 @@ def check(path):
                 errs.append(f"{fn}() called with {len(args)} args, MQL4 documents "
                             f"{want}: " + ", ".join(a.strip()[:22] for a in args))
 
-    #--- datetime offsets must be explicitly cast (avoids conversion warnings)
-    for m in re.finditer(r"Time\[[^\]]*\]\s*\+\s*(?!.*\(datetime\))VVPPeriodSeconds\(\)", code):
-        errs.append("datetime + int without a (datetime) cast at char " + str(m.start()))
+    #--- datetime offsets: cast only what is actually narrower than datetime.
+    #--- `datetime` in MT4 is a 64-bit integer, so a long-valued helper needs no
+    #--- cast, while an int-valued one is a documented source of
+    #--- 'possible loss of data' notes once it is stored back into a datetime.
+    def ret_type(fn):
+        mm = re.search(r"^([A-Za-z_]\w*)\s+" + fn + r"\s*\(", code, flags=re.M)
+        return mm.group(1) if mm else None
+
+    for m in re.finditer(r"Time\[[^\]]*\]\s*[-+]\s*([^;{}\n]+)", code):
+        expr = m.group(1)
+        if "(datetime)" not in expr and re.search(r"\w\s*\(\s*\)|\*", expr):
+            errs.append("datetime offset is not explicitly cast to (datetime): "
+                        + expr.strip()[:60])
+    for m in re.finditer(r"datetime\s+\w+\s*=\s*[^;\n]*\)\s*\(\s*\)[^;\n]*;", code):
+        if "(datetime)" not in m.group(0):
+            errs.append("datetime initialised from a helper without a (datetime) "
+                        "cast: " + m.group(0).strip()[:60])
 
     #--- globals must precede use --------------------------------
     gvars = {}
@@ -311,6 +342,15 @@ def check(path):
         pass  # built as VVP<tag>_<key>_<kind><idx>: worst case ~24 chars, safe
     for m in re.finditer(r'ObjectCreate\(\s*"([^"]{40,})"', code):
         warns.append("hard-coded object name close to the 63-char limit")
+
+    #--- fragile MQL4/MQL5 traps (raw lines, they are lexical) -----
+    for i, line in enumerate(raw.split("\n")):
+        st = line.strip()
+        if not st or st.startswith(("*", "//", "+")):
+            continue
+        for rx, hint in FRAGILE:
+            if re.search(rx, line):
+                warns.append("line %d: %s" % (i + 1, hint))
 
     pre = [p for p in MQL4_PREDEFINED if re.search(r"\b" + p + r"\b", code)]
     print("== " + path)

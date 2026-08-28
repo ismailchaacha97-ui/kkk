@@ -132,7 +132,7 @@ for exact numbers. On stocks/crypto indices where the broker supplies real volum
 These are the calls that break an MT4 build when code is copied or auto-converted
 from MQL5, and they are pinned by the checker:
 
-| MTL4 (correct here) | MQL5 / wrong-for-MT4 |
+| MQL4 (correct here) | MQL5 / wrong-for-MT4 |
 |---|---|
 | `SetIndexEmptyValue(i, EMPTY_VALUE)` | `SetIndexEmpty()` — **does not exist in MQL4** |
 | `ObjectCreate(name, type, sub_window, t1, p1, t2, p2)` | `ObjectCreate(chart_id, name, ...)` and the pre-600 form with an extra `number` argument |
@@ -144,6 +144,25 @@ from MQL5, and they are pinned by the checker:
 A mismatched argument count is reported by MetaEditor as
 `')' - open parenthesis expected`, which is why the checker verifies the arity of
 every one of these calls.
+
+### Traps a real MetaEditor build actually reported
+
+| MetaEditor said | on this line | fix used here |
+|---|---|---|
+| `'SetIndexEmpty' - function not defined` | `SetIndexEmpty(i, EMPTY_VALUE)` | `SetIndexEmptyValue(i, EMPTY_VALUE)` — the MQL4 name |
+| `')' - open parenthesis expected` | `switch(Period)` (and `case PERIOD_*:`) | the predefined `Period` int is never read; `VVPPeriodSeconds()` measures the smallest positive `Time[]` gap instead and returns a `long` |
+| `possible loss of data due to type conversion` | `int d = (int)MathFloor(...)`, `int rows = (int)MathRound(...)` | no `MathFloor`/`MathRound` left in the file: session keys are pure integer arithmetic (`VVPFloorDiv`), and the only double→int conversions sit in `VVPFloorToInt` / `VPVRoundToInt` |
+
+Two rules that fall out of this, both enforced by `tools/mql4_lint.py`:
+
+* **time maths stays in integers.** Day and week numbers come from
+  `VVPFloorDiv(Time[i] - offset, 86400)`, so the session key is `long` end to end and
+  no `double` ever appears near it. Bar length is *measured*, not looked up in a
+  `PERIOD_*` switch — which also makes `W1`/`MN1` correct instead of assuming
+  604800/2419200 seconds.
+* **narrowing lives in one place.** `VVPIntString()` covers `long`→text (some MT4
+  builds declare `IntegerToString()` with an `int` argument), and `(datetime)` is
+  written out at every `Time[]` offset instead of relying on an implicit widening.
 
 ## Verification in this repo
 

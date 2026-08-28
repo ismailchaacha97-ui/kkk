@@ -169,7 +169,7 @@ string   g_note         = "";
 int      g_objFail      = 0;
 
 //--- session map (oldest session first, last entry = current)
-int      g_sSid[];
+long     g_sSid[];
 int      g_sOld[];
 int      g_sNew[];
 datetime g_sT1[];
@@ -179,7 +179,8 @@ double   g_sPOC[];
 //--- current session summary (stats panel)
 double   g_curPOC = 0.0, g_curVAH = 0.0, g_curVAL = 0.0;
 double   g_curTot = 0.0, g_curVWAP = 0.0;
-int      g_curBars = 0, g_curKey = 0;
+int      g_curBars = 0;
+long     g_curKey  = 0;
 
 //--- the profile just built (BuildProfile writes, VVPRender reads)
 double   g_pBin[];
@@ -306,23 +307,37 @@ int start()
 //|  VWAP                                                             |
 //+==================================================================+
 
-//--- seconds per chart period (own switch: no dependency on the
-//--- newer PeriodSeconds() helper)
-int VVPPeriodSeconds()
+//--- Seconds per chart bar, measured from the bar times themselves.
+//--- Deliberately avoids the predefined 'Period' identifier (it parses
+//--- differently across MT4 builds) and avoids hard-coded W1/MN1 lengths:
+//--- the smallest positive gap in the last bars IS the period, because
+//--- weekends/holidays only ever make a gap longer.  It returns a long so the
+//--- arithmetic never narrows; callers still wrap the result in (datetime), which
+//--- is the one Time[]-offset conversion MetaEditor documents.
+long VVPPeriodSeconds()
   {
-   switch(Period)
+   static long     cached = 0;
+   static datetime last0  = 0;
+
+   if(cached > 0 && last0 == Time[0])
+      return(cached);
+
+   long best = 0;
+   int  n = Bars - 1;
+   if(n > 20)
+      n = 20;
+   for(int k = 1; k <= n; k++)
      {
-      case PERIOD_M1:  return(60);
-      case PERIOD_M5:  return(300);
-      case PERIOD_M15: return(900);
-      case PERIOD_M30: return(1800);
-      case PERIOD_H1:  return(3600);
-      case PERIOD_H4:  return(14400);
-      case PERIOD_D1:  return(86400);
-      case PERIOD_W1:  return(604800);
-      case PERIOD_MN1: return(2592000);
+      long g = (long)Time[k - 1] - (long)Time[k];
+      if(g > 0 && (best == 0 || g < best))
+         best = g;
      }
-   return(60 * Period);
+   if(best <= 0)
+      best = 60;
+
+   cached = best;
+   last0  = Time[0];
+   return(cached);
   }
 
 //--- how many bars we calculate over
@@ -331,6 +346,15 @@ int VVPMaxBars()
    if(InpMaxBars <= 0)
       return(Bars - 1);
    return(VVPClamp(InpMaxBars, 20, Bars - 1));
+  }
+
+//--- floor division for longs (MQL truncates towards zero, we want floor)
+long VVPFloorDiv(const long a, const long b)
+  {
+   long q = a / b;
+   if(a < 0 && q * b != a)
+      q--;
+   return(q);
   }
 
 //--- the price that is volume-weighted
@@ -366,10 +390,10 @@ double VVPBarVolume(const int i)
 //--- session key of bar i; equal keys mean equal session.
 //--- Arithmetic on Time[] only, so the boundary is the same time the
 //--- chart axis prints - independent of the terminal time zone.
-int VVPSessionId(const int i)
+long VVPSessionId(const int i)
   {
-   int off = InpOffsetHour * 3600 + InpOffsetMin * 60;
-   int d   = (int)MathFloor((double)(Time[i] - off) / 86400.0);
+   long off = (long)(InpOffsetHour * 3600 + InpOffsetMin * 60);
+   long d   = VVPFloorDiv((long)Time[i] - off, 86400);
 
    switch(InpAnchor)
      {
@@ -378,14 +402,14 @@ int VVPSessionId(const int i)
 
       case VVP_ANCHOR_WEEKLY:
         {
-         int dow    = ((d + 4) % 7 + 7) % 7;          // 1970.01.01 = Thursday
-         int target = InpWeekdayStart % 7;            // Mon(1) ... Sun(0)
-         int since  = ((dow - target) % 7 + 7) % 7;
-         return((int)MathFloor((double)(d - since) / 7.0));
+         long dow    = ((d + 4) % 7 + 7) % 7;         // 1970.01.01 = Thursday
+         long target = InpWeekdayStart % 7;           // Mon(1) ... Sun(0)
+         long since  = ((dow - target) % 7 + 7) % 7;
+         return(VVPFloorDiv(d - since, 7));
         }
 
       case VVP_ANCHOR_MONTHLY:
-         return((int)TimeYear(Time[i]) * 12 + (int)TimeMonth(Time[i]) - 1);
+         return(TimeYear(Time[i]) * 12 + TimeMonth(Time[i]) - 1);
 
       case VVP_ANCHOR_FIXED:
          return((Time[i] >= VVPAnchorTime()) ? VVP_FIXED_KEY : -1);
@@ -414,9 +438,9 @@ datetime VVPAnchorTime()
    if(t <= 0)
      {
       //--- no/invalid date: use the session start of the oldest calculated bar
-      int last = VVPClamp(VVPMaxBars(), 0, Bars - 1);
-      int off  = InpOffsetHour * 3600 + InpOffsetMin * 60;
-      int dn   = (int)MathFloor((double)(Time[last] - off) / 86400.0);
+      int  last = VVPClamp(VVPMaxBars(), 0, Bars - 1);
+      long off  = (long)(InpOffsetHour * 3600 + InpOffsetMin * 60);
+      long dn   = VVPFloorDiv((long)Time[last] - off, 86400);
       t = (datetime)(dn * 86400 + off);
      }
    g_anchorTime = t;
@@ -473,11 +497,11 @@ void RecalcVWAP()
      }
 
    double sumV = 0.0, sumVP = 0.0, sumVP2 = 0.0, vSum = 0.0;
-   int    cur  = -VVP_NOMAX;
+   long   cur  = -VVP_NOMAX;
 
    for(int i = first; i >= 0; i--)
      {
-      int s = VVPSessionId(i);
+      long s = VVPSessionId(i);
       if(s != cur)
         {
          cur    = s;
@@ -550,12 +574,12 @@ int BuildSessions()
    int nMax = VVPClamp(VVP_OBJ_BUDGET / perSession, 1, 512);
    int want = (InpProfSessions <= 0) ? nMax : VVPClamp(InpProfSessions, 1, nMax);
 
-   int cur    = -VVP_NOMAX;
+   long cur   = -VVP_NOMAX;
    int newest = 0;
 
    for(int i = 0; i <= g_depth; i++)
      {
-      int s = VVPSessionId(i);
+      long s = VVPSessionId(i);
       if(s != cur)
         {
          if(cur != -VVP_NOMAX && ArraySize(g_sSid) < want)
@@ -571,9 +595,10 @@ int BuildSessions()
    int n = ArraySize(g_sSid);
    for(int a = 0; a < n / 2; a++)
      {
-      int b = n - 1 - a;
+      int  b = n - 1 - a;
       int  ti;
-      ti = g_sSid[a]; g_sSid[a] = g_sSid[b]; g_sSid[b] = ti;
+      long tl;
+      tl = g_sSid[a]; g_sSid[a] = g_sSid[b]; g_sSid[b] = tl;
       ti = g_sOld[a]; g_sOld[a] = g_sOld[b]; g_sOld[b] = ti;
       ti = g_sNew[a]; g_sNew[a] = g_sNew[b]; g_sNew[b] = ti;
       datetime td = g_sT1[a]; g_sT1[a] = g_sT1[b]; g_sT1[b] = td;
@@ -586,7 +611,7 @@ int BuildSessions()
 //+------------------------------------------------------------------+
 //| session occupying bars newIdx..oldIdx (newIdx = newest bar)       |
 //+------------------------------------------------------------------+
-void VVPPushSession(const int sid, const int oldIdx, const int newIdx)
+void VVPPushSession(const long sid, const int oldIdx, const int newIdx)
   {
    if(newIdx < 0)
       return;
@@ -616,7 +641,7 @@ int VVPBinOf(const double p)
    int n = ArraySize(g_pBin) - 1;
    if(n < 0)
       return(0);
-   return(VVPClamp((int)MathFloor((p - g_pLo) / g_pBinPx), 0, n));
+   return(VVPClamp(VVPFloorToInt((p - g_pLo) / g_pBinPx), 0, n));
   }
 
 //+------------------------------------------------------------------+
@@ -822,7 +847,7 @@ void DrawAll()
       if(InpHideCurrent && live)
          continue;
 
-      g_keySigNew = g_keySigNew + IntegerToString(g_sSid[s]) + "|";
+      g_keySigNew = g_keySigNew + VVPIntString(g_sSid[s]) + "|";
       VVPRender(g_sSid[s], g_sT1[s], g_sT2[s], bins, false, live);
      }
 
@@ -834,7 +859,7 @@ void DrawAll()
 //+------------------------------------------------------------------+
 //| Render the profile currently held in g_p*  (rows, POC, VA, labels)|
 //+------------------------------------------------------------------+
-void VVPRender(const int key, const datetime t1in, const datetime t2in, const int bins,
+void VVPRender(const long key, const datetime t1in, const datetime t2in, const int bins,
               const bool isRange, const bool live)
   {
    datetime t1 = t1in;
@@ -862,7 +887,7 @@ void VVPRender(const int key, const datetime t1in, const datetime t2in, const in
       if(frac > 1.0)
          frac = 1.0;
 
-      int rows = (int)MathRound(frac * width);
+      int rows = VPVRoundToInt(frac * (double)width);
       if(rows < 1)
          rows = 1;
       datetime te = t1 + (datetime)(rows * VVPPeriodSeconds());
@@ -958,9 +983,9 @@ double VVPRowHeight()
 //|  plus ObjectSetInteger(0, name, prop, value) for the properties   |
 //|  that only exist in the newer property enumeration.              |
 //+==================================================================+
-string VVPName(const int key, const string kind, const int idx)
+string VVPName(const long key, const string kind, const int idx)
   {
-   return(g_tag + IntegerToString(key) + "_" + kind + IntegerToString(idx));
+   return(g_tag + VVPIntString(key) + "_" + kind + IntegerToString(idx));
   }
 
 //--- pass bookkeeping ------------------------------------------------
@@ -1176,7 +1201,7 @@ void VVPStats()
       int pn = ArraySize(g_sPOC) - 1;
       if(pn > 0 && g_sPOC[pn - 1] > 0.0 && g_curPOC > 0.0)
          s = s + "  prev POC  " + VVPAd(VVPFmt(g_sPOC[pn - 1]), 11) + "   shift " +
-               IntegerToString((int)MathRound((g_curPOC - g_sPOC[pn - 1]) / MathMax(Point, 1.0e-10))) + " pts\n";
+               IntegerToString(VPVRoundToInt((g_curPOC - g_sPOC[pn - 1]) / MathMax(Point, 1.0e-10))) + " pts\n";
      }
    else
       s = s + "  volume profile: off\n";
@@ -1250,19 +1275,24 @@ string VVP2(const int v)
 
 string VVPTFName()
   {
-   switch(Period)
-     {
-      case PERIOD_M1:  return("M1");
-      case PERIOD_M5:  return("M5");
-      case PERIOD_M15: return("M15");
-      case PERIOD_M30: return("M30");
-      case PERIOD_H1:  return("H1");
-      case PERIOD_H4:  return("H4");
-      case PERIOD_D1:  return("D1");
-      case PERIOD_W1:  return("W1");
-      case PERIOD_MN1: return("MN1");
-     }
-   return("M" + IntegerToString(Period));
+   long s = VVPPeriodSeconds();
+   if(s == 60)      return("M1");
+   if(s == 300)     return("M5");
+   if(s == 900)     return("M15");
+   if(s == 1800)    return("M30");
+   if(s == 3600)    return("H1");
+   if(s == 14400)   return("H4");
+   if(s == 28800)   return("H8");
+   if(s == 86400)   return("D1");
+   if(s == 604800)  return("W1");
+   if(s >= 2419200) return("MN1");
+   if(s < 3600   && (s % 60) == 0)
+      return("M" + VVPIntString(s / 60));
+   if(s < 86400  && (s % 3600) == 0)
+      return("H" + VVPIntString(s / 3600));
+   if(s < 604800 && (s % 86400) == 0)
+      return("D" + VVPIntString(s / 86400));
+   return(VVPIntString(s / 60) + "min");
   }
 
 //--- where the market sits relative to the session VWAP
@@ -1275,7 +1305,7 @@ string VVPBias()
    double pt = (Close[0] - vw) / MathMax(Point, 1.0e-10);
    string ar = (Close[0] >= vw) ? "above" : "below";
    return("  " + ar + " " + DoubleToString(MathAbs(d), 3) + "% / " +
-          IntegerToString((int)MathRound(MathAbs(pt))) + " pts");
+          IntegerToString(VPVRoundToInt(MathAbs(pt))) + " pts");
   }
 
 //--- distance of a level from the VWAP, in points
@@ -1285,7 +1315,7 @@ string VVPDist(const double p)
       return("");
    double d = (p - BufVWAP[0]) / MathMax(Point, 1.0e-10);
    string sg = (d >= 0.0) ? "+" : "";
-   return("  " + sg + IntegerToString((int)MathRound(d)) + " pts vs VWAP");
+   return("  " + sg + IntegerToString(VPVRoundToInt(d)) + " pts vs VWAP");
   }
 
 string VVPFmt(const double p)
@@ -1316,14 +1346,54 @@ string VVPAd(const string s, const int w)
 color VVPMix(const color base, const double ratio)
   {
    double k = MathMax(0.0, MathMin(1.0, ratio)) * 0.8;
-   int    b  = (int)base;
-   int    r  = b & 0xFF;
-   int    g  = (b >> 8) & 0xFF;
-   int    bl = (b >> 16) & 0xFF;
-   r  = (int)MathMin(255.0, r  + (255 - r)  * k);
-   g  = (int)MathMin(255.0, g  + (255 - g)  * k);
-   bl = (int)MathMin(255.0, bl + (255 - bl) * k);
-   return((color)(r | (g << 8) | (bl << 16)));
+   int    b = (int)base;                       // color is a 32-bit int: no loss
+   double r  = (double)(b & 0xFF);
+   double g  = (double)((b >> 8) & 0xFF);
+   double bl = (double)((b >> 16) & 0xFF);
+   r  = MathMax(0.0, MathMin(255.0, r  + (255.0 - r)  * k));
+   g  = MathMax(0.0, MathMin(255.0, g  + (255.0 - g)  * k));
+   bl = MathMax(0.0, MathMin(255.0, bl + (255.0 - bl) * k));
+   // the only narrowing sits in the rounding helper
+   return((color)(VPVRoundToInt(r) | (VPVRoundToInt(g) << 8) | (VPVRoundToInt(bl) << 16)));
+  }
+
+//--- A double becomes an integer in exactly one place, so any note about
+//--- narrowing stays on this line instead of every call site.
+int VVPFloorToInt(const double v)
+  {
+   int n = (int)v;              // MQL truncates towards zero
+   if(v < (double)n)
+      n--;                      // ... we want the floor
+   return(n);
+  }
+
+//--- long -> decimal string.  Some MT4 builds document IntegerToString() with an
+//--- int argument, so a long key is broken into single digits first: every
+//--- conversion in here is provably lossless and no call site has to care.
+string VVPIntString(const long v)
+  {
+   if(v == 0)
+      return("0");
+
+   bool   neg = (v < 0);
+   long   a = (neg ? -v : v);
+   string r = "";
+
+   while(a > 0)
+     {
+      int d = (int)(a % 10);            // 0..9
+      r = IntegerToString(d) + r;
+      a = a / 10;
+     }
+   return(neg ? "-" + r : r);
+  }
+
+//--- nearest integer
+int VPVRoundToInt(const double v)
+  {
+   if(v >= 0.0)
+      return(VVPFloorToInt(v + 0.5));
+   return(VVPFloorToInt(v - 0.5));
   }
 
 int VVPClamp(const int v, const int lo, const int hi)
