@@ -218,8 +218,9 @@ int init()
    SetIndexLabel(2, "VWAP -" + DoubleToString(InpSD1, 1) + " SD");
    SetIndexLabel(3, "VWAP +" + DoubleToString(InpSD2, 1) + " SD");
    SetIndexLabel(4, "VWAP -" + DoubleToString(InpSD2, 1) + " SD");
+   //--- MQL4 name is SetIndexEmptyValue() (there is no SetIndexEmpty())
    for(int i = 0; i <= 4; i++)
-      SetIndexEmpty(i, EMPTY_VALUE);
+      SetIndexEmptyValue(i, EMPTY_VALUE);
 
    //--- object names: unique per instance, ASCII only, no '_' (they are parsed)
    string t = InpTag;
@@ -282,9 +283,13 @@ int start()
    bool shifted = (g_first != g_prevFirst);
    uint now     = GetTickCount();
 
+   int minMs = 50;
+   if(InpRedrawMs > minMs)
+      minMs = InpRedrawMs;                 // plain ints: no double->int conversion
+
    bool doDraw = (g_lastDrawMs == 0) || newBar || shifted || (ArraySize(g_owned) == 0);
    if(!doDraw && InpLiveTick)
-      doDraw = ((now - g_lastDrawMs) >= (uint)MathMax(50, InpRedrawMs));
+      doDraw = ((now - g_lastDrawMs) >= (uint)minMs);
 
    if(doDraw)
      {
@@ -597,7 +602,7 @@ void VVPPushSession(const int sid, const int oldIdx, const int newIdx)
    g_sOld[k] = VVPClamp(oldIdx, 0, Bars - 1);
    g_sNew[k] = VVPClamp(newIdx, 0, Bars - 1);
    g_sT1[k]  = Time[g_sOld[k]];
-   g_sT2[k]  = Time[g_sNew[k]] + VVPPeriodSeconds();
+   g_sT2[k]  = Time[g_sNew[k]] + (datetime)VVPPeriodSeconds();
    g_sPOC[k] = 0.0;
   }
 
@@ -790,7 +795,7 @@ void DrawAll()
       if(BuildProfile(g_depth, 0, bins))
         {
          g_keySigNew = g_keySigNew + IntegerToString(VVP_LOOK_KEY) + "|";
-         VVPRender(VVP_LOOK_KEY, Time[g_depth], Time[0] + VVPPeriodSeconds(), bins, true, false);
+         VVPRender(VVP_LOOK_KEY, Time[g_depth], Time[0] + (datetime)VVPPeriodSeconds(), bins, true, false);
         }
      }
 
@@ -835,7 +840,7 @@ void VVPRender(const int key, const datetime t1in, const datetime t2in, const in
    datetime t1 = t1in;
    datetime t2 = t2in;
    if(t2 <= t1)
-      t2 = t1 + VVPPeriodSeconds();
+      t2 = t1 + (datetime)VVPPeriodSeconds();
 
    //--- vertical gap: a row drawn at H% height leaves (100-H)/2 of a bin of
    //--- empty space above and below it, so neighbouring rows never overlap
@@ -864,7 +869,7 @@ void VVPRender(const int key, const datetime t1in, const datetime t2in, const in
       if(InpClipSession && te > t2)
          te = t2;
       if(te <= t1)
-         te = t1 + VVPPeriodSeconds();
+         te = t1 + (datetime)VVPPeriodSeconds();
 
       color c;
       if(b == g_pPOCIdx)
@@ -999,29 +1004,11 @@ void VVPCommitPass()
    ArrayResize(g_next, 0);
   }
 
-//--- delete VVP objects left behind by a previous (crashed) session
+//--- delete VVP objects left behind by a previous (crashed) run: prefix-based,
+//--- so we never need to walk the chart object list
 void VVPSweepOrphans()
   {
-   int tlen = StringLen(g_tag);
-   int nOwn = ArraySize(g_owned);
-
-   for(int i = ObjectsTotal() - 1; i >= 0; i--)
-     {
-      string nm = ObjectName(i);
-      if(StringLen(nm) <= tlen || StringFind(nm, g_tag, 0) != 0)
-         continue;
-      bool own = false;
-      for(int k = 0; k < nOwn; k++)
-        {
-         if(g_owned[k] == nm)
-           {
-            own = true;
-            break;
-           }
-        }
-      if(!own)
-         ObjectDelete(nm);
-     }
+   ObjectsDeleteAll(0, g_tag);
   }
 
 //--- remember a name we have just drawn
@@ -1068,10 +1055,10 @@ bool VVPRect(const string nm, const datetime t1, const double p1, const datetime
       ObjectSet(nm, OBJPROP_STYLE, STYLE_SOLID);
       ObjectSet(nm, OBJPROP_WIDTH, 1);
       ObjectSet(nm, OBJPROP_BACK,  (fill) ? 1 : 0);
-      ObjectSetInteger(0, nm, OBJPROP_FILL,       fill);
-      ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, nm, OBJPROP_SELECTED,   false);
-      ObjectSetInteger(0, nm, OBJPROP_HIDDEN,     true);
+      ObjectSetInteger(0, nm, OBJPROP_FILL,       (fill) ? 1 : 0);
+      ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, 0);
+      ObjectSetInteger(0, nm, OBJPROP_SELECTED,   0);
+      ObjectSetInteger(0, nm, OBJPROP_HIDDEN,     1);
       VVPTake(nm);
       return(true);
      }
@@ -1096,9 +1083,9 @@ bool VVPLine(const string nm, const datetime t1, const double p1, const datetime
          g_objFail++;
          return(false);
         }
-      ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, nm, OBJPROP_SELECTED,   false);
-      ObjectSetInteger(0, nm, OBJPROP_HIDDEN,     true);
+      ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, 0);
+      ObjectSetInteger(0, nm, OBJPROP_SELECTED,   0);
+      ObjectSetInteger(0, nm, OBJPROP_HIDDEN,     1);
       ObjectSet(nm, OBJPROP_BACK, 0);
       VVPTake(nm);
      }
@@ -1131,9 +1118,9 @@ bool VVPLabel(const string nm, const datetime t, const double p, const string tx
          g_objFail++;
          return(false);
         }
-      ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, nm, OBJPROP_SELECTED,   false);
-      ObjectSetInteger(0, nm, OBJPROP_HIDDEN,     true);
+      ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, 0);
+      ObjectSetInteger(0, nm, OBJPROP_SELECTED,   0);
+      ObjectSetInteger(0, nm, OBJPROP_HIDDEN,     1);
       ObjectSet(nm, OBJPROP_BACK, 0);
       VVPTake(nm);
      }
@@ -1141,7 +1128,10 @@ bool VVPLabel(const string nm, const datetime t, const double p, const string tx
       VVPTake(nm);
 
    ObjectMove(nm, 0, t, p);
-   ObjectSetText(nm, txt, MathMax(6, InpFontSize), "Arial", clr);
+   int fs = InpFontSize;
+   if(fs < 6)
+      fs = 6;
+   ObjectSetText(nm, txt, fs, "Arial", clr);
    return(true);
   }
 

@@ -239,25 +239,41 @@ def main():
        "classic MT4 init()/start()/deinit() entry points")
     ok("OnCalculate" not in src, "no MT5-only OnCalculate")
     # every MQL4 call we rely on must exist in MT4
-    for fn in ["SetIndexStyle", "SetIndexBuffer", "SetIndexEmpty", "SetIndexLabel",
+    for fn in ["SetIndexStyle", "SetIndexBuffer", "SetIndexEmptyValue", "SetIndexLabel",
                "IndicatorBuffers", "IndicatorDigits", "IndicatorShortName",
                "ObjectSet", "ObjectSetInteger", "ObjectSetText", "ObjectFind",
                "ObjectDelete", "iVolume", "TimeYear", "TimeMonth", "StrToTime",
                "TimeToString", "ArrayResize", "ArraySize", "PlaySound", "Alert",
                "Comment", "StringReplace", "StringTrimLeft", "GetTickCount"]:
         ok(fn + "(" in src, f"uses documented MQL4 function {fn}()")
-    for bad in ["PeriodSeconds(", "ObjectsDeleteAll(", "ChartRedraw(", "IndicatorSetString(",
+    for bad in ["PeriodSeconds(", "ChartRedraw(", "IndicatorSetString(",
                 "IndicatorSetInteger(", "PlotIndexSet"]:
         pat = r"(?<!VVP)" + re.escape(bad[:-1]) + r"\("
         ok(re.search(pat, src) is None, f"avoids ambiguous/newer API: {bad[:-1]}")
-    # ObjectsTotal()/ObjectName() are used only in their legacy 0/1-arg form,
-    # which cannot be confused with the chart_id overloads.
-    ok(re.search(r"ObjectsTotal\(\s*\)", src) is not None,
-       "ObjectsTotal() called with no args (legacy MQL4 overload, unambiguous)")
-    ok(re.search(r"ObjectName\(\s*i\s*\)", src) is not None,
-       "ObjectName(i) called with a single index (legacy MQL4 overload)")
+    # MQL4 has no SetIndexEmpty() - the reference name is SetIndexEmptyValue()
+    ok("SetIndexEmpty(" not in src, "no SetIndexEmpty() (that is not an MQL4 function)")
+    # no chart-object list walking either: cleanup is prefix based
+    for gone in ["ObjectsTotal(", "ObjectName(", "ObjectGetInteger(", "ObjectSetDouble("]:
+        ok(gone not in src, f"does not depend on {gone[:-1]}")
+    ok("ObjectsDeleteAll(0, g_tag)" in src, "orphan cleanup uses ObjectsDeleteAll(chart, prefix)")
     ok(re.search(r"ObjectCreate\(\s*0\s*,", src) is None,
-       "no chart_id-first ObjectCreate (kept to the one documented MQL4 form)")
+       "no chart_id-first ObjectCreate (MQL5 form) - MQL4 legacy form only")
+    # arity/paren-shape mistakes are verified by the static linter, which does
+    # real paren matching; run it here so this file has one source of truth.
+    import subprocess
+    lint = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "mql4_lint.py"), SRC], capture_output=True, text=True)
+    ok(lint.returncode == 0 and "no static errors" in lint.stdout,
+       "tools/mql4_lint.py reports no static errors (arities, scopes, MQL5 leakage)")
+    if lint.returncode != 0:
+        for l in lint.stdout.splitlines():
+            if "ERROR" in l:
+                print("     " + l.strip())
+    # datetime arithmetic must not lean on implicit int->datetime conversions
+    ok(not re.search(r"Time\[[^\]]*\]\s*\+\s*VVPPeriodSeconds\(\)", src),
+       "datetime offsets are explicitly cast, so no 'possible loss of data' warnings")
+    ok(re.search(r"int minMs = 50;", src) is not None,
+       "tick throttle uses ints, not MathMax(double)")
     for prop in ["OBJPROP_COLOR", "OBJPROP_STYLE", "OBJPROP_WIDTH", "OBJPROP_BACK",
                  "OBJPROP_RAY", "OBJPROP_FILL", "OBJPROP_SELECTABLE", "OBJPROP_HIDDEN"]:
         ok(prop in src, f"object property {prop} referenced")

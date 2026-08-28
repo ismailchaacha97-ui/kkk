@@ -71,6 +71,96 @@ def strip_pp(code):
     return "\n".join("" if ln.lstrip().startswith("#") else ln for ln in code.split("\n"))
 
 
+# MQL4 builtins this project is allowed to call - each one is present in the
+# MQL4 Reference (docs.mql4.com). Anything called that is not here and not
+# defined in the file is reported, because MQL5-only helpers (SetIndexEmpty is
+# not MQL4 at all; PlotIndexSet*/IndicatorSet* are, but only from build 600)
+# are exactly what breaks an MT4 build.
+MQL4_API = set("""
+IndicatorBuffers IndicatorCounted IndicatorDigits IndicatorShortName
+IndicatorSetInteger IndicatorSetString IndicatorSetDouble IndicatorRelease
+SetIndexBuffer SetIndexStyle SetIndexLabel SetIndexEmptyValue SetIndexDrawBegin
+SetIndexShift SetIndexDefault SetLevelStyle SetLevelValue PlotIndexSetInteger
+PlotIndexSetDouble PlotIndexGet
+ObjectCreate ObjectDelete ObjectsDeleteAll ObjectFind ObjectMove ObjectsTotal
+ObjectName ObjectSet ObjectSetInteger ObjectSetDouble ObjectSetString
+ObjectGetInteger ObjectDescription ChartRedraw ChartID ChartPeriod
+TimeCurrent TimeDay TimeMonth TimeYear TimeDayOfWeek TimeHour TimeMinute
+TimeToString TimeLocal StrToTime PeriodSeconds MarketInfo
+GetTickCount ObjectSetText
+MathAbs MathMax MathMin MathSqrt MathPow MathFloor MathCeil MathRound
+MathIsValidNumber Mathrand
+IntegerToString DoubleToString ToString NormaliseDouble NormalizeDouble
+StringLen StringSubstr StringFind StringReplace StringTrimLeft StringTrimRight
+StringConcatenate StringSplit StringFormat ArrayResize ArraySize ArrayInitialize
+ArrayFree ArrayMaximum ArrayMinimum ArrayCopy
+PlaySound Alert Print Comment Sleep GetLastError
+iVolume iCustom iTime iOpen iHigh iLow iClose iMA
+Digits Point Bars Period Symbol Volume Open High Close Low Time
+""".split())
+# MQL4 functions that were NEVER part of the language (MQL5-only or invented):
+FORBIDDEN = {
+    "SetIndexEmpty": "MQL4 calls this SetIndexEmptyValue()",
+    "PlotIndexSetString": "MQL5-only",
+    "OnCalculate": "MQL5-only - MT4 uses start()",
+    "OnInit": "MQL5-style - use init() for maximum MT4 compatibility",
+    "OnDeinit": "MQL5-style - use deinit()",
+    "CopyBuffer": "MQL5-only",
+    "ArraySetAsSeries": "MQL5-only (MQL4 predefined arrays are already series)",
+    "ChartSetDouble": "MQL5-only",
+    "ObjectSetInteger_": "",
+}
+# verified MQL4 arities (number of arguments) for the calls this file makes
+ARITY = {
+    "ObjectCreate": 7,        # (name, type, sub_window, t1, p1, t2, p2)
+    "ObjectSet": 3,           # (name, prop_id, value)
+    "ObjectSetInteger": 4,    # (chart_id, name, prop_id, value)
+    "ObjectMove": 4,          # (name, point_index, time, price)
+    "ObjectFind": 1,          # (name)
+    "ObjectDelete": 1,        # (name)
+    "ObjectsDeleteAll": 2,    # (chart_id/window, prefix)
+    "SetIndexEmptyValue": 2,
+    "SetIndexBuffer": 2,
+    "SetIndexStyle": 5,
+    "SetIndexLabel": 2,
+    "iVolume": 3,
+    "ObjectSetText": 5,       # (name, text, size, font, color)
+}
+
+
+def split_args(call):
+    """top-level commas of '(...)' content"""
+    depth, cur, out = 0, [], []
+    for ch in call:
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    tail = "".join(cur).strip()
+    if tail or out:
+        out.append(tail)
+    return [a for a in out if a.strip() != ""]
+
+
+def call_args(code, name):
+    """yield the argument list of every call to name("""
+    for m in re.finditer(r"\b" + name + r"\s*\(", code):
+        i = m.end()
+        depth, j = 1, i
+        while j < len(code) and depth:
+            if code[j] in "([":
+                depth += 1
+            elif code[j] in ")]":
+                depth -= 1
+            j += 1
+        yield split_args(code[i:j - 1])
+
+
 def check(path):
     raw = open(path, encoding="utf-8", errors="replace").read()
     code = strip_pp(scan(raw))
@@ -101,6 +191,34 @@ def check(path):
     for f in MQL5_ONLY:
         if re.search(r"\b" + f + r"\s*\(", code):
             errs.append(f"MQL5-only API used in an MT4 file: {f}()")
+
+    #--- forbidden / non-MQL4 names, with the fix spelled out --------------
+    for f, why in FORBIDDEN.items():
+        if re.search(r"\b" + f + r"\s*\(", code):
+            errs.append(f"{f}() is not callable in MQL4" + ((" - " + why) if why else ""))
+
+    #--- every call must be one of ours, an MQL4 builtin, or a keyword -----
+    KEYWORDS = {"if", "for", "while", "switch", "return", "sizeof"}
+    unknown = {}
+    for m in re.finditer(r"\b([A-Za-z_]\w*)\s*\(", code):
+        nm = m.group(1)
+        if nm in KEYWORDS or nm in funcs or nm in MQL4_API:
+            continue
+        unknown.setdefault(nm, code[:m.start()].count("\n") + 1)
+    for nm, ln in sorted(unknown.items()):
+        errs.append(f"line {ln}: '{nm}()' is neither defined here nor a documented "
+                    "MQL4 function (add it to MQL4_API only if docs.mql4.com lists it)")
+
+    #--- verified arities --------------------------------------------------
+    for fn, want in sorted(ARITY.items()):
+        for args in call_args(code, fn):
+            if len(args) != want:
+                errs.append(f"{fn}() called with {len(args)} args, MQL4 documents "
+                            f"{want}: " + ", ".join(a.strip()[:22] for a in args))
+
+    #--- datetime offsets must be explicitly cast (avoids conversion warnings)
+    for m in re.finditer(r"Time\[[^\]]*\]\s*\+\s*(?!.*\(datetime\))VVPPeriodSeconds\(\)", code):
+        errs.append("datetime + int without a (datetime) cast at char " + str(m.start()))
 
     #--- globals must precede use --------------------------------
     gvars = {}

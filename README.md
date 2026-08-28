@@ -127,6 +127,24 @@ for exact numbers. On stocks/crypto indices where the broker supplies real volum
 
 ---
 
+## MQL4 vs MQL5 API traps this file avoids
+
+These are the calls that break an MT4 build when code is copied or auto-converted
+from MQL5, and they are pinned by the checker:
+
+| MTL4 (correct here) | MQL5 / wrong-for-MT4 |
+|---|---|
+| `SetIndexEmptyValue(i, EMPTY_VALUE)` | `SetIndexEmpty()` — **does not exist in MQL4** |
+| `ObjectCreate(name, type, sub_window, t1, p1, t2, p2)` | `ObjectCreate(chart_id, name, ...)` and the pre-600 form with an extra `number` argument |
+| `ObjectMove(name, point, time, price)` — **one** anchor point per call | `ObjectMove(name, 0, t1, p1, t2, p2)` |
+| `ObjectSet(name, OBJPROP_COLOR/STYLE/WIDTH/BACK/RAY, value)` (legacy index space) | `ObjectSet(name, OBJPROP_HIDDEN, …)` — those IDs belong to the other property enum |
+| `ObjectSetInteger(chart_id, name, prop, value)` for `FILL/SELECTABLE/SELECTED/HIDDEN` | 3-arg `ObjectSetInteger(name, prop, value)` |
+| `ObjectsDeleteAll(0, prefix)` | walking the chart with `ObjectsTotal()/ObjectName()` |
+
+A mismatched argument count is reported by MetaEditor as
+`')' - open parenthesis expected`, which is why the checker verifies the arity of
+every one of these calls.
+
 ## Verification in this repo
 
 There is no MetaEditor in this environment, so the code is checked two other ways — both run
@@ -139,7 +157,9 @@ python3 tools/reference_check.py
 
 * `tools/mql4_lint.py` — static pass for the things that break an MT4 build: unbalanced blocks,
   calls to undefined helpers, MQL5-only API in an MQL4 file (e.g. `OnCalculate`, `CopyRates`),
-  MQL5-style `ObjectCreate(chart_id, ...)` misuse, globals used before declaration, loop counters
+  MQL5-style `ObjectCreate(chart_id, ...)` misuse, **calls that are not in the MQL4 reference**
+  (`SetIndexEmpty` is caught here), the documented argument count of every chart-object call,
+  globals used before declaration, loop counters
   written outside their `for()` scope, buffer count vs `IndicatorBuffers(n)`, unused inputs.
 * `tools/reference_check.py` — a line-by-line **Python port of the indicator's maths** with unit
   tests, plus assertions against the `.mq4` text (formula and API-usage invariants). It pins:
@@ -150,6 +170,10 @@ python3 tools/reference_check.py
   extremes, doji/zero-volume/no-data safety, and the render geometry + object-budget arithmetic.
 
 Current state: `OK: no static errors found` and `ALL CHECKS PASSED`.
+
+Compile-time truth still belongs to MetaEditor: these tools prove the API usage and the
+maths, not the last byte of parser behaviour. If F7 reports anything, paste the exact
+line it points at — the allowlist/arity rules above usually name the cause immediately.
 
 ## Porting to MT5
 
