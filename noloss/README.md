@@ -192,21 +192,33 @@ generated ind_under_test.inc (#property stripped, OnCalculate signature aliased)
 `make cross` then checks the C++ core against the Python simulator: all 12 rungs
 agree on cumulative lot and basket take profit.
 
-**This caught four real bugs**, which is the reason to bother:
+**This caught five real bugs**, which is the reason to bother:
 
 1. `TickValue` / `TickSize` are not predefined variables in MQL4 — they have to
    come from `MarketInfo()`. Two hard compile errors.
-2. `const` on a by-value struct parameter is rejected by MQL4. Sixteen of them.
+2. **Structs cannot be passed by value in MQL4 at all.** My first fix removed
+   `const` and left them by value, which produced the *same* error with different
+   wording. The real fix is `const LadderSpec &s`, chosen by an object-like macro
+   so one source serves both languages. `MakeSpec` and `MakeAccount` also had to
+   stop returning structs by value.
 3. `LiveAnchor` picked rung 1 as the **lowest** buy entry. In an averaging-down
    ladder rung 1 is the *first* position — the **highest** buy. The indicator was
    drawing the entire ladder from the wrong end.
 4. A `"literal" + "literal"` concatenation, which is pointer arithmetic rather
    than string building.
+5. Nothing above would have been caught by the original test setup, because g++
+   happily accepts a by-value struct. In reference mode the structs now inherit a
+   deleted copy constructor, so a by-value parameter is a compile error *here*
+   too. Verified by reintroducing bug 2 on purpose: the build fails with 8
+   errors; revert it and both suites pass again.
+
+I also dropped the function-like macros (`NOLOSS_SPEC(T, name)`) in favour of
+object-like ones. MQL4's preprocessor is documented for object-like macros only,
+and I am not going to bet your compile on an undocumented feature.
 
 **What is still not verified:** that MetaEditor itself accepts the file. The stub
-is not the real compiler, and MQL4 has rules g++ does not model. If it errors
-again, paste the messages and I will fix them — that loop is the only way to
-close this.
+is not the real compiler, and MQL4 has rules g++ does not model — bug 2 proves
+that twice over. If it errors again, paste the messages and I will fix them.
 
 ## Files
 

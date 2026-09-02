@@ -119,22 +119,28 @@ int main()
 
    std::printf("\n--- MakeSpec converts pips into price units ---\n");
    reset_world();
-   LadderSpec s = MakeSpec(1.1000, PipSize());
+   LadderSpec s;
+   MakeSpec(s, 1.1000, PipSize());
    expect_near("step 30 pips -> 0.0030", s.step, 0.0030, 1e-12);
    expect_near("tp 20 pips -> 0.0020", s.take_profit, 0.0020, 1e-12);
    expect_near("first entry is the anchor", s.first_entry, 1.1000, 1e-12);
    expect_int("default direction is a buy", s.dir, 1);
    InpDirection = -1;
-   expect_int("InpDirection=-1 gives a sell", MakeSpec(1.1, 0.0001).dir, -1);
+   LadderSpec sell;
+   MakeSpec(sell, 1.1, 0.0001);
+   expect_int("InpDirection=-1 gives a sell", sell.dir, -1);
 
    std::printf("\n--- MakeAccount reads the terminal, not a constant ---\n");
    reset_world();
-   AccountSpec a = MakeAccount();
+   AccountSpec a;
+   MakeAccount(a);
    expect_near("balance", a.balance, 100.0, 1e-9);
    expect_near("1:500 -> margin rate 0.002", a.margin_rate, 0.002, 1e-12);
    expect_near("stopout 50 -> 0.5", a.stopout_pct, 0.5, 1e-12);
    g_leverage = 100;
-   expect_near("1:100 -> margin rate 0.01", MakeAccount().margin_rate, 0.01, 1e-12);
+   AccountSpec b;
+   MakeAccount(b);
+   expect_near("1:100 -> margin rate 0.01", b.margin_rate, 0.01, 1e-12);
 
    std::printf("\n--- LiveAnchor: preview mode with no orders open ---\n");
    reset_world();

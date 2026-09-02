@@ -84,8 +84,8 @@ static const double TV = 100000.0;
 
 int main()
 {
-   const LadderSpec s = ref_ladder();
-   const AccountSpec a = ref_account();
+   LadderSpec s = ref_ladder();
+   AccountSpec a = ref_account();
 
    std::printf("\n--- rung entries: 1.1000 less 30 pips per rung ---\n");
    expect_near("LadderEntry(1)", LadderEntry(s, 1), 1.1000, 1e-9);

@@ -38,9 +38,41 @@ input double InpManualTickVal = 0.0;   // Override tick value per lot (0 = auto)
 
 #ifndef NOLOSS_NO_CORE
 
+// MQL4 will not accept a struct passed by value - it insists on a reference,
+// which is what the "objects are passed by reference only" error means. Plain
+// C++ takes it either way, so the two builds need different parameter lists.
+//
+// These are OBJECT-LIKE macros only. MQL4's preprocessor is documented for
+// object-like macros, so a function-like macro such as SPEC(T, name) is a risk
+// worth not taking.
+//
+// Reference mode (MetaEditor, and the whole-file C++ test): structs cannot be
+// copied at all, so a by-value parameter is a compile error here too - that is
+// the check that was missing when this file first failed to compile.
+// By-value mode (-DNOLOSS_BYVAL=1, the core arithmetic test only): plain
+// copyable structs.
+#ifndef NOLOSS_BYVAL
+#define NOLOSS_BYVAL 0
+#endif
+
+#if NOLOSS_BYVAL
+struct NoLossNoCopy { };
+#define NOLOSS_LADDER(name) LadderSpec name
+#define NOLOSS_ACCT(name)   AccountSpec name
+#else
+struct NoLossNoCopy
+{
+   NoLossNoCopy() { }
+   NoLossNoCopy(const NoLossNoCopy &) = delete;
+   NoLossNoCopy &operator=(const NoLossNoCopy &) = delete;
+};
+#define NOLOSS_LADDER(name) const LadderSpec &name
+#define NOLOSS_ACCT(name)   const AccountSpec &name
+#endif
+
 #define NOLOSS_MAX_RUNGS 64
 
-struct LadderSpec
+struct LadderSpec : NoLossNoCopy
 {
    double first_entry;   // price of rung 1
    double step;          // adverse price distance between rungs
@@ -50,7 +82,7 @@ struct LadderSpec
    int    dir;           // +1 buy ladder (price falling), -1 sell ladder
 };
 
-struct AccountSpec
+struct AccountSpec : NoLossNoCopy
 {
    double balance;
    double contract_size; // units per 1.00 lot, normally 100000
@@ -60,13 +92,13 @@ struct AccountSpec
 };
 
 //--- entry price of rung n (1-based) -------------------------------
-double LadderEntry(LadderSpec s, const int rung)
+double LadderEntry(NOLOSS_LADDER(s), const int rung)
 {
    return s.first_entry - s.dir * (rung - 1) * s.step;
 }
 
 //--- lot of rung n (1-based) ---------------------------------------
-double LadderLot(LadderSpec s, const int rung)
+double LadderLot(NOLOSS_LADDER(s), const int rung)
 {
    double lot = s.base_lot;
    for(int i = 1; i < rung; i++)
@@ -75,7 +107,7 @@ double LadderLot(LadderSpec s, const int rung)
 }
 
 //--- total lot held after opening rungs 1..rung --------------------
-double LadderCumLot(LadderSpec s, const int rung)
+double LadderCumLot(NOLOSS_LADDER(s), const int rung)
 {
    double total = 0.0;
    for(int i = 1; i <= rung; i++)
@@ -84,7 +116,7 @@ double LadderCumLot(LadderSpec s, const int rung)
 }
 
 //--- volume weighted average entry of rungs 1..rung ----------------
-double LadderAvgEntry(LadderSpec s, const int rung)
+double LadderAvgEntry(NOLOSS_LADDER(s), const int rung)
 {
    double total = LadderCumLot(s, rung);
    if(total <= 0.0)
@@ -106,7 +138,7 @@ double LadderAvgEntry(LadderSpec s, const int rung)
 // For a SELL ladder the adverse direction is UP, the rungs step up, the
 // average entry drifts up, and the basket TP sits above it again - price
 // still has to fall back through it. So in both cases it is plus dir.
-double LadderBasketTP(LadderSpec s, const int rung)
+double LadderBasketTP(NOLOSS_LADDER(s), const int rung)
 {
    return LadderAvgEntry(s, rung) + s.dir * s.take_profit;
 }
@@ -115,14 +147,15 @@ double LadderBasketTP(LadderSpec s, const int rung)
 // Always exactly cumLot * tp * tick_value, at every rung depth. This
 // is the arithmetic behind the "no loss" claim: the basket TP sits at
 // the average entry, so reaching it puts the whole stack in profit.
-double LadderBasketTPProfit(LadderSpec s, const int rung,
+double LadderBasketTPProfit(NOLOSS_LADDER(s), const int rung,
                             const double tick_value)
 {
    return LadderCumLot(s, rung) * s.take_profit * tick_value;
 }
 
 //--- open P&L of rungs 1..rung at price p, in currency -------------
-double LadderFloating(LadderSpec s, const int rung, const double p,
+double LadderFloating(NOLOSS_LADDER(s), const int rung,
+                        const double p,
                       const double tick_value)
 {
    double pnl = 0.0;
@@ -132,13 +165,14 @@ double LadderFloating(LadderSpec s, const int rung, const double p,
 }
 
 //--- margin locked up by rungs 1..rung -----------------------------
-double LadderMargin(LadderSpec s, AccountSpec a, const int rung)
+double LadderMargin(NOLOSS_LADDER(s), NOLOSS_ACCT(a),
+                    const int rung)
 {
    return LadderCumLot(s, rung) * a.contract_size * a.margin_rate * a.price;
 }
 
 //--- rung number at price p (1-based), clamped ---------------------
-int RungAtPrice(LadderSpec s, const double p)
+int RungAtPrice(NOLOSS_LADDER(s), const double p)
 {
    if(s.step <= 0.0)
       return 1;
@@ -154,7 +188,8 @@ int RungAtPrice(LadderSpec s, const double p)
 //--- can this balance still open rung n? ---------------------------
 // True when the equity after the rung is opened stays above the
 // broker's stop out level.
-bool RungIsSurvivable(LadderSpec s, AccountSpec a, const int rung,
+bool RungIsSurvivable(NOLOSS_LADDER(s), NOLOSS_ACCT(a),
+                        const int rung,
                       const double tick_value)
 {
    double entry = LadderEntry(s, rung);
@@ -168,7 +203,7 @@ bool RungIsSurvivable(LadderSpec s, AccountSpec a, const int rung,
 
 //--- deepest rung this account can open ----------------------------
 // Beyond this the next rung stops the account out.
-int MaxAffordableRung(LadderSpec s, AccountSpec a,
+int MaxAffordableRung(NOLOSS_LADDER(s), NOLOSS_ACCT(a),
                       const double tick_value, const int max_rungs)
 {
    int cap = max_rungs;
@@ -188,7 +223,8 @@ int MaxAffordableRung(LadderSpec s, AccountSpec a,
 // The price at which equity falls to the stop out level, holding the
 // whole ladder 1..rung open. Returns 0 when there is no such price
 // (the account cannot be stopped out at this depth).
-double KillPrice(LadderSpec s, AccountSpec a, const int rung,
+double KillPrice(NOLOSS_LADDER(s), NOLOSS_ACCT(a),
+                 const int rung,
                  const double tick_value)
 {
    double total = LadderCumLot(s, rung);
@@ -245,21 +281,20 @@ double TickValuePerLot()
    return tick_value / tick_size;
 }
 
-LadderSpec MakeSpec(const double anchor, const double pip)
+// Fills `s` rather than returning it: MQL4 will not return a struct by value
+// for the same reason it will not accept one as a by-value parameter.
+void MakeSpec(LadderSpec &s, const double anchor, const double pip)
 {
-   LadderSpec s;
    s.first_entry = anchor;
    s.step        = InpStep * pip;
    s.take_profit = InpTakeProfit * pip;
    s.base_lot    = InpBaseLot;
    s.multiplier  = InpMultiplier;
    s.dir         = (InpDirection < 0 ? -1 : 1);
-   return s;
 }
 
-AccountSpec MakeAccount()
+void MakeAccount(AccountSpec &a)
 {
-   AccountSpec a;
    a.balance      = AccountBalance();
    a.contract_size = 100000.0;   // units per 1.00 lot
    a.margin_rate  = (AccountLeverage() > 0 ? 1.0 / (double)AccountLeverage() : 0.002);
@@ -267,7 +302,6 @@ AccountSpec MakeAccount()
    if(a.stopout_pct <= 0.0)
       a.stopout_pct = 0.5;
    a.price        = Bid;
-   return a;
 }
 
 //--- adopt the real ladder if the EA has orders open ---------------
@@ -402,10 +436,12 @@ int OnCalculate(const int rates_total,
    int live_rungs = 0, live_dir = 0;
    double anchor = LiveAnchor(live_rungs, live_dir);
 
-   LadderSpec s = MakeSpec(anchor, pip);
+   LadderSpec s;
+   MakeSpec(s, anchor, pip);
    if(live_rungs > 0)
       s.dir = live_dir;
-   AccountSpec a = MakeAccount();
+   AccountSpec a;
+   MakeAccount(a);
 
    // value of one full price unit on 1.00 lot, in account currency
    double tv = TickValuePerLot();
