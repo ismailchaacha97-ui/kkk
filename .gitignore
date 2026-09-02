@@ -3,4 +3,6 @@ __pycache__/
 
 # build artefacts from mt4/Makefile
 mt4/core_under_test.inc
+mt4/ind_under_test.inc
 mt4/test_ladder
+mt4/test_api

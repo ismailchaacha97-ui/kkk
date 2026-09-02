@@ -36,6 +36,8 @@ input double InpManualTickVal = 0.0;   // Override tick value per lot (0 = auto)
 // it as C++17 so the exact same code can be unit tested off-platform.
 // Keep this section valid in both MQL4 and C++.
 
+#ifndef NOLOSS_NO_CORE
+
 #define NOLOSS_MAX_RUNGS 64
 
 struct LadderSpec
@@ -58,13 +60,13 @@ struct AccountSpec
 };
 
 //--- entry price of rung n (1-based) -------------------------------
-double LadderEntry(const LadderSpec s, const int rung)
+double LadderEntry(LadderSpec s, const int rung)
 {
    return s.first_entry - s.dir * (rung - 1) * s.step;
 }
 
 //--- lot of rung n (1-based) ---------------------------------------
-double LadderLot(const LadderSpec s, const int rung)
+double LadderLot(LadderSpec s, const int rung)
 {
    double lot = s.base_lot;
    for(int i = 1; i < rung; i++)
@@ -73,7 +75,7 @@ double LadderLot(const LadderSpec s, const int rung)
 }
 
 //--- total lot held after opening rungs 1..rung --------------------
-double LadderCumLot(const LadderSpec s, const int rung)
+double LadderCumLot(LadderSpec s, const int rung)
 {
    double total = 0.0;
    for(int i = 1; i <= rung; i++)
@@ -82,7 +84,7 @@ double LadderCumLot(const LadderSpec s, const int rung)
 }
 
 //--- volume weighted average entry of rungs 1..rung ----------------
-double LadderAvgEntry(const LadderSpec s, const int rung)
+double LadderAvgEntry(LadderSpec s, const int rung)
 {
    double total = LadderCumLot(s, rung);
    if(total <= 0.0)
@@ -104,7 +106,7 @@ double LadderAvgEntry(const LadderSpec s, const int rung)
 // For a SELL ladder the adverse direction is UP, the rungs step up, the
 // average entry drifts up, and the basket TP sits above it again - price
 // still has to fall back through it. So in both cases it is plus dir.
-double LadderBasketTP(const LadderSpec s, const int rung)
+double LadderBasketTP(LadderSpec s, const int rung)
 {
    return LadderAvgEntry(s, rung) + s.dir * s.take_profit;
 }
@@ -113,14 +115,14 @@ double LadderBasketTP(const LadderSpec s, const int rung)
 // Always exactly cumLot * tp * tick_value, at every rung depth. This
 // is the arithmetic behind the "no loss" claim: the basket TP sits at
 // the average entry, so reaching it puts the whole stack in profit.
-double LadderBasketTPProfit(const LadderSpec s, const int rung,
+double LadderBasketTPProfit(LadderSpec s, const int rung,
                             const double tick_value)
 {
    return LadderCumLot(s, rung) * s.take_profit * tick_value;
 }
 
 //--- open P&L of rungs 1..rung at price p, in currency -------------
-double LadderFloating(const LadderSpec s, const int rung, const double p,
+double LadderFloating(LadderSpec s, const int rung, const double p,
                       const double tick_value)
 {
    double pnl = 0.0;
@@ -130,13 +132,13 @@ double LadderFloating(const LadderSpec s, const int rung, const double p,
 }
 
 //--- margin locked up by rungs 1..rung -----------------------------
-double LadderMargin(const LadderSpec s, const AccountSpec a, const int rung)
+double LadderMargin(LadderSpec s, AccountSpec a, const int rung)
 {
    return LadderCumLot(s, rung) * a.contract_size * a.margin_rate * a.price;
 }
 
 //--- rung number at price p (1-based), clamped ---------------------
-int RungAtPrice(const LadderSpec s, const double p)
+int RungAtPrice(LadderSpec s, const double p)
 {
    if(s.step <= 0.0)
       return 1;
@@ -152,7 +154,7 @@ int RungAtPrice(const LadderSpec s, const double p)
 //--- can this balance still open rung n? ---------------------------
 // True when the equity after the rung is opened stays above the
 // broker's stop out level.
-bool RungIsSurvivable(const LadderSpec s, const AccountSpec a, const int rung,
+bool RungIsSurvivable(LadderSpec s, AccountSpec a, const int rung,
                       const double tick_value)
 {
    double entry = LadderEntry(s, rung);
@@ -166,7 +168,7 @@ bool RungIsSurvivable(const LadderSpec s, const AccountSpec a, const int rung,
 
 //--- deepest rung this account can open ----------------------------
 // Beyond this the next rung stops the account out.
-int MaxAffordableRung(const LadderSpec s, const AccountSpec a,
+int MaxAffordableRung(LadderSpec s, AccountSpec a,
                       const double tick_value, const int max_rungs)
 {
    int cap = max_rungs;
@@ -186,7 +188,7 @@ int MaxAffordableRung(const LadderSpec s, const AccountSpec a,
 // The price at which equity falls to the stop out level, holding the
 // whole ladder 1..rung open. Returns 0 when there is no such price
 // (the account cannot be stopped out at this depth).
-double KillPrice(const LadderSpec s, const AccountSpec a, const int rung,
+double KillPrice(LadderSpec s, AccountSpec a, const int rung,
                  const double tick_value)
 {
    double total = LadderCumLot(s, rung);
@@ -207,6 +209,8 @@ double KillPrice(const LadderSpec s, const AccountSpec a, const int rung,
    return LadderAvgEntry(s, rung) + drift / (total * tick_value);
 }
 
+#endif // NOLOSS_NO_CORE
+
 //--- CORE END ------------------------------------------------------
 
 #ifndef NOLOSS_CORE_ONLY
@@ -225,15 +229,20 @@ double PipSize()
 }
 
 //--- account currency value of ONE FULL PRICE UNIT on 1.00 lot -----
-// For a standard EURUSD lot this is 100000. TickValue is quoted per
-// TickSize, so the ratio converts it to a per-price-unit figure.
+// For a standard EURUSD lot this is 100000. Tick value is quoted per tick
+// size, so the ratio converts it to a per-price-unit figure.
+//
+// MQL4 has no predefined TickValue/TickSize variables - they have to come
+// from MarketInfo(). This was a compile error before.
 double TickValuePerLot()
 {
    if(InpManualTickVal > 0.0)
       return InpManualTickVal;
-   if(TickValue <= 0.0 || TickSize <= 0.0)
+   double tick_value = MarketInfo(Symbol(), MODE_TICKVALUE);
+   double tick_size  = MarketInfo(Symbol(), MODE_TICKSIZE);
+   if(tick_value <= 0.0 || tick_size <= 0.0)
       return 100000.0;
-   return TickValue / TickSize;
+   return tick_value / tick_size;
 }
 
 LadderSpec MakeSpec(const double anchor, const double pip)
@@ -252,7 +261,7 @@ AccountSpec MakeAccount()
 {
    AccountSpec a;
    a.balance      = AccountBalance();
-   a.contract_size = (MarketInfo(Symbol(), MODE_TICKSIZE) > 0.0 ? 100000.0 : 100000.0);
+   a.contract_size = 100000.0;   // units per 1.00 lot
    a.margin_rate  = (AccountLeverage() > 0 ? 1.0 / (double)AccountLeverage() : 0.002);
    a.stopout_pct  = AccountStopoutLevel() / 100.0;
    if(a.stopout_pct <= 0.0)
@@ -270,7 +279,7 @@ double LiveAnchor(int &rungs, int &dir)
    rungs = 0;
    dir = (InpDirection < 0 ? -1 : 1);
    double best = 0.0;
-   double lots = 0.0;
+   datetime best_time = 0;
    for(int i = OrdersTotal() - 1; i >= 0; i--)
    {
       if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
@@ -286,15 +295,26 @@ double LiveAnchor(int &rungs, int &dir)
       {
          dir = d;
          best = OrderOpenPrice();
+         best_time = OrderOpenTime();
       }
       else if(d != dir)
          continue;
-      // rung 1 is the FIRST position opened: the best price for a buy
-      // ladder is the lowest entry, for a sell ladder the highest
-      if((d > 0 && OrderOpenPrice() < best) || (d < 0 && OrderOpenPrice() > best))
+      // Rung 1 is the FIRST position opened. In an averaging-down ladder the
+      // first buy is at the HIGHEST price and each later rung is lower, so
+      // for a buy ladder rung 1 is the highest entry and for a sell ladder
+      // the lowest. Getting this backwards draws the whole ladder from the
+      // wrong end, which is what this did before.
+      // Where two orders share a price, the older one is rung 1.
+      const bool better_price =
+         (d > 0 ? OrderOpenPrice() > best : OrderOpenPrice() < best);
+      const bool older_at_same_price =
+         OrderOpenPrice() == best && OrderOpenTime() < best_time;
+      if(better_price || older_at_same_price)
+      {
          best = OrderOpenPrice();
+         best_time = OrderOpenTime();
+      }
       rungs++;
-      lots += OrderLots();
    }
    if(rungs == 0)
    {
@@ -444,7 +464,9 @@ int OnCalculate(const int rates_total,
    if(InpShowPanel)
    {
       string txt = "";
-      txt += "RULE OP LADDER  " + (s.dir > 0 ? "BUY" : "SELL") + "\n";
+      txt += "RULE OP LADDER  ";
+      txt += (s.dir > 0 ? "BUY" : "SELL");
+      txt += "\n";
       txt += "rung now        " + IntegerToString(rung_now) + "\n";
       txt += "total lot       " + DoubleToString(LadderCumLot(s, rung_now), 2) + "\n";
       txt += "average entry   " + DoubleToString(LadderAvgEntry(s, rung_now), Digits) + "\n";

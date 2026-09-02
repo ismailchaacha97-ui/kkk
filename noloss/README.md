@@ -170,25 +170,43 @@ magic number and it will adopt your **real** open positions instead.
 ### How the math is tested without MetaEditor
 
 There is no MetaEditor in this sandbox, so I could not compile the indicator. What
-I did instead: the ladder arithmetic lives between `CORE BEGIN` / `CORE END` markers
-in the `.mq4` file and is written to be valid **both** as MQL4 and as C++17. The
-Makefile extracts those exact bytes and compiles them with g++:
+I did instead is compile it two different ways with g++:
 
 ```
 $ cd mt4 && make test
-extracted 132 lines of core from RuleOP_Ladder.mq4
-...
-53 checks, 0 failures
-ALL PASS
+extracted 180 lines of core from RuleOP_Ladder.mq4
+generated ind_under_test.inc (#property stripped, OnCalculate signature aliased)
+37 checks, 0 failures — ALL PASS      <- the whole file, against an MQL4 API stub
+53 checks, 0 failures — ALL PASS      <- the core, against hand-derived values
 ```
 
-So the arithmetic is genuinely tested — same source, not a copy. `make cross` also
-checks it against the Python simulator: all 12 rungs agree on cumulative lot and
-basket take profit.
+- **`test_ladder`** — the ladder arithmetic between `CORE BEGIN` / `CORE END`,
+  written to be valid both as MQL4 and as C++17. 53 assertions with expected
+  values derived by hand, not read back off the code.
+- **`test_api`** — the *entire* file, core and drawing half, compiled against a
+  stub MQL4 API (`mql4_api_stub.h`). It drives `OnInit`, `OnCalculate`,
+  `OnDeinit` and `LiveAnchor` and asserts on the objects actually drawn: rung
+  prices, average entry, basket TP, kill price, and which rungs are coloured
+  unaffordable.
 
-**What is *not* verified:** the drawing code, the MT4 API calls, and the compile
-itself. That part is uncompiled and you should expect to fix small things in
-MetaEditor. The math underneath it is not the risky part.
+`make cross` then checks the C++ core against the Python simulator: all 12 rungs
+agree on cumulative lot and basket take profit.
+
+**This caught four real bugs**, which is the reason to bother:
+
+1. `TickValue` / `TickSize` are not predefined variables in MQL4 — they have to
+   come from `MarketInfo()`. Two hard compile errors.
+2. `const` on a by-value struct parameter is rejected by MQL4. Sixteen of them.
+3. `LiveAnchor` picked rung 1 as the **lowest** buy entry. In an averaging-down
+   ladder rung 1 is the *first* position — the **highest** buy. The indicator was
+   drawing the entire ladder from the wrong end.
+4. A `"literal" + "literal"` concatenation, which is pointer arithmetic rather
+   than string building.
+
+**What is still not verified:** that MetaEditor itself accepts the file. The stub
+is not the real compiler, and MQL4 has rules g++ does not model. If it errors
+again, paste the messages and I will fix them — that loop is the only way to
+close this.
 
 ## Files
 

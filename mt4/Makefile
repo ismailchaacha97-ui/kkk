@@ -10,7 +10,7 @@ MQ4     := RuleOP_Ladder.mq4
 CORE    := core_under_test.inc
 BIN     := test_ladder
 
-.PHONY: test cross clean extract
+.PHONY: test cross clean extract api
 
 $(CORE): $(MQ4)
 	@awk '/CORE BEGIN/{flag=1;next} /CORE END/{flag=0} flag' $(MQ4) > $(CORE)
@@ -21,7 +21,7 @@ extract: $(CORE)
 $(BIN): $(CORE) test_ladder.cpp
 	$(CXX) -std=c++17 -Wall -Wextra -Wno-unused-parameter -O1 -o $(BIN) test_ladder.cpp
 
-test: $(BIN)
+test: $(BIN) api
 	@./$(BIN)
 
 # Independent cross-check: the Python simulator's ladder table and this C++ core
@@ -32,4 +32,21 @@ cross: test
 	@python3 crosscheck.py
 
 clean:
-	@rm -f $(CORE) $(BIN)
+	@rm -f $(CORE) $(BIN) ind_under_test.inc test_api
+
+# The MT4 half of the indicator, compiled against an MQL4 API stub. This proves
+# the drawing/order-reading code is syntactically valid and behaves, which the
+# core-only test cannot reach. It is NOT a substitute for MetaEditor.
+ind_under_test.inc: $(MQ4)
+	@grep -v '^#property' $(MQ4) \
+	  | sed -E 's/const (datetime|double|long|int) &([a-z_]+)\[\]/const \1_vec \&\2/g' \
+	  > ind_under_test.inc
+	@echo "generated ind_under_test.inc (#property stripped, OnCalculate " \
+	      "signature aliased)"
+
+test_api: ind_under_test.inc test_api.cpp mql4_api_stub.cpp mql4_api_stub.h
+	$(CXX) -std=c++17 -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
+	       -DNOLOSS_HAS_INPUTS -O1 -o test_api test_api.cpp mql4_api_stub.cpp
+
+api: test_api
+	@./test_api
