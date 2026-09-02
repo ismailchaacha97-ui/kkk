@@ -1,16 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="260" viewBox="0 0 900 260">
 <rect width="900" height="260" fill="#0f1115"/>
-<rect x="60.0" y="206.1" width="132.0" height="13.9" fill="#46a758"/>
+<rect x="60.0" y="205.6" width="132.0" height="14.4" fill="#46a758"/>
 <text x="127.5" y="236" fill="#8b8b8b" font-size="10" font-family="monospace" text-anchor="middle">1</text>
-<rect x="195.0" y="206.1" width="132.0" height="13.9" fill="#46a758"/>
+<rect x="195.0" y="205.6" width="132.0" height="14.4" fill="#46a758"/>
 <text x="262.5" y="236" fill="#8b8b8b" font-size="10" font-family="monospace" text-anchor="middle">2</text>
-<rect x="330.0" y="207.0" width="132.0" height="13.0" fill="#46a758"/>
+<rect x="330.0" y="205.6" width="132.0" height="14.4" fill="#46a758"/>
 <text x="397.5" y="236" fill="#8b8b8b" font-size="10" font-family="monospace" text-anchor="middle">3</text>
-<rect x="465.0" y="205.2" width="132.0" height="14.8" fill="#46a758"/>
+<rect x="465.0" y="30.0" width="132.0" height="190.0" fill="#46a758"/>
 <text x="532.5" y="236" fill="#8b8b8b" font-size="10" font-family="monospace" text-anchor="middle">4</text>
-<rect x="600.0" y="30.0" width="132.0" height="190.0" fill="#f5a623"/>
+<rect x="600.0" y="135.4" width="132.0" height="84.6" fill="#f5a623"/>
 <text x="667.5" y="236" fill="#8b8b8b" font-size="10" font-family="monospace" text-anchor="middle">5</text>
-<rect x="735.0" y="196.2" width="132.0" height="23.8" fill="#f5a623"/>
+<rect x="735.0" y="218.4" width="132.0" height="1.6" fill="#f5a623"/>
 <text x="802.5" y="236" fill="#8b8b8b" font-size="10" font-family="monospace" text-anchor="middle">6</text>
 <text x="60" y="20" fill="#e6e6e6" font-size="13" font-family="monospace">how deep the martingale ladder got (rung = lot multiplier level)</text>
 </svg>

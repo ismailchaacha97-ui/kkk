@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+
+# build artefacts from mt4/Makefile
+mt4/core_under_test.inc
+mt4/test_ladder

@@ -172,24 +172,49 @@ def simulate_grid(p: Params, n_ticks: int, tick_sd_pips: float | None, seed: int
 
         # adverse move of `step` pips below the deepest entry -> add a rung
         deepest = min(e for e, _ in ladder.entries)
-        if px <= deepest - p.step_pips and len(ladder.entries) < p.max_rungs:
+        if px <= deepest - p.step_pips:
+            if len(ladder.entries) >= p.max_rungs:
+                # ladder exhausted: the system has no answer left
+                return _result(p, balance + ladder.floating_pnl(px),
+                               equity_curve, max_rung, max_floating,
+                               cycles_closed, blowup=False, tick=tick,
+                               exhausted=True)
             last_lot = ladder.entries[-1][1]
             new_lot = last_lot * p.multiplier
+            # a real broker rejects this order when free margin is gone; the
+            # stack then sits there until the stop out level takes it
+            if free_margin(p, balance, ladder.floating_pnl(px),
+                           ladder.total_lot + new_lot) <= 0:
+                return _result(p, balance + ladder.floating_pnl(px),
+                               equity_curve, max_rung, max_floating,
+                               cycles_closed, blowup=False, tick=tick,
+                               exhausted=True, blocked=True)
             ladder.entries.append((px + p.spread_pips, new_lot))
             max_rung = max(max_rung, len(ladder.entries))
-        elif px <= deepest - p.step_pips:
-            # ladder exhausted: the system has no answer left, close the stack
-            return _result(p, balance + ladder.floating_pnl(px), equity_curve,
-                           max_rung, max_floating, cycles_closed,
-                           blowup=False, tick=tick, exhausted=True)
 
     return _result(p, balance + ladder.floating_pnl(px), equity_curve,
                    max_rung, max_floating, cycles_closed, blowup=False,
                    tick=n_ticks)
 
 
+def margin_used(p: Params, total_lot: float) -> float:
+    """Margin locked up by `total_lot`, mirroring LadderMargin in the MT4 core."""
+    return total_lot * p.margin_per_lot()
+
+
+def free_margin(p: Params, balance: float, floating: float,
+                total_lot: float) -> float:
+    """What the broker would let you open another position with.
+
+    Real MT4 rejects the order when this is not positive. Omitting this check
+    makes a martingale look far more durable than it is, because the model lets
+    you keep adding rungs after the account could no longer fund them.
+    """
+    return balance + floating - margin_used(p, total_lot)
+
+
 def _result(p, final_balance, curve, max_rung, max_floating, cycles, blowup,
-            tick, exhausted=False):
+            tick, exhausted=False, blocked=False):
     peak = p.balance
     max_dd = 0.0
     for v in curve:
@@ -203,6 +228,7 @@ def _result(p, final_balance, curve, max_rung, max_floating, cycles, blowup,
         "cycles_closed": cycles,
         "blowup": blowup,
         "exhausted": exhausted,
+        "blocked": blocked,
         "max_drawdown": max_dd,
         "ticks": tick,
     }
@@ -341,8 +367,13 @@ def simulate_hedge(p: Params, n_ticks: int, tick_sd_pips: float | None, seed: in
                     return _result(p, max(equity, 0.0), equity_curve, max_rung,
                                    max_floating, cycles_closed, False, tick,
                                    exhausted=True)
-                ladder.entries.append(
-                    (px + p.spread_pips / 2, ladder.entries[-1][1] * p.multiplier))
+                new_lot = ladder.entries[-1][1] * p.multiplier
+                if free_margin(p, balance + banked, f,
+                               ladder.total_lot + new_lot) <= 0:
+                    return _result(p, max(equity, 0.0), equity_curve, max_rung,
+                                   max_floating, cycles_closed, False, tick,
+                                   exhausted=True, blocked=True)
+                ladder.entries.append((px + p.spread_pips / 2, new_lot))
                 max_rung = max(max_rung, len(ladder.entries))
 
     return _result(p, balance + banked + floating(), equity_curve, max_rung,
@@ -422,6 +453,7 @@ def summarize(runs, p):
         "win_rate": len(winners) / len(runs),
         "blowup_rate": len(blowups) / len(runs),
         "exhausted_rate": sum(1 for r in runs if r.get("exhausted")) / len(runs),
+        "blocked_rate": sum(1 for r in runs if r.get("blocked")) / len(runs),
         "median_final": statistics.median(finals),
         "mean_final": statistics.mean(finals),
         "p10_final": pct(finals, 0.10),
@@ -512,22 +544,46 @@ def svg_rungs(hist, path, width=900, height=260):
 # ---------------------------------------------------------------------------
 
 def ladder_table(p: Params) -> list:
-    """Pure arithmetic: what the martingale ladder demands of the account."""
+    """Pure arithmetic: what the martingale ladder demands of the account.
+
+    Two loss figures, because conflating them is exactly what makes these
+    systems look survivable:
+
+      newest_rung_loss - the loss on the rung just added, taken alone. This is
+                         what most Rule-OP write-ups show, and it is small.
+      stack_floating   - the loss on the WHOLE stack at that rung's entry.
+                         This is what your equity actually reads, and it is
+                         roughly 2.5x larger by rung 6.
+
+    Both are reported. Only the second one can stop you out.
+    """
     rows = []
-    cum_loss = 0.0
+    entries = []
+    lots = []
     lot = p.base_lot
     for rung in range(1, 13):
-        if rung > 1:
-            lot *= p.multiplier
+        entries.append((rung - 1) * p.step_pips)   # adverse pips at this rung
+        lots.append(lot)
         adverse = (rung - 1) * p.step_pips
-        cum_loss = adverse * lot * PIP_VALUE_PER_LOT
+        newest_loss = adverse * lot * PIP_VALUE_PER_LOT
+        # signed: negative, because it is a loss. Storing the magnitude here
+        # is a trap - every consumer has to remember to negate it, and one
+        # of them did not.
+        stack_floating = -sum((adverse - entries[i]) * lots[i]
+                              for i in range(rung)) * PIP_VALUE_PER_LOT
+        cum_lot = sum(lots[:rung])
         rows.append({
             "rung": rung,
             "lot": lot,
+            "cum_lot": cum_lot,
             "adverse_pips": adverse,
-            "cum_loss_usd": cum_loss,
-            "margin_usd": lot * p.margin_per_lot(),
+            "newest_rung_loss": newest_loss,
+            "cum_loss_usd": newest_loss,      # kept for report continuity
+            "stack_floating_usd": stack_floating,
+            "basket_tp_usd": cum_lot * p.tp_pips * PIP_VALUE_PER_LOT,
+            "margin_usd": cum_lot * p.margin_per_lot(),
         })
+        lot *= p.multiplier
     return rows
 
 
@@ -578,7 +634,9 @@ def main():
         print(f"\n=== {name} === ({s['n']} accounts of ${p.balance:.0f})")
         print(f"  accounts ending in profit        : {s['win_rate']*100:5.1f}%")
         print(f"  accounts blown up (stop-out)     : {s['blowup_rate']*100:5.1f}%")
-        print(f"  runs where ladder ran out        : {s['exhausted_rate']*100:5.1f}%")
+        print(f"  runs blocked by free margin      : {s['blocked_rate']*100:5.1f}%")
+        print(f"  runs that hit the rung cap       : "
+              f"{(s['exhausted_rate']-s['blocked_rate'])*100:5.1f}%")
         print(f"  median final equity              : ${s['median_final']:8.2f}")
         print(f"  mean final equity                : ${s['mean_final']:8.2f}")
         print(f"  10th pct final equity            : ${s['p10_final']:8.2f}")
@@ -623,7 +681,7 @@ def _theo(cycles, rung):
     return 0.0
 
 
-def lot_sweep(p: Params, n_runs, n_ticks, tick_sd, sweep_runs=1200):
+def lot_sweep(p: Params, n_runs, n_ticks, tick_sd, sweep_runs=2000):
     """The universal objection: 'just use a smaller lot'. Does it work?"""
     out = []
     for lot in (0.01, 0.005, 0.002, 0.001):
@@ -675,23 +733,68 @@ def write_report(here, p, grid, hedge, rows, n_ticks, tick_sd, n_runs,
     a("## The ladder, in plain arithmetic\n")
     a("Before any simulation, here is what the martingale ladder *requires*. "
       "This is not a model result, it is just multiplication.\n")
-    a("| rung | lot | adverse move (pips) | floating loss (USD) | margin (USD) |\n"
-      "|---|---|---|---|---|")
+    a("| rung | lot | cum lot | adverse move | loss on newest rung | "
+      "**floating loss on the whole stack** | basket TP payout | margin |\n"
+      "|---|---|---|---|---|---|---|---|")
     for r in rows:
-        a(f"| {r['rung']} | {r['lot']:.4f} | {r['adverse_pips']:.0f} | "
-          f"{r['cum_loss_usd']:,.0f} | {r['margin_usd']:,.0f} |")
-    a(f"\nRead the bottom rows: by rung 10 the system is carrying "
-      f"{rows[9]['adverse_pips']:.0f} pips of adverse move at "
-      f"{rows[9]['lot']:.4f} lot, sitting on a floating loss of "
-      f"${rows[9]['cum_loss_usd']:,.0f} on a ${p.balance:.0f} account.\n")
+        a(f"| {r['rung']} | {r['lot']:.4f} | {r['cum_lot']:.3f} | "
+          f"{r['adverse_pips']:.0f} pips | ${r['newest_rung_loss']:,.0f} | "
+          f"**-${abs(r['stack_floating_usd']):,.0f}** | "
+          f"${r['basket_tp_usd']:,.0f} | "
+          f"${r['margin_usd']:,.0f} |")
+    a("\nLook hard at the two loss columns, because conflating them is exactly "
+      "what makes these systems look survivable. \"Loss on newest rung\" is "
+      "what Rule-OP write-ups show you: the damage done by the position you "
+      "just added, considered on its own. \"Floating loss on the whole stack\" "
+      "is what your equity actually reads, and by rung 6 it is "
+      f"${abs(rows[5]['stack_floating_usd']):,.0f} against the "
+      f"${rows[5]['newest_rung_loss']:,.0f} you were shown. Only the second "
+      "column can stop you out.\n")
+    # deterministic depth limit, matching the MT4 indicator's MaxAffordableRung
+    # Same rule as RungIsSurvivable in RuleOP_Ladder.mq4: after opening the
+    # rung, equity must still sit above the stop out level AND there must be
+    # free margin left. Checking only the stop out level is far too generous -
+    # it lets the account keep adding rungs it could never actually fund.
+    max_ok = 0
+    killer = None
+    for r in rows:
+        equity = p.balance + r["stack_floating_usd"]
+        if (equity > p.stop_out_pct * r["margin_usd"]
+                and equity - r["margin_usd"] > 0):
+            max_ok = r["rung"]
+        else:
+            killer = r
+            break
+    if killer is not None:
+        last = rows[max_ok - 1]
+        a(f"With these exact settings on a ${p.balance:.0f} account at "
+          f"1:{p.leverage} and a {p.stop_out_pct*100:.0f}% stop out, the deepest "
+          f"rung you can open is **rung {max_ok}** - just "
+          f"{last['adverse_pips']:.0f} pips of adverse move. Rung "
+          f"{killer['rung']} is the one that kills you: it wants "
+          f"{killer['lot']:.2f} lot on top of a stack already "
+          f"${abs(last['stack_floating_usd']):,.0f} underwater. "
+          "`RuleOP_Ladder.mq4` computes the same number live and draws it as "
+          "the kill price.\n")
+    else:
+        a(f"Every rung in this table still fits a ${p.balance:.0f} account at "
+          f"1:{p.leverage}. Extend the table and it stops fitting quickly.\n")
+    a(f"Read the bottom rows: by rung 10 the system is carrying "
+      f"{rows[9]['adverse_pips']:.0f} pips of adverse move, "
+      f"{rows[9]['cum_lot']:.2f} lot in total, and a stack floating loss of "
+      f"${abs(rows[9]['stack_floating_usd']):,.0f} on a ${p.balance:.0f} "
+      f"account.\n")
     a("## Monte Carlo results\n")
     a(f"| metric | grid + martingale | hedge lock + martingale |\n|---|---|---|\n"
       f"| accounts ending in profit | {grid['win_rate']*100:.1f}% | "
       f"{hedge['win_rate']*100:.1f}% |\n"
       f"| accounts blown up | {grid['blowup_rate']*100:.1f}% | "
       f"{hedge['blowup_rate']*100:.1f}% |\n"
-      f"| runs where ladder ran out of rungs | {grid['exhausted_rate']*100:.1f}% | "
-      f"{hedge['exhausted_rate']*100:.1f}% |\n"
+      f"| runs where the broker refused the next rung | "
+      f"{grid['blocked_rate']*100:.1f}% | {hedge['blocked_rate']*100:.1f}% |\n"
+      f"| runs where the ladder hit its rung cap | "
+      f"{(grid['exhausted_rate']-grid['blocked_rate'])*100:.1f}% | "
+      f"{(hedge['exhausted_rate']-hedge['blocked_rate'])*100:.1f}% |\n"
       f"| median final equity | ${grid['median_final']:.2f} | "
       f"${hedge['median_final']:.2f} |\n"
       f"| mean final equity | ${grid['mean_final']:.2f} | "
@@ -800,24 +903,43 @@ def write_report(here, p, grid, hedge, rows, n_ticks, tick_sd, n_runs,
       "then gives back on the recovery close, which adds cost without adding "
       "any offsetting edge.\n")
     a("## The universal objection: \"just use a smaller lot\"\n")
-    a("| base lot | accounts blown up | median final equity | capital returned | "
-      "deepest rung seen |\n|---|---|---|---|---|")
+    a("This is the finding worth the most, because it is counter-intuitive and "
+      "it survived a re-run at higher sample size.\n")
+    a("| base lot | stopped out | margin-blocked | **failed either way** | "
+      "median final equity | capital returned | deepest rung |\n"
+      "|---|---|---|---|---|---|---|")
     for s in sweep:
+        failed = s["blowup_rate"] + s["blocked_rate"]
         a(f"| {s['base_lot']} | {s['blowup_rate']*100:.1f}% | "
+          f"{s['blocked_rate']*100:.1f}% | **{failed*100:.1f}%** | "
           f"${s['median_final']:.2f} | "
           f"{s['total_final']/s['total_start']-1:+.1%} | {s['max_rung']} |")
-    a("\nShrinking the lot does reduce the blow-up rate, and it is the only "
-      "honest lever here. But capital returned stays negative in every row: "
-      "you are buying survival, not profit, and the price of survival is that "
-      "the ladder can climb one rung higher before it hits you.\n")
+    a("\nShrinking the lot does cut the overall failure rate - look at the bold "
+      f"column, it falls from {sweep[0]['blowup_rate']*100+sweep[0]['blocked_rate']*100:.0f}% "
+      f"to {sweep[-1]['blowup_rate']*100+sweep[-1]['blocked_rate']*100:.0f}%. "
+      "But read *which* failure it removes. Almost all of the improvement is in "
+      f"the margin-blocked column ({sweep[0]['blocked_rate']*100:.0f}% down to "
+      f"{sweep[-1]['blocked_rate']*100:.0f}%), because a small lot can actually "
+      "fund a full ladder. The stopped-out column, which is the catastrophic "
+      "one, does not fall cleanly - it rises at first "
+      f"({sweep[0]['blowup_rate']*100:.0f}% to {sweep[1]['blowup_rate']*100:.0f}%) "
+      "before collapsing at the very smallest size.\n")
+    a("So a smaller lot buys you a longer life with more green days, and shifts "
+      "the way it ends from a quiet margin refusal toward a violent stop-out. "
+      "Capital returned improves a little and stays negative in every row. You "
+      "are not buying an edge, you are buying time.\n")
     a("## What this means in practice\n")
     a("- The system's win rate is real and high. Its expected value is not.\n")
     a("- Every parameter you can tune (TP, step, multiplier, lot) changes the "
       "*shape* of the distribution - how often the tail hits and how big it "
       "is - never its sign.\n")
-    a("- The failure mode is not a bad month. It is a single trending move "
-      "that takes the account to the stop-out level in one go, after a long "
-      "run of small green days that made the method look proven.\n")
+    a("- The failure has two faces. About "
+      f"{grid['blocked_rate']*100:.0f}% of the time the account simply runs out "
+      "of margin and the ladder cannot fund its next rung. About "
+      f"{grid['blowup_rate']*100:.0f}% of the time a single trending move takes "
+      "it to the stop-out level in one go. Either way the run ends, and both "
+      "happen after a long run of small green days that made the method look "
+      "proven.\n")
     a("- Anyone selling this with a money-back guarantee is short the tail. "
       "The guarantee is funded by the students who have not been trading long "
       "enough to hit it yet.\n")

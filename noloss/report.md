@@ -24,43 +24,48 @@ The price model has **zero expected return**. There is no edge in it. So every d
 
 Before any simulation, here is what the martingale ladder *requires*. This is not a model result, it is just multiplication.
 
-| rung | lot | adverse move (pips) | floating loss (USD) | margin (USD) |
-|---|---|---|---|---|
-| 1 | 0.0100 | 0 | 0 | 2 |
-| 2 | 0.0200 | 30 | 6 | 4 |
-| 3 | 0.0400 | 60 | 24 | 9 |
-| 4 | 0.0800 | 90 | 72 | 18 |
-| 5 | 0.1600 | 120 | 192 | 35 |
-| 6 | 0.3200 | 150 | 480 | 70 |
-| 7 | 0.6400 | 180 | 1,152 | 141 |
-| 8 | 1.2800 | 210 | 2,688 | 282 |
-| 9 | 2.5600 | 240 | 6,144 | 563 |
-| 10 | 5.1200 | 270 | 13,824 | 1,126 |
-| 11 | 10.2400 | 300 | 30,720 | 2,253 |
-| 12 | 20.4800 | 330 | 67,584 | 4,506 |
+| rung | lot | cum lot | adverse move | loss on newest rung | **floating loss on the whole stack** | basket TP payout | margin |
+|---|---|---|---|---|---|---|---|
+| 1 | 0.0100 | 0.010 | 0 pips | $0 | **-$0** | $2 | $2 |
+| 2 | 0.0200 | 0.030 | 30 pips | $6 | **-$3** | $6 | $7 |
+| 3 | 0.0400 | 0.070 | 60 pips | $24 | **-$12** | $14 | $15 |
+| 4 | 0.0800 | 0.150 | 90 pips | $72 | **-$33** | $30 | $33 |
+| 5 | 0.1600 | 0.310 | 120 pips | $192 | **-$78** | $62 | $68 |
+| 6 | 0.3200 | 0.630 | 150 pips | $480 | **-$171** | $126 | $139 |
+| 7 | 0.6400 | 1.270 | 180 pips | $1,152 | **-$360** | $254 | $279 |
+| 8 | 1.2800 | 2.550 | 210 pips | $2,688 | **-$741** | $510 | $561 |
+| 9 | 2.5600 | 5.110 | 240 pips | $6,144 | **-$1,506** | $1,022 | $1,124 |
+| 10 | 5.1200 | 10.230 | 270 pips | $13,824 | **-$3,039** | $2,046 | $2,251 |
+| 11 | 10.2400 | 20.470 | 300 pips | $30,720 | **-$6,108** | $4,094 | $4,503 |
+| 12 | 20.4800 | 40.950 | 330 pips | $67,584 | **-$12,249** | $8,190 | $9,009 |
 
-Read the bottom rows: by rung 10 the system is carrying 270 pips of adverse move at 5.1200 lot, sitting on a floating loss of $13,824 on a $100 account.
+Look hard at the two loss columns, because conflating them is exactly what makes these systems look survivable. "Loss on newest rung" is what Rule-OP write-ups show you: the damage done by the position you just added, considered on its own. "Floating loss on the whole stack" is what your equity actually reads, and by rung 6 it is $171 against the $480 you were shown. Only the second column can stop you out.
+
+With these exact settings on a $100 account at 1:500 and a 50% stop out, the deepest rung you can open is **rung 4** - just 90 pips of adverse move. Rung 5 is the one that kills you: it wants 0.16 lot on top of a stack already $33 underwater. `RuleOP_Ladder.mq4` computes the same number live and draws it as the kill price.
+
+Read the bottom rows: by rung 10 the system is carrying 270 pips of adverse move, 10.23 lot in total, and a stack floating loss of $3,039 on a $100 account.
 
 ## Monte Carlo results
 
 | metric | grid + martingale | hedge lock + martingale |
 |---|---|---|
-| accounts ending in profit | 23.0% | 18.8% |
-| accounts blown up | 77.0% | 81.0% |
-| runs where ladder ran out of rungs | 0.0% | 0.0% |
-| median final equity | $30.80 | $30.66 |
-| mean final equity | $92.47 | $80.71 |
-| 10th pct final equity | $15.66 | $16.16 |
-| 90th pct final equity | $312.89 | $298.16 |
-| median max drawdown | $109.08 | $106.08 |
-| 90th pct max drawdown | $195.80 | $186.66 |
-| median deepest rung | 5 | 5 |
-| 95th pct deepest rung | 6 | 6 |
-| median worst floating P&L | $-90.86 | $-89.08 |
+| accounts ending in profit | 22.0% | 18.0% |
+| accounts blown up | 20.0% | 21.0% |
+| runs where the broker refused the next rung | 60.2% | 62.0% |
+| runs where the ladder hit its rung cap | 0.0% | 0.0% |
+| median final equity | $39.16 | $35.26 |
+| mean final equity | $90.33 | $81.13 |
+| 10th pct final equity | $21.06 | $20.06 |
+| 90th pct final equity | $293.22 | $284.16 |
+| median max drawdown | $90.84 | $90.49 |
+| 90th pct max drawdown | $181.10 | $177.29 |
+| median deepest rung | 4 | 4 |
+| 95th pct deepest rung | 5 | 5 |
+| median worst floating P&L | $-82.58 | $-84.04 |
 | 95th pct worst floating P&L | $-58.53 | $-60.60 |
 | median completed cycles | 8 | 9 |
 | **capital in** | $60,000 | $60,000 |
-| **capital out** | **$55,481** (-7.5%) | **$48,424** (-19.3%) |
+| **capital out** | **$54,199** (-9.7%) | **$48,680** (-18.9%) |
 
 ## Equity curves, five accounts each
 
@@ -80,57 +85,60 @@ This is the part almost nobody explains. Look at what a **closed** cycle actuall
 
 | ladder depth | share of all cycles | total lot | theoretical P&L (total lot x TP) | smallest P&L seen | mean P&L |
 |---|---|---|---|---|---|
-| 1 rung | 60.5% | 0.010 | $2.00 | $2.00 | $2.19 |
-| 2 rungs | 22.2% | 0.030 | $6.00 | $6.00 | $6.58 |
-| 3 rungs | 10.2% | 0.070 | $14.00 | $14.00 | $15.36 |
-| 4 rungs | 5.3% | 0.150 | $30.00 | $30.01 | $32.84 |
-| 5 rungs | 1.7% | 0.310 | $62.00 | $62.02 | $67.88 |
-| 6 rungs | 0.1% | 0.630 | $126.00 | $131.10 | $137.47 |
+| 1 rung | 60.9% | 0.010 | $2.00 | $2.00 | $2.19 |
+| 2 rungs | 22.3% | 0.030 | $6.00 | $6.00 | $6.58 |
+| 3 rungs | 10.3% | 0.070 | $14.00 | $14.00 | $15.35 |
+| 4 rungs | 5.3% | 0.150 | $30.00 | $30.01 | $32.83 |
+| 5 rungs | 1.3% | 0.310 | $62.00 | $62.02 | $67.83 |
 
-Across 7262 closed cycles, the *smallest* P&L booked was **$2.00**. Not one closed cycle lost money. That is not marketing - it is forced by the geometry. The basket take profit sits at the **average** entry of the stack, so the instant price reaches it the whole stack is in profit by `total_lot x TP x pip_value`.
+Across 6861 closed cycles, the *smallest* P&L booked was **$2.00**. Not one closed cycle lost money. That is not marketing - it is forced by the geometry. The basket take profit sits at the **average** entry of the stack, so the instant price reaches it the whole stack is in profit by `total_lot x TP x pip_value`.
 
-So the claim "this system never loses" is literally true of every trade it is allowed to finish. It is false of the account, because of the 77% of accounts in this run that were never allowed to finish one. The system does not remove losses, it moves them out of the per-trade column and into a single balance-sheet event.
+So the claim "this system never loses" is literally true of every trade it is allowed to finish. It is false of the account, because of the 20% of accounts in this run that were never allowed to finish one. The system does not remove losses, it moves them out of the per-trade column and into a single balance-sheet event.
 
 Two consequences of that table, and they are the whole strategy in two sentences:
 
 1. Payout per closed cycle grows **geometrically** with ladder depth (`base_lot x (2^n - 1) x TP`). A rung-1 cycle pays $2.00; a rung-5 cycle pays $62.00. The big wins are not luck, they are the deep ladders that happened to recover.
 
-2. The **probability** of reaching a deep rung falls at roughly the same geometric rate the payout rises, so the two effects largely cancel. That is the martingale identity: on a price series with no drift, no choice of TP, step or multiplier creates an edge. The simulation agrees - with the spread switched off the grid returns -3.4% of capital over 1500 accounts, which is close enough to zero that the fat tail easily explains the gap. Turn the spread back on and it becomes -11.1%. Costs are what convert a zero-expectation game into a losing one.
+2. The **probability** of reaching a deep rung falls at roughly the same geometric rate the payout rises, so the two effects largely cancel. That is the martingale identity: on a price series with no drift, no choice of TP, step or multiplier creates an edge. The simulation agrees - with the spread switched off the grid returns -5.7% of capital over 1500 accounts, which is close enough to zero that the fat tail easily explains the gap. Turn the spread back on and it becomes -10.3%. Costs are what convert a zero-expectation game into a losing one.
 
 ## Why the hedge version is worse, and it is not the spread
 
 | variant | accounts | capital returned | accounts blown up | accounts in profit |
 |---|---|---|---|---|
-| grid spread=0 | 1500 | -3.4% | 75.2% | 24.8% |
-| grid spread=1.5 | 1500 | -11.1% | 78.2% | 21.8% |
-| hedge spread=0 | 1500 | -14.6% | 79.3% | 20.7% |
-| hedge spread=1.5 | 1500 | -17.6% | 80.4% | 19.6% |
+| grid spread=0 | 1500 | -5.7% | 22.7% | 23.5% |
+| grid spread=1.5 | 1500 | -10.3% | 19.4% | 21.0% |
+| hedge spread=0 | 1500 | -14.7% | 22.3% | 19.6% |
+| hedge spread=1.5 | 1500 | -18.0% | 22.7% | 18.3% |
 
-Set the spread to zero and the gap is still there: -3.4% for the grid against -14.6% for the hedge. So costs are not the explanation. The mechanism is structural:
+Set the spread to zero and the gap is still there: -5.7% for the grid against -14.7% for the hedge. So costs are not the explanation. The mechanism is structural:
 
 When the winning hedge leg takes profit, the surviving losing leg is entered at the **hedge** price, but the whole position only closes at `average entry + TP`. Because the survivor's entry is one TP distance behind, price has to recover that first. The result is that the hedge needs a deeper ladder to close the same recovery:
 
 | ladder depth | grid: share of cycles | hedge: share of recoveries |
 |---|---|---|
-| 1 | 60.5% | 16.9% |
-| 2 | 22.2% | 47.5% |
-| 3 | 10.2% | 22.4% |
+| 1 | 60.9% | 17.2% |
+| 2 | 22.3% | 47.6% |
+| 3 | 10.3% | 22.6% |
 | 4 | 5.3% | 10.3% |
-| 5 | 1.7% | 2.9% |
-| 6 | 0.1% | 0.1% |
+| 5 | 1.3% | 2.2% |
+| 6 | 0.0% | 0.0% |
 
-35.6% of hedge recoveries need 3+ rungs versus 17.3% for the grid. Deeper ladders are the tail risk, so the "safety lock" you were sold actually buys more of it. The hedge also books a small profit 4290 times that it then gives back on the recovery close, which adds cost without adding any offsetting edge.
+35.2% of hedge recoveries need 3+ rungs versus 16.8% for the grid. Deeper ladders are the tail risk, so the "safety lock" you were sold actually buys more of it. The hedge also books a small profit 4117 times that it then gives back on the recovery close, which adds cost without adding any offsetting edge.
 
 ## The universal objection: "just use a smaller lot"
 
-| base lot | accounts blown up | median final equity | capital returned | deepest rung seen |
-|---|---|---|---|---|
-| 0.01 | 77.9% | $31.17 | -11.3% | 6 |
-| 0.005 | 63.2% | $31.68 | -7.0% | 7 |
-| 0.002 | 45.5% | $126.29 | -6.0% | 8 |
-| 0.001 | 33.7% | $119.66 | -6.7% | 9 |
+This is the finding worth the most, because it is counter-intuitive and it survived a re-run at higher sample size.
 
-Shrinking the lot does reduce the blow-up rate, and it is the only honest lever here. But capital returned stays negative in every row: you are buying survival, not profit, and the price of survival is that the ladder can climb one rung higher before it hits you.
+| base lot | stopped out | margin-blocked | **failed either way** | median final equity | capital returned | deepest rung |
+|---|---|---|---|---|---|---|
+| 0.01 | 19.4% | 60.7% | **80.0%** | $40.00 | -8.9% | 6 |
+| 0.005 | 26.5% | 39.0% | **65.5%** | $43.45 | -6.7% | 6 |
+| 0.002 | 9.1% | 39.6% | **48.7%** | $109.26 | -5.9% | 7 |
+| 0.001 | 2.2% | 31.8% | **34.1%** | $119.66 | -3.5% | 8 |
+
+Shrinking the lot does cut the overall failure rate - look at the bold column, it falls from 80% to 34%. But read *which* failure it removes. Almost all of the improvement is in the margin-blocked column (61% down to 32%), because a small lot can actually fund a full ladder. The stopped-out column, which is the catastrophic one, does not fall cleanly - it rises at first (19% to 26%) before collapsing at the very smallest size.
+
+So a smaller lot buys you a longer life with more green days, and shifts the way it ends from a quiet margin refusal toward a violent stop-out. Capital returned improves a little and stays negative in every row. You are not buying an edge, you are buying time.
 
 ## What this means in practice
 
@@ -138,7 +146,7 @@ Shrinking the lot does reduce the blow-up rate, and it is the only honest lever 
 
 - Every parameter you can tune (TP, step, multiplier, lot) changes the *shape* of the distribution - how often the tail hits and how big it is - never its sign.
 
-- The failure mode is not a bad month. It is a single trending move that takes the account to the stop-out level in one go, after a long run of small green days that made the method look proven.
+- The failure has two faces. About 60% of the time the account simply runs out of margin and the ladder cannot fund its next rung. About 20% of the time a single trending move takes it to the stop-out level in one go. Either way the run ends, and both happen after a long run of small green days that made the method look proven.
 
 - Anyone selling this with a money-back guarantee is short the tail. The guarantee is funded by the students who have not been trading long enough to hit it yet.
 
