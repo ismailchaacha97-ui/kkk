@@ -10,7 +10,7 @@ MQ4     := RuleOP_Ladder.mq4
 CORE    := core_under_test.inc
 BIN     := test_ladder
 
-.PHONY: test cross clean extract api
+.PHONY: test cross clean extract api ea
 
 $(CORE): $(MQ4)
 	@awk '/CORE BEGIN/{flag=1;next} /CORE END/{flag=0} flag' $(MQ4) > $(CORE)
@@ -21,7 +21,7 @@ extract: $(CORE)
 $(BIN): $(CORE) test_ladder.cpp
 	$(CXX) -std=c++17 -Wall -Wextra -Wno-unused-parameter -O1 -o $(BIN) test_ladder.cpp
 
-test: $(BIN) api
+test: $(BIN) api ea
 	@./$(BIN)
 
 # Independent cross-check: the Python simulator's ladder table and this C++ core
@@ -32,7 +32,8 @@ cross: test
 	@python3 crosscheck.py
 
 clean:
-	@rm -f $(CORE) $(BIN) ind_under_test.inc test_api
+	@rm -f $(CORE) $(BIN) ind_under_test.inc test_api \
+	       $(EA_CORE) $(EA_BIN)
 
 # The MT4 half of the indicator, compiled against an MQL4 API stub. This proves
 # the drawing/order-reading code is syntactically valid and behaves, which the
@@ -50,3 +51,20 @@ test_api: ind_under_test.inc test_api.cpp mql4_api_stub.cpp mql4_api_stub.h
 
 api: test_api
 	@./test_api
+
+# The EA's decision logic and circuit breakers, extracted and compiled the same
+# way. The breakers are the only thing in a Rule OP system that protects the
+# account, and a reversed comparison operator means the stop never fires.
+EA      := RuleOP_LadderEA.mq4
+EA_CORE := ea_core_under_test.inc
+EA_BIN  := test_ea_core
+
+$(EA_CORE): $(EA)
+	@awk '/EA CORE BEGIN/{flag=1;next} /EA CORE END/{flag=0} flag' $(EA) > $(EA_CORE)
+	@echo "extracted $$(wc -l < $(EA_CORE)) lines of EA core from $(EA)"
+
+$(EA_BIN): $(EA_CORE) test_ea_core.cpp
+	$(CXX) -std=c++17 -Wall -Wextra -O1 -o $(EA_BIN) test_ea_core.cpp
+
+ea: $(EA_BIN)
+	@./$(EA_BIN)

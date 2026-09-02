@@ -63,6 +63,8 @@ class Params:
     price: float = 1.1000         # entry price, EURUSD-ish
     swap_per_lot_per_tick: float = 0.0   # overnight financing, USD per lot per tick
     tick_sd_pips: float = 3.3     # 1-sigma price movement per tick, pips
+    equity_stop_pct: float = 0.0  # 0 = off. Close all at this % off the peak.
+    cycles_target: int = 0        # 0 = off. Stop after this many closed cycles
 
     def margin_per_lot(self) -> float:
         return 100_000.0 * self.price / self.leverage
@@ -131,6 +133,7 @@ def simulate_grid(p: Params, n_ticks: int, tick_sd_pips: float | None, seed: int
     max_floating = 0.0
     balance = p.balance
     cycles_closed = 0
+    peak_equity = p.balance
 
     for tick in range(n_ticks):
         px += path.next_pip_move()
@@ -139,6 +142,20 @@ def simulate_grid(p: Params, n_ticks: int, tick_sd_pips: float | None, seed: int
         margin = ladder.total_lot * p.margin_per_lot()
         equity = balance + ladder.floating_pnl(px)
         equity_curve.append(equity)
+        if equity > peak_equity:
+            peak_equity = equity
+
+        # the EA's circuit breaker: a discretionary stop, taken at a loss,
+        # before the broker takes it for you
+        if (p.equity_stop_pct > 0.0
+                and equity <= peak_equity * (1.0 - p.equity_stop_pct / 100.0)):
+            return _result(p, equity, equity_curve, max_rung, max_floating,
+                           cycles_closed, blowup=False, tick=tick,
+                           stopped=True)
+        if p.cycles_target > 0 and cycles_closed >= p.cycles_target:
+            return _result(p, equity, equity_curve, max_rung, max_floating,
+                           cycles_closed, blowup=False, tick=tick,
+                           stopped=True)
 
         # broker stop-out: force close everything, book the floating loss
         if margin > 0 and equity <= p.stop_out_pct * margin:
@@ -214,7 +231,7 @@ def free_margin(p: Params, balance: float, floating: float,
 
 
 def _result(p, final_balance, curve, max_rung, max_floating, cycles, blowup,
-            tick, exhausted=False, blocked=False):
+            tick, exhausted=False, blocked=False, stopped=False):
     peak = p.balance
     max_dd = 0.0
     for v in curve:
@@ -229,6 +246,7 @@ def _result(p, final_balance, curve, max_rung, max_floating, cycles, blowup,
         "blowup": blowup,
         "exhausted": exhausted,
         "blocked": blocked,
+        "stopped": stopped,
         "max_drawdown": max_dd,
         "ticks": tick,
     }
