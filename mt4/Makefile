@@ -19,8 +19,7 @@ $(CORE): $(MQ4)
 extract: $(CORE)
 
 $(BIN): $(CORE) test_ladder.cpp
-	$(CXX) -std=c++17 -Wall -Wextra -Wno-unused-parameter -DNOLOSS_BYVAL=1 \
-	       -O1 -o $(BIN) test_ladder.cpp
+	$(CXX) -std=c++17 -Wall -Wextra -Wno-unused-parameter -O1 -o $(BIN) test_ladder.cpp
 
 test: $(BIN) api
 	@./$(BIN)

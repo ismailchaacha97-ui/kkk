@@ -198,27 +198,39 @@ agree on cumulative lot and basket take profit.
    come from `MarketInfo()`. Two hard compile errors.
 2. **Structs cannot be passed by value in MQL4 at all.** My first fix removed
    `const` and left them by value, which produced the *same* error with different
-   wording. The real fix is `const LadderSpec &s`, chosen by an object-like macro
-   so one source serves both languages. `MakeSpec` and `MakeAccount` also had to
-   stop returning structs by value.
+   wording.
 3. `LiveAnchor` picked rung 1 as the **lowest** buy entry. In an averaging-down
    ladder rung 1 is the *first* position — the **highest** buy. The indicator was
    drawing the entire ladder from the wrong end.
 4. A `"literal" + "literal"` concatenation, which is pointer arithmetic rather
    than string building.
-5. Nothing above would have been caught by the original test setup, because g++
-   happily accepts a by-value struct. In reference mode the structs now inherit a
-   deleted copy constructor, so a by-value parameter is a compile error *here*
-   too. Verified by reintroducing bug 2 on purpose: the build fails with 8
-   errors; revert it and both suites pass again.
+5. `MaxAffordableRung` ignored free margin, so it reported a ladder one rung
+   deeper than any broker would fund.
 
-I also dropped the function-like macros (`NOLOSS_SPEC(T, name)`) in favour of
-object-like ones. MQL4's preprocessor is documented for object-like macros only,
-and I am not going to bet your compile on an undocumented feature.
+**Then I stopped guessing at MQL4 features.** Each fix above replaced one
+unsupported construct with another one I had also assumed was fine — `const`
+removal, then a function-like macro, then struct inheritance, none of which I
+could check. The core now takes **scalar parameters only**: no structs across any
+function boundary, no macros beyond one object-like `#define`, no inheritance.
+Doubles and ints behave the same in MQL4 and C++, so there is nothing left in the
+math core for MetaEditor to disagree with. The structs survive only as local
+holders inside the MT4 half, which is the one place MQL4 unambiguously allows
+them.
+
+```
+$ grep -cE "^\s*#define\s+\w+\(" RuleOP_Ladder.mq4    # function-like macros
+0
+$ grep -cE "struct\s+\w+\s*:" RuleOP_Ladder.mq4       # inheritance
+0
+$ awk '/CORE BEGIN/,/CORE END/' RuleOP_Ladder.mq4 | grep -c "^\s*struct"
+0
+```
 
 **What is still not verified:** that MetaEditor itself accepts the file. The stub
-is not the real compiler, and MQL4 has rules g++ does not model — bug 2 proves
-that twice over. If it errors again, paste the messages and I will fix them.
+is not the real compiler, and three rounds of errors prove I cannot predict it
+from here. What I *can* say is that the constructs which caused all 34 errors so
+far are gone, and the arithmetic underneath is tested. If it errors again, paste
+the messages — that loop is the only way to close this.
 
 ## Files
 
