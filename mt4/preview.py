@@ -10,7 +10,8 @@ from matplotlib.patches import Rectangle
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from verify_parity import mql4_port, MA_PERIOD, VOL_WINDOW, VOL_MAX, SIZE_VOL_WINDOW
+from verify_parity import (mql4_port, wilder_adx, MA_PERIOD, VOL_WINDOW,
+                           VOL_MAX, SIZE_VOL_WINDOW, ADX_MIN)
 
 SYM = "SPY"
 
@@ -19,13 +20,15 @@ def main():
     close = pd.read_parquet(os.path.join(ROOT, "data", "close.parquet"))[SYM]
     high = pd.read_parquet(os.path.join(ROOT, "data", "high.parquet"))[SYM]
     low = pd.read_parquet(os.path.join(ROOT, "data", "low.parquet"))[SYM]
-    state, scale = mql4_port(close)
+    adx_s = wilder_adx(high, low, close)
+    state, scale = mql4_port(close, adx_s)
 
     ma = close.rolling(MA_PERIOD).mean()
     vol = close.pct_change().rolling(VOL_WINDOW).std() * np.sqrt(252)
 
     d = pd.DataFrame(dict(close=close, ma=ma, vol=vol, state=state,
-                          scale=scale, high=high, low=low)).dropna()
+                          scale=scale, high=high, low=low,
+                          adx=adx_s)).dropna()
 
     fig, ax = plt.subplots(3, 1, figsize=(15, 11), sharex=True,
                            gridspec_kw={"height_ratios": [3, 1, 1]})
@@ -68,7 +71,7 @@ def main():
     ax[0].scatter(d.index[ext], d.high[ext] * 1.03, marker="v", s=90,
                   color="#ff4500", edgecolor="k", zorder=6, label="exit")
 
-    ax[0].set_title(f"TrendVolFilter.mq4  —  {SYM} Daily  (rank #1 of 9,600)",
+    ax[0].set_title(f"TrendVolFilter.mq4  —  {SYM} Daily  (rank #1 of 9,600, ADX entry gate)",
                     color="white", fontsize=14)
     ax[0].set_ylabel("price", color="#cccccc")
     ax[0].legend(fontsize=9, facecolor="#2a2a2a", labelcolor="#dddddd", ncol=3)
@@ -81,6 +84,7 @@ def main():
              f"  ({(last.close/last.ma-1)*100:+.2f}%)\n"
              f"Vol    Ann{VOL_WINDOW}         : {last.vol*100:.2f}%  "
              f"(max {VOL_MAX*100:.2f}%)  {'OK' if last.vol < VOL_MAX else 'no'}\n"
+             f"Range  ADX14          : {last.adx:.1f}  (min {ADX_MIN:.0f} at entry)\n"
              f"SIGNAL                : {'LONG' if last.state else 'FLAT'}\n"
              f"Position scale        : {last.scale:.2f}x  (target 10% vol)")
     ax[0].text(0.005, 0.98, panel, transform=ax[0].transAxes, va="top",
@@ -93,8 +97,12 @@ def main():
     ax[1].axhline(VOL_MAX * 100, color="#ff4500", ls="--", lw=1.5,
                   label=f"ceiling {VOL_MAX*100:.0f}%")
     ax[1].fill_between(d.index, 0, VOL_MAX * 100, color="#32cd32", alpha=0.08)
-    ax[1].set_ylabel("vol %", color="#cccccc")
-    ax[1].legend(fontsize=9, facecolor="#2a2a2a", labelcolor="#dddddd")
+    ax[1].plot(d.index, d.adx, color="#00ced1", lw=1.0, alpha=0.9,
+               label="ADX(14)")
+    ax[1].axhline(ADX_MIN, color="#00ced1", ls=":", lw=1.4,
+                  label=f"ADX entry gate {ADX_MIN:.0f}")
+    ax[1].set_ylabel("vol % / ADX", color="#cccccc")
+    ax[1].legend(fontsize=8, facecolor="#2a2a2a", labelcolor="#dddddd", ncol=2)
 
     # --- size pane
     ax[2].fill_between(d.index, 0, d.scale, color="#1e90ff", alpha=0.55, step="pre")

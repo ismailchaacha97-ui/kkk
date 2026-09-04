@@ -6,15 +6,42 @@ The best-performing strategy of the 9,600 tested in this repo, ported to MQL4.
 
 ## The rule
 
-Be **long** only when both conditions hold at the close of a bar:
+Be **long** only when these hold at the close of a bar:
 
 1. **Trend** — `Close > SMA(200)`
 2. **Calm** — annualised realised volatility over the last **120** bars is **below 12%**
+3. **Not ranging** — `ADX(14) > 25`, **checked only when opening a new position**
 
 Position size = `10% / AnnVol(60)`, capped at **3.0x**. Flat otherwise; never short.
 
 The signal is taken from the **last closed bar** and acted on at the next bar's open —
 a deliberate 1-bar lag that matches the backtest. **The indicator does not repaint.**
+
+## The ranging fix (v1.1)
+
+The original rule fired in sideways markets: low volatility and chop look identical
+to a vol filter. Measured across 40 symbols, **49% of round trips lasted ≤5 bars**.
+
+The instinctive fix — requiring ADX on *every* bar — is actively harmful, because it
+forces an exit each time ADX dips and then re-enters:
+
+| variant | Sharpe | max DD | turnover | ≤5-bar trades |
+|---|---|---|---|---|
+| baseline (no filter) | 0.86 | −8.8% | 23.2x | 49% |
+| ADX>20 **every bar** | 0.47 | −11.0% | 38.6x | — |
+| ER>0.30 **every bar** | 0.08 | −14.5% | 94.7x | — |
+| **ADX>25 at entry only** | **0.89** | **−6.3%** | **11.8x** | **33%** |
+
+Gating **entries only** and letting the base rule manage exits improves everything at
+once: fewer trades, half the turnover, smaller drawdown, and it holds out-of-sample
+(OOS Sharpe 1.12 → **1.32**). On SPY daily, entries drop from 17 to 7 in ten years.
+
+Set `Use_ADX_Filter = false` to restore the original behaviour.
+
+> Note on `ADX_Min`: 30 scored even better out-of-sample (Sharpe 1.50) but its
+> in-sample score was flat and trade count fell to 140. That monotonic OOS
+> improvement is most likely small-sample luck, so the default is the more
+> defensible **25**.
 
 ## Backtested performance
 
@@ -22,15 +49,16 @@ a deliberate 1-bar lag that matches the backtest. **The indicator does not repai
 
 | metric | strategy | SPY buy & hold |
 |---|---|---|
-| Out-of-sample Sharpe (2014–17) | **1.12** | — |
-| Full-period Sharpe | **0.86** | 0.44 |
-| CAGR | 3.8% | 7.05% |
-| Volatility | 4.5% | — |
-| **Max drawdown** | **−8.8%** | −56.5% |
-| Calmar | 0.43 | 0.12 |
-| Turnover | 23x/yr | — |
+| Out-of-sample Sharpe (2014–17) | **1.32** | — |
+| Full-period Sharpe | **0.89** | 0.44 |
+| CAGR | 3.9% | 7.05% |
+| **Max drawdown** | **−6.3%** | −56.5% |
+| Calmar | 0.63 | 0.12 |
+| Turnover | 11.8x/yr | — |
 
-On SPY daily it is in the market ~34% of the time, with 17 entries over 10 years —
+(Figures with the ADX entry gate on. Without it: OOS Sharpe 1.12, DD −8.8%, 23x turnover.)
+
+On SPY daily it is in the market ~26% of the time, with 7 entries over 10 years —
 it sits out crashes rather than trying to trade them.
 
 ## Install
@@ -48,6 +76,9 @@ it sits out crashes rather than trying to trade them.
 | `Vol_Window` | 120 | vol lookback for the **filter** |
 | `Size_Vol_Window` | 60 | vol lookback for **sizing** (deliberately different) |
 | `Vol_Max` | 0.12 | vol ceiling; above this, stay flat |
+| `Use_ADX_Filter` | true | require a trending market to **enter** |
+| `ADX_Period` | 14 | ADX period |
+| `ADX_Min` | 25.0 | minimum ADX to open a position (never forces an exit) |
 | `Vol_Target` | 0.10 | annualised vol target for position sizing |
 | `Leverage_Cap` | 3.0 | maximum position scale |
 | `Periods_Per_Year` | 0 | 0 = auto from timeframe (D1 → 252) |
@@ -78,7 +109,8 @@ python3 mt4/verify_parity.py
 ```
 
 Result: **100.00% signal agreement**, worst position-size difference `1.8e-13`
-(floating-point noise). The indicator reproduces the backtest exactly.
+(floating-point noise). The indicator reproduces the backtest exactly — including
+the ADX entry gate and its carried-forward position state.
 
 ## Honest caveats
 

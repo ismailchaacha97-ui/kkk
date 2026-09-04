@@ -5,9 +5,18 @@
 //|                    sizing = 10% annualised vol target)            |
 //|                                                                   |
 //|   RULE                                                            |
-//|     Be long only when BOTH are true at the close of the bar:      |
+//|     Be long only when ALL are true at the close of the bar:       |
 //|       1. Close > SMA(200)                     ... trend filter    |
 //|       2. AnnVol(120) < 12%                    ... calm filter     |
+//|       3. ADX(14) > 25  *at entry only*        ... range filter    |
+//|                                                                   |
+//|   The ADX condition is checked ONLY when opening a new position.  |
+//|     Once long, the trade is managed by rules 1-2 alone. Applying  |
+//|     ADX on every bar forces an exit each time it dips and wrecks  |
+//|     the strategy (Sharpe 0.86 -> 0.47, turnover 23x -> 39x).      |
+//|     Entry-gating instead cuts <=5-bar round trips from 49% to 33% |
+//|     and improves every metric. Set Use_ADX_Filter=false for the   |
+//|     original unfiltered rule.                                     |
 //|     Position size = 10% / AnnVol(120), capped at 3.0x.            |
 //|     The signal is acted on at the NEXT bar's open (1-bar lag),    |
 //|     exactly as in the Python backtest -- no repainting.           |
@@ -40,6 +49,9 @@ input int    MA_Period        = 200;    // trend MA period (strategy: 200)
 input int    Vol_Window       = 120;    // vol lookback for the FILTER (strategy: 120)
 input int    Size_Vol_Window   = 60;     // vol lookback for SIZING  (strategy: 60)
 input double Vol_Max          = 0.12;   // max annualised vol to allow a position
+input bool   Use_ADX_Filter   = true;   // require a trending market to ENTER
+input int    ADX_Period       = 14;     // ADX period (standard: 14)
+input double ADX_Min          = 25.0;   // min ADX at entry (25 = trending)
 input double Vol_Target       = 0.10;   // annualised vol target for sizing
 input double Leverage_Cap     = 3.0;    // max position scale
 input int    Periods_Per_Year = 0;      // 0 = auto from chart timeframe
@@ -95,7 +107,8 @@ int OnInit()
 
    IndicatorShortName("TrendVolFilter #1  MA" + IntegerToString(MA_Period) +
                       " Vol" + IntegerToString(Vol_Window) +
-                      " max" + DoubleToString(Vol_Max * 100, 0) + "%");
+                      " max" + DoubleToString(Vol_Max * 100, 0) + "%" +
+                      (Use_ADX_Filter ? "  ADX>" + DoubleToString(ADX_Min, 0) : ""));
    IndicatorDigits(Digits);
 
    g_annFactor = AnnualisationFactor();
@@ -179,7 +192,7 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
   {
-   int minBars = MathMax(MA_Period, MathMax(Vol_Window, Size_Vol_Window)) + 3;
+   int minBars = MathMax(MA_Period, MathMax(Vol_Window, Size_Vol_Window)) + ADX_Period + 3;
    if(rates_total < minBars)
       return(0);
 
@@ -214,7 +227,24 @@ int OnCalculate(const int rates_total,
 
       bool trendOK = (Close[s] > ma_s);          // rule 1: above the 200 SMA
       bool calmOK  = (vol_s < Vol_Max);          // rule 2: vol below the ceiling
-      bool inPos   = (trendOK && calmOK);
+      bool baseOK  = (trendOK && calmOK);
+
+      // rule 3: ADX gate, checked ONLY on a fresh entry. If we are already
+      // long, the base rule alone decides -- ADX never forces an exit.
+      bool wasIn = (i + 1 < rates_total) ? (BufState[i + 1] > 0.5) : false;
+      bool inPos = false;
+      if(baseOK)
+        {
+         if(wasIn)
+            inPos = true;                        // already long: just hold
+         else if(!Use_ADX_Filter)
+            inPos = true;                        // filter off: open freely
+         else
+           {
+            double adxv = iADX(NULL, 0, ADX_Period, PRICE_CLOSE, MODE_MAIN, s);
+            inPos = (adxv > ADX_Min);            // only open in a trending market
+           }
+        }
 
       // Sizing uses a SEPARATE 60-bar vol window, measured on the bar before
       // the signal bar -- exactly what the Python overlay does
@@ -266,7 +296,8 @@ void UpdatePanel()
 
    bool trendOK = (Close[s] > ma);
    bool calmOK  = (vol < Vol_Max);
-   bool inPos   = (trendOK && calmOK);
+   bool inPos   = (BufState[1] > 0.5);
+   double adxv  = iADX(NULL, 0, ADX_Period, PRICE_CLOSE, MODE_MAIN, s);
    double volz  = AnnualisedVol(s + 1, Size_Vol_Window);
    double scale = 0.0;
    if(inPos && volz > 0.0)
@@ -282,6 +313,10 @@ void UpdatePanel()
    txt += StringFormat("Vol     Ann%d          : %.2f%%  (max %.2f%%)  %s\n",
                        Vol_Window, vol * 100.0, Vol_Max * 100.0,
                        (calmOK ? "OK" : "no"));
+   if(Use_ADX_Filter)
+      txt += StringFormat("Range   ADX%d           : %.1f  (min %.1f at entry)  %s\n",
+                          ADX_Period, adxv, ADX_Min,
+                          (adxv > ADX_Min ? "OK" : (inPos ? "held" : "no")));
    txt += "-------------------------------------------\n";
    txt += StringFormat("SIGNAL                 : %s\n", (inPos ? "LONG" : "FLAT"));
    txt += StringFormat("Sizing vol Ann%d       : %.2f%%\n",
@@ -297,7 +332,8 @@ void UpdatePanel()
      }
 
    txt += "-------------------------------------------\n";
-   txt += "Signal from the last CLOSED bar (1-bar lag).";
+   txt += "Signal from the last CLOSED bar (1-bar lag).\n";
+   txt += "ADX gates ENTRIES only, never exits.";
 
    Comment(txt);
 
