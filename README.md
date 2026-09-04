@@ -7,6 +7,10 @@ strict in-sample / out-of-sample protocol with multiple-testing correction.
 **→ See [REPORT.md](REPORT.md) for the results and the top 10 table.**
 ![top 10](results/top10.png)
 
+## MT4 indicator
+The #1 strategy is ported to MQL4 in [`mt4/TrendVolFilter.mq4`](mt4/) — signal-parity
+verified against the Python backtest (100% agreement). See [mt4/README.md](mt4/README.md).
+
 ## Layout
 | file | purpose |
 |---|---|
