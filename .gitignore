@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 data/*.parquet
 results/curves.parquet
+mt4/__pycache__/
