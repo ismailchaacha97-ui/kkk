@@ -105,3 +105,86 @@ to neutral: +0.521R vs +0.532R. Kept as an option for pullback-style trading.
 * The dashboard shows each gate as `ok` / `NO`, so when no signal fires you can see
   exactly which filter blocked it.
 * Not financial advice.
+
+---
+
+## v1.20 — mean-reversion engine (ADX < 25)
+
+v1.10 *avoided* chop. v1.20 trades it. When the trend engine is blocked because
+ADX is low, a second engine fades the stretch:
+
+| | |
+|---|---|
+| Trigger | ADX < `InpMRADXMax` (25) **and** the trend votes failed |
+| Setup | price ≥ `InpMRExtATR` (1.5) ATR away from the mean |
+| Confirm | RSI ≤ 35 (fade long) / ≥ 65 (fade short) **and** close turns |
+| Stop | `InpMRStopATR` (1.0) × ATR |
+| Target | **the mean itself** — not a fixed R multiple |
+| Filter | reward:risk to the mean must be ≥ `InpMRMinRR` (1.0) |
+
+The trend and fade engines are mutually exclusive by construction: the fade can
+only fire where the trend leg already produced nothing, so it never cannibalises
+a trend entry. Volume, HTF and anti-chase gates are **skipped** for fades — a
+volume spike in a range usually means breakout, so requiring it would fight the
+fade. Spread, session, ATR-floor and cooldown still apply.
+
+### Evidence
+
+MR trades only, synthetic chop, realistic daily FX volatility, 1.5 pip round trip:
+
+| | trades | win | net R |
+|---|---|---|---|
+| In-sample (8 seeds) | 65 | 52.3% | **+0.517R** |
+| Out-of-sample (12 unseen seeds) | 76 | 60.5% | **+0.662R** |
+
+It generalises. But be honest about where it does *not* work:
+
+* In **strong trends** the same MR logic loses (−0.57R, n=48). Low ADX there
+  means *reversal*, not consolidation — and fading a reversal is the classic
+  mean-reversion blowup.
+* Caveat on that caveat: the synthetic trend series flip direction every 250
+  bars, so their low-ADX periods are almost all reversals. Real trends pull back
+  without reversing, which is friendlier to fading. **This is the single biggest
+  thing real data has to settle.**
+* Two filters I tried and rejected: requiring ADX to stay low for N bars
+  (never binds), and range containment ≤ N ATR (only throttles trade count;
+  +0.517R at 65 trades degraded to +0.220R at 13).
+
+If you trade strongly trending instruments, set `InpUseMR = false`.
+
+## Validation harness — `tools/validate.py`
+
+Everything needed to answer "edge or curve-fit":
+
+```bash
+python3 tools/validate.py                       # synthetic regimes (sanity check)
+python3 tools/validate.py data/*.csv            # REAL data
+python3 tools/validate.py data/*.csv --sims 5000 --cost 1.5 --folds 4
+```
+
+It computes the indicator logic in Python, then reports for every dataset:
+
+* trade count, win rate, gross R and **net R after costs**
+* **random-entry benchmark** — thousands of random entries with *identical*
+  SL/TP/exit rules, giving a null distribution and a percentile
+* **regime-matched random** — random entries restricted to the bars the strategy
+  was eligible for. This is the hard test: if the percentile here isn't high,
+  the signal adds nothing beyond simply trading in the right regime.
+* walk-forward folds and chronological out-of-sample splits
+
+### Getting real data in
+
+MT4: **File → Open Data Folder**, or use an export script, then save CSV as
+`data/SYMBOL.csv` with columns `Date,Open,High,Low,Close,Volume`. Daily or
+hourly both work; ≥1000 bars recommended. Drop the files in and re-run.
+
+### Status of validation
+
+* ✅ Parameter choices (ADX 25, adaptive extension baseline) — tuned on
+  synthetic, and the direction of the effect held across 20 seeds.
+* ✅ Mean-reversion engine — in-sample + out-of-sample on unseen seeds.
+* ⏳ **Not yet validated on real market data.** The sandbox this was built in
+  has no direct internet egress, so bulk history couldn't be downloaded.
+  The harness is ready — it needs a CSV.
+
+Until that run exists, treat every number here as a hypothesis, not a result.

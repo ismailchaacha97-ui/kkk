@@ -107,6 +107,16 @@ input bool             InpMomReset         = false;      // Require a fresh mome
 input int              InpMomResetBars     = 12;         // ... within this many bars
 input double           InpMomResetBuffer   = 10.0;       // ... pullback depth (RSI pts)
 
+//--- 3b. MEAN REVERSION (only where the trend leg is blocked: ADX < threshold)
+input bool             InpUseMR            = true;       // Fade extremes when ADX is low
+input double           InpMRADXMax         = 25.0;       // MR only fires when ADX below this
+input double           InpMRExtATR         = 1.50;       // Min stretch from the mean (ATR)
+input double           InpMRStopATR        = 1.00;       // MR stop distance (ATR)
+input int              InpMRRsiOS          = 35;         // RSI oversold -> fade long
+input int              InpMRRsiOB          = 65;         // RSI overbought -> fade short
+input double           InpMRMinRR          = 1.00;       // Min reward:risk to the mean
+input ENUM_MR_BASE     InpMRBase           = MR_FASTEMA; // Mean to revert to
+
 //--- 4. GATES
 input bool             InpUseADXGate       = true;       // Use ADX regime gate
 input int              InpADXPeriod        = 14;         // ADX period
@@ -184,6 +194,10 @@ double   g_sigPrice      = 0.0;
 double   g_sigStop       = 0.0;
 double   g_sigTarget     = 0.0;
 datetime g_sigTime       = 0;
+bool     g_sigMR         = false; // last signal was a mean-reversion fade
+bool     g_isMR          = false; // current bar is a fade (not a trend entry)
+double   g_mrStretch     = 0.0;   // stretch from the mean, in ATR
+double   g_mrRR          = 0.0;   // reward:risk to the mean
 
 //--- bar-0 snapshot for the dashboard
 double   g_dFair=0.0, g_dATR=0.0, g_dRSI=0.0, g_dHist=0.0, g_dRVOL=0.0, g_dADX=0.0;
@@ -345,12 +359,12 @@ int OnCalculate(const int rates_total,
 
       //---------------- Momentum ------------------------------------
       double rsi=0.0, rsiPrev=0.0, hist=0.0, histPrev=0.0;
-      if(InpMomentumMode == MOM_RSI)
+      if(InpMomentumMode == MOM_RSI || InpUseMR)   // MR needs RSI even in MACD mode
         {
          rsi     = iRSI(NULL,0,InpRSIPeriod,PRICE_CLOSE,i);
          rsiPrev = iRSI(NULL,0,InpRSIPeriod,PRICE_CLOSE,i+1);
         }
-      else
+      if(InpMomentumMode == MOM_MACD)
         {
          hist     = MacdHist(i);
          histPrev = MacdHist(i+1);
@@ -439,13 +453,47 @@ int OnCalculate(const int rates_total,
       if(fairVal <= 0.0)
          fairVal = vwap;
 
-      bool gADX=true, gVol=true, gExt=true, gSpr=true, gSes=true, gHTF=true, gATR=true, gCool=true;
-      double adx = 0.0;
+      double adx = iADX(NULL,0,InpADXPeriod,PRICE_CLOSE,MODE_MAIN,i);
 
-      //--- regime: ADX (+ optional DI agreement)
-      if(InpUseADXGate)
+      //=========== MEAN REVERSION (only when the trend leg is off) ==
+      //  Fade a stretch away from the mean, targeting the mean itself.
+      //  Only ever reached when the trend votes failed, so it cannot
+      //  cannibalise a trend entry.
+      bool   isMR     = false;
+      double mrStop   = 0.0;
+      double mrTarget = 0.0;
+      double mrMean   = fairVal;
+      g_mrStretch = 0.0;
+      g_mrRR      = 0.0;
+      if(InpUseMR && dirNow == 0 && adx > 0.0 && adx < InpMRADXMax && atr > 0.0)
         {
-         adx = iADX(NULL,0,InpADXPeriod,PRICE_CLOSE,MODE_MAIN,i);
+         mrMean = (InpMRBase == MR_FASTEMA) ? emaFast : fairVal;
+         double stretch = (close[i] - mrMean) / atr;
+         if(stretch <= -InpMRExtATR && rsi <= InpMRRsiOS && close[i] > close[i+1])
+           { dirNow = 1;  isMR = true; }
+         else
+         if(stretch >= InpMRExtATR && rsi >= InpMRRsiOB && close[i] < close[i+1])
+           { dirNow = -1; isMR = true; }
+
+         if(isMR)
+           {
+            mrStop   = atr * InpMRStopATR;
+            mrTarget = mrMean;
+            double reward = MathAbs(mrTarget - close[i]);
+            if(mrStop <= 0.0 || reward / mrStop < InpMRMinRR)
+              { dirNow = 0; isMR = false; }      // not enough room to the mean
+            else
+              { g_mrStretch = MathAbs(stretch); g_mrRR = reward / mrStop; }
+           }
+        }
+      g_isMR = isMR;
+
+      bool gADX=true, gVol=true, gExt=true, gSpr=true, gSes=true, gHTF=true, gATR=true, gCool=true;
+
+      //--- regime: ADX (+ optional DI agreement). Skipped for fades, which
+      //    are defined by low ADX in the first place.
+      if(!isMR && InpUseADXGate)
+        {
          if(adx < InpADXMin)
             gADX = false;
          if(InpUseDIAgree)
@@ -456,18 +504,17 @@ int OnCalculate(const int rates_total,
             if(dirNow == -1 && !(mdi > pdi)) gADX = false;
            }
         }
-      else
-         adx = iADX(NULL,0,InpADXPeriod,PRICE_CLOSE,MODE_MAIN,i);
 
-      //--- participation
-      if(InpUseVolGate && !volOK)
+      //--- participation (not required for fades: a volume spike in a range
+      //    usually means breakout, so requiring it would fight the fade)
+      if(!isMR && InpUseVolGate && !volOK)
          gVol = false;
 
       //--- anti-chase: distance from the regime-appropriate baseline.
       //    In a range, "extended" means far from fair value (fade risk).
       //    In a trend, it means far from the fast EMA (chase risk) - using
       //    VWAP here kills trends, because VWAP resets every session.
-      if(InpUseExtGate && atr > 0.0)
+      if(!isMR && InpUseExtGate && atr > 0.0)
         {
          double base = fairVal;
          double thr  = InpMaxExtATR;
@@ -496,7 +543,7 @@ int OnCalculate(const int rates_total,
         }
 
       //--- higher timeframe alignment
-      if(InpUseHTFGate && (int)InpHTF > 0 && (int)InpHTF != Period())
+      if(!isMR && InpUseHTFGate && (int)InpHTF > 0 && (int)InpHTF != Period())
         {
          int hb = iBarShift(NULL,(int)InpHTF,time[i],false);
          if(InpHTFUseClosed)
@@ -532,8 +579,8 @@ int OnCalculate(const int rates_total,
       EMASlowBuf[i] = (InpShowTrendEMAs ? emaSlow : 0.0);
 
       //---------------- RISK: chandelier trail + breakeven ----------
-      double stopDist = atr * InpATRStopMult;
-      if(dirFinal == 1)
+      double stopDist = isMR ? mrStop : atr * InpATRStopMult;
+      if(!isMR && dirFinal == 1)
         {
          double hh = HighestHigh(i,InpTrailLookback);
          double s  = hh - stopDist;
@@ -561,10 +608,10 @@ int OnCalculate(const int rates_total,
          g_trailDir = -1;
         }
 
-      if(InpShowATRTrail && g_trailDir == 1)
+      if(InpShowATRTrail && !isMR && g_trailDir == 1)
         { TrailUpBuf[i] = g_trailVal; TrailDnBuf[i] = 0.0; }
       else
-      if(InpShowATRTrail && g_trailDir == -1)
+      if(InpShowATRTrail && !isMR && g_trailDir == -1)
         { TrailDnBuf[i] = g_trailVal; TrailUpBuf[i] = 0.0; }
       else
         { TrailUpBuf[i] = 0.0; TrailDnBuf[i] = 0.0; }
@@ -580,8 +627,10 @@ int OnCalculate(const int rates_total,
          g_sigType   = dirFinal;
          g_sigPrice  = close[i];
          g_sigStop   = (dirFinal == 1) ? close[i] - stopDist : close[i] + stopDist;
-         g_sigTarget = (dirFinal == 1) ? close[i] + stopDist * InpRiskReward
-                                       : close[i] - stopDist * InpRiskReward;
+         g_sigTarget = isMR ? mrTarget
+                            : ((dirFinal == 1) ? close[i] + stopDist * InpRiskReward
+                                               : close[i] - stopDist * InpRiskReward);
+         g_sigMR     = isMR;
          g_sigTime   = time[i];
          g_lastSigIdx= i;
          g_beDone    = false;
@@ -591,6 +640,7 @@ int OnCalculate(const int rates_total,
             g_lastAlertTime = time[i];
             string msg = "JobPick "+Symbol()+" "+TFToString()+" : "
                          +((dirFinal==1) ? "BUY" : "SELL")
+                         +((isMR) ? " (FADE)" : "")
                          +" @ "+DoubleToString(close[i],_Digits)
                          +" | SL "+DoubleToString(g_sigStop,_Digits)
                          +" | TP "+DoubleToString(g_sigTarget,_Digits)
@@ -806,7 +856,7 @@ void DrawPanel()
    int x      = 14;
    int y      = 22;
    int w      = fs * 30;
-   int h      = 11 * lh + 10;
+   int h      = 12 * lh + 10;
 
    string bg = PREFIX+"BG";
    if(ObjectFind(0,bg) < 0)
@@ -879,6 +929,22 @@ void DrawPanel()
                +"  HTF "+Flag(g_gHTF);
    SetRow(PREFIX+"r10",10,g3,(g_gSpr && g_gSes && g_gHTF) ? C'0,230,120' : C'255,90,90',
           corner,x,y,fs,lh);
+
+//--- row 11: which engine is armed right now
+   string modeTxt;
+   color  modeClr;
+   if(g_dADX >= InpADXMin)
+     {
+      modeTxt = " MODE      TREND   ADX "+DoubleToString(g_dADX,1);
+      modeClr = C'120,190,255';
+     }
+   else
+     {
+      modeTxt = " MODE      FADE    str "+DoubleToString(g_mrStretch,2)
+                +"  R:R "+DoubleToString(g_mrRR,2);
+      modeClr = C'230,180,60';
+     }
+   SetRow(PREFIX+"r11",11,modeTxt,modeClr,corner,x,y,fs,lh);
   }
 
 string Flag(bool ok)
