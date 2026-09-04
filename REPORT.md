@@ -16,11 +16,12 @@
 | 2 | `trend_vol_filter` | ma=150, volw=120, volmax=0.15, mode=lo, sizing=vt20 | 0.68 | 1.06 | 0.81 | 5.4% | 6.7% | -12.3% | 0.44 | 26.3x |
 | 3 | `ma_cross` | fast=60, slow=250, kind=sma, mode=lo, sizing=vt10 | 0.68 | 0.84 | 0.73 | 6.0% | 8.4% | -13.6% | 0.44 | 5.2x |
 | 4 | `ma_cross` | fast=10, slow=150, kind=sma, mode=lo, sizing=vt20 | 0.65 | 0.84 | 0.71 | 6.3% | 9.3% | -20.1% | 0.32 | 11.3x |
-| 5 | `ma_cross` | fast=20, slow=175, kind=ema, mode=lo, sizing=raw | 0.58 | 0.85 | 0.64 | 7.5% | 12.4% | -29.3% | 0.25 | 8.2x |
-| 6 | `trend_vol_filter` | ma=200, volw=60, volmax=0.12, mode=lo, sizing=vt20 | 0.55 | 0.82 | 0.65 | 3.4% | 5.5% | -11.3% | 0.30 | 28.2x |
-| 7 | `breakout_atr` | n=15, mult=5.0, mode=lo, sizing=vt10 | 0.54 | 0.66 | 0.57 | 4.9% | 9.1% | -27.4% | 0.18 | 11.0x |
-| 8 | `donchian` | entry=40, exit_n=30, mode=lo, sizing=vt20 | 0.53 | 0.64 | 0.56 | 5.2% | 10.1% | -25.0% | 0.21 | 16.7x |
-| 9 | `donchian` | entry=150, exit_n=40, mode=lo, sizing=vt10 | 0.53 | 0.59 | 0.54 | 4.9% | 9.6% | -22.4% | 0.22 | 11.2x |
+| 5 | `ma_cross` | fast=25, slow=250, kind=sma, mode=lo, sizing=vt20 | 0.70 | 0.75 | 0.72 | 6.3% | 9.1% | -14.3% | 0.44 | 6.6x |
+| 6 | `trend_vol_filter` | ma=150, volw=60, volmax=0.15, mode=lo, sizing=raw | 0.66 | 0.76 | 0.69 | 5.1% | 7.6% | -17.5% | 0.29 | 28.4x |
+| 7 | `ts_momentum` | lookback=220, gap=3, mode=lo, sizing=vt10 | 0.61 | 0.74 | 0.65 | 5.1% | 8.1% | -12.2% | 0.42 | 18.0x |
+| 8 | `ts_momentum` | lookback=250, gap=3, mode=lo, sizing=vt10 | 0.63 | 0.71 | 0.65 | 5.1% | 8.1% | -11.6% | 0.44 | 14.8x |
+| 9 | `ts_momentum` | lookback=220, gap=3, mode=lo, sizing=vt20 | 0.59 | 0.73 | 0.64 | 5.4% | 8.9% | -15.1% | 0.36 | 18.5x |
+| 10 | `donchian` | entry=80, exit_n=50, mode=lo, sizing=vt20 | 0.60 | 0.64 | 0.60 | 5.6% | 9.9% | -22.7% | 0.25 | 10.7x |
 
 ## How they were chosen
 
