@@ -74,9 +74,9 @@ def main(limit=None):
     os.makedirs(RESULTS, exist_ok=True)
     df.to_csv(os.path.join(RESULTS, "all_results.csv"), index=False)
     # keep only the best curves -- the full 9,600-column matrix is ~100MB
-    top = df.sort_values("oos_sharpe", ascending=False)["id"].head(4000)
+    top = df.sort_values("oos_sharpe", ascending=False)["id"].head(300)
     pd.DataFrame({int(i): curves[i] for i in top if i in curves}).to_parquet(
-        os.path.join(RESULTS, "top_curves.parquet"))
+        os.path.join(RESULTS, "top_curves.parquet"), compression="zstd")
     print(f"done: {len(df)} strategies in {time.time()-t0:.0f}s")
     return df
 
