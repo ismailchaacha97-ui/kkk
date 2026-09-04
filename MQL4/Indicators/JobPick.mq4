@@ -1,21 +1,28 @@
 //+------------------------------------------------------------------+
 //|                                                      JobPick.mq4 |
-//|   One indicator, five jobs:                                       |
-//|     Bias / fair value ..... VWAP (intraday) or 200 EMA (swing)    |
-//|     Trend structure ....... 20 / 50 EMA                           |
-//|     Momentum / trigger .... RSI(14) or MACD histogram             |
-//|     Participation ......... Volume / RVOL                         |
-//|     Risk .................. ATR (stop, target, trailing stop)     |
+//|  v1.10                                                            |
 //|                                                                  |
-//|   Main-chart overlay + on-chart dashboard.                        |
-//|   NOTE: MQL4 can only draw in ONE window per indicator, so the    |
-//|   oscillator is reported numerically in the dashboard instead of  |
-//|   a sub-window. (Ask for JobPick_Osc.mq4 if you want it plotted.) |
+//|  VOTES (directional evidence, 3):                                 |
+//|    Bias .......... VWAP (intraday) or 200 EMA (swing)             |
+//|    Trend ......... 20 / 50 EMA                                    |
+//|    Momentum ...... RSI(14) or MACD histogram, fresh turn only     |
+//|                                                                  |
+//|  GATES (pass/fail filters, 7):                                    |
+//|    Regime ........ ADX >= min (+/-DI agreement)                   |
+//|    Participation . RVOL >= threshold                              |
+//|    Extension ..... price not stretched from fair value            |
+//|    Spread ........ spread <= max pips                             |
+//|    Session ....... broker-hour window                             |
+//|    HTF ........... higher timeframe alignment                     |
+//|    ATR floor ..... market not dead                                |
+//|    Cooldown ...... min bars between signals                       |
+//|                                                                  |
+//|  RISK: ATR stop/target, ratcheting chandelier trail, breakeven    |
 //+------------------------------------------------------------------+
 #property copyright "JobPick"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
-#property description "Bias + Trend + Momentum + Participation + Risk in one overlay"
+#property description "Votes (bias/trend/momentum) + Gates (regime/volume/cost/HTF) + ATR risk"
 #property indicator_chart_window
 
 #property indicator_buffers 8
@@ -23,8 +30,8 @@
 #property indicator_color2  DeepSkyBlue     // bias EMA (200)
 #property indicator_color3  Lime            // fast EMA (20)
 #property indicator_color4  Gold            // slow EMA (50)
-#property indicator_color5  MediumSeaGreen  // ATR trailing stop (longs)
-#property indicator_color6  OrangeRed       // ATR trailing stop (shorts)
+#property indicator_color5  MediumSeaGreen  // ATR chandelier trail (longs)
+#property indicator_color6  OrangeRed       // ATR chandelier trail (shorts)
 #property indicator_color7  Lime            // buy arrow
 #property indicator_color8  Red             // sell arrow
 
@@ -61,10 +68,20 @@ enum ENUM_VOL_SOURCE
    VOL_REAL = 1     // Real volume (exchange instruments)
   };
 
+enum ENUM_HTF
+  {
+   HTF_OFF = 0,
+   HTF_M15 = 15,
+   HTF_M30 = 30,
+   HTF_H1  = 16385,
+   HTF_H4  = 16388,
+   HTF_D1  = 16408
+  };
+
 //+------------------------------------------------------------------+
 //| Inputs                                                            |
 //+------------------------------------------------------------------+
-//--- 1. Bias / fair value
+//--- 1. Bias / fair value (VOTE)
 input ENUM_BIAS_MODE   InpBiasMode         = BIAS_VWAP;  // Bias source
 input bool             InpShowVWAP         = true;       // Draw VWAP
 input ENUM_VWAP_ANCHOR InpVWAPAnchor       = VWAP_DAY;   // VWAP anchor
@@ -72,12 +89,12 @@ input int              InpSessionStartHour = 0;          // Start hour (VWAP_HOU
 input bool             InpShowEMABias      = true;       // Draw 200 EMA
 input int              InpEMABiasPeriod    = 200;        // Bias EMA period
 
-//--- 2. Trend structure
+//--- 2. Trend structure (VOTE)
 input bool             InpShowTrendEMAs    = true;       // Draw 20/50 EMA
 input int              InpEMAFast          = 20;         // Fast EMA
 input int              InpEMASlow          = 50;         // Slow EMA
 
-//--- 3. Momentum / trigger
+//--- 3. Momentum (VOTE)
 input ENUM_MOM_MODE    InpMomentumMode     = MOM_RSI;    // Momentum engine
 input int              InpRSIPeriod        = 14;         // RSI period
 input int              InpRSIMid           = 50;         // RSI bull/bear line
@@ -86,21 +103,47 @@ input int              InpRSIOverbought    = 65;         // RSI overbought (fade
 input int              InpMACDFast         = 12;         // MACD fast
 input int              InpMACDSlow         = 26;         // MACD slow
 input int              InpMACDSignal       = 9;          // MACD signal
+input bool             InpMomReset         = false;      // Require a fresh momentum turn
+input int              InpMomResetBars     = 12;         // ... within this many bars
+input double           InpMomResetBuffer   = 10.0;       // ... pullback depth (RSI pts)
 
-//--- 4. Participation
+//--- 4. GATES
+input bool             InpUseADXGate       = true;       // Use ADX regime gate
+input int              InpADXPeriod        = 14;         // ADX period
+input double           InpADXMin           = 25.0;       // Min ADX (below = chop, no trade)
+input bool             InpUseDIAgree       = true;       // Require +DI/-DI agreement
+input bool             InpUseVolGate       = true;       // Use RVOL participation gate
 input ENUM_VOL_SOURCE  InpVolumeSource     = VOL_TICK;   // Volume source
 input int              InpRVOLPeriod       = 20;         // RVOL average period
-input double           InpRVOLThreshold    = 1.20;       // RVOL "strong" threshold
+input double           InpRVOLThreshold    = 1.20;       // Min RVOL
+input bool             InpUseExtGate       = true;       // Use anti-chase gate
+input bool             InpExtAdaptive      = true;       // Adaptive extension baseline
+input double           InpMaxExtATR        = 2.00;       // Max dist from fair value (ATR)
+input double           InpMaxExtEMATrend   = 2.50;       // Max dist from fast EMA (ATR)
+input bool             InpUseSpreadGate    = true;       // Use spread gate
+input double           InpMaxSpreadPips    = 2.0;        // Max spread (pips)
+input bool             InpUseSessionGate   = false;      // Use session window gate
+input int              InpSessionFrom      = 8;          // Session start hour (broker)
+input int              InpSessionTo        = 18;         // Session end hour (broker)
+input bool             InpUseHTFGate       = false;      // Use higher-timeframe gate
+input ENUM_HTF         InpHTF              = HTF_H1;     // Higher timeframe
+input int              InpHTFPeriod        = 50;         // HTF EMA period
+input bool             InpHTFUseClosed     = true;       // Use last closed HTF bar
+input bool             InpUseATRFloor      = false;      // Use minimum-volatility gate
+input double           InpMinATRPips       = 5.0;        // Min ATR (pips)
+input int              InpCooldownBars     = 5;          // Min bars between signals
 
 //--- 5. Risk (ATR)
 input int              InpATRPeriod        = 14;         // ATR period
 input double           InpATRStopMult      = 1.50;       // Stop = ATR x this
 input double           InpRiskReward       = 2.00;       // Target = stop x this
-input bool             InpShowATRTrail     = true;       // Draw ATR trailing stop
+input bool             InpShowATRTrail     = true;       // Draw ATR chandelier trail
+input int              InpTrailLookback    = 10;         // Chandelier lookback bars
+input bool             InpUseBreakeven     = true;       // Move stop to entry at 1R
 input bool             InpShowLevels       = true;       // Draw last SL / TP lines
 
 //--- 6. Signals & alerts
-input int              InpMinScore         = 4;          // Min confluence (1-4) to fire
+input int              InpMinVotes         = 3;          // Min directional votes (1-3)
 input bool             InpShowArrows       = true;       // Draw signal arrows
 input bool             InpAlertOnSignal    = true;       // Pop-up alert
 input bool             InpPushOnSignal     = false;      // Push notification
@@ -126,11 +169,14 @@ double BuyArrowBuf[];
 double SellArrowBuf[];
 
 //+------------------------------------------------------------------+
-//| Globals (state carried between calls)                             |
+//| Globals                                                           |
 //+------------------------------------------------------------------+
-int      g_sigDir        = 0;     // last bar's alignment direction (-1/0/1)
-int      g_trailDir      = 0;     // trailing-stop direction
-double   g_trailVal      = 0.0;   // trailing-stop level
+int      g_ratesTotal    = 0;
+int      g_sigDir        = 0;     // last bar's final direction (-1/0/1)
+int      g_trailDir      = 0;     // chandelier direction
+double   g_trailVal      = 0.0;   // chandelier level
+bool     g_beDone        = false; // breakeven already triggered
+int      g_lastSigIdx    = 0;     // bar index of last signal (cooldown)
 datetime g_lastAlertTime = 0;
 
 int      g_sigType       = 0;     // last signal: +1 buy / -1 sell
@@ -140,16 +186,18 @@ double   g_sigTarget     = 0.0;
 datetime g_sigTime       = 0;
 
 //--- bar-0 snapshot for the dashboard
-double   g_dFair=0.0, g_dATR=0.0, g_dRSI=0.0, g_dHist=0.0, g_dRVOL=0.0;
-int      g_bullScore=0, g_bearScore=0, g_dirNow=0;
-bool     g_bBiasBull=false, g_bTrendBull=false, g_bMomBull=false, g_bVolOK=false;
+double   g_dFair=0.0, g_dATR=0.0, g_dRSI=0.0, g_dHist=0.0, g_dRVOL=0.0, g_dADX=0.0;
+int      g_bullVotes=0, g_bearVotes=0, g_dirNow=0;
+bool     g_bBiasBull=false, g_bTrendBull=false, g_bMomBull=false;
+bool     g_gADX=true, g_gVol=true, g_gExt=true, g_gSpr=true, g_gSes=true, g_gHTF=true, g_gATR=true;
+bool     g_gCool=true;
+string   g_blockers="";
 
 //+------------------------------------------------------------------+
 //| OnInit                                                            |
 //+------------------------------------------------------------------+
 int OnInit()
   {
-//--- buffers
    SetIndexBuffer(0,VWAPBuf);      SetIndexLabel(0,"VWAP");
    SetIndexBuffer(1,EMABiasBuf);   SetIndexLabel(1,"EMA Bias");
    SetIndexBuffer(2,EMAFastBuf);   SetIndexLabel(2,"EMA Fast");
@@ -159,7 +207,6 @@ int OnInit()
    SetIndexBuffer(6,BuyArrowBuf);  SetIndexLabel(6,"Buy");
    SetIndexBuffer(7,SellArrowBuf); SetIndexLabel(7,"Sell");
 
-//--- styles
    SetIndexStyle(0,DRAW_LINE,STYLE_SOLID,2);
    SetIndexStyle(1,DRAW_LINE,STYLE_SOLID,2);
    SetIndexStyle(2,DRAW_LINE,STYLE_SOLID,1);
@@ -171,7 +218,6 @@ int OnInit()
    SetIndexArrow(6,ARROW_UP);
    SetIndexArrow(7,ARROW_DOWN);
 
-//--- empty values: 0 for lines, EMPTY_VALUE for arrows
    for(int b=0; b<6; b++)
       SetIndexEmptyValue(b,0.0);
    SetIndexEmptyValue(6,EMPTY_VALUE);
@@ -222,7 +268,6 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
   {
-//--- indexing: newest bar = 0
    ArraySetAsSeries(time,true);
    ArraySetAsSeries(open,true);
    ArraySetAsSeries(high,true);
@@ -231,7 +276,9 @@ int OnCalculate(const int rates_total,
    ArraySetAsSeries(tick_volume,true);
    ArraySetAsSeries(volume,true);
 
-   int minBars = (int)MathMax(InpEMASlow,InpEMABiasPeriod) + InpRVOLPeriod + 10;
+   g_ratesTotal = rates_total;
+
+   int minBars = (int)MathMax(InpEMASlow,InpEMABiasPeriod) + InpRVOLPeriod + InpTrailLookback + 20;
    if(rates_total < minBars)
       return(0);
 
@@ -240,7 +287,8 @@ int OnCalculate(const int rates_total,
    if(prev_calculated <= 0)
      {
       limit = (int)MathMin(rates_total-1,InpMaxBars);
-      g_sigDir=0; g_trailDir=0; g_trailVal=0.0; g_lastAlertTime=0;
+      g_sigDir=0; g_trailDir=0; g_trailVal=0.0; g_beDone=false;
+      g_lastAlertTime=0; g_lastSigIdx=1000000;
       g_sigType=0; g_sigPrice=0.0; g_sigStop=0.0; g_sigTarget=0.0; g_sigTime=0;
       ArrayInitialize(BuyArrowBuf,EMPTY_VALUE);
       ArrayInitialize(SellArrowBuf,EMPTY_VALUE);
@@ -250,6 +298,7 @@ int OnCalculate(const int rates_total,
       limit = rates_total - prev_calculated;
       if(limit < 1)
          limit = 1;
+      g_lastSigIdx += (rates_total - prev_calculated);   // indices shift by new bars
      }
    if(limit > rates_total-1)
       limit = rates_total-1;
@@ -259,12 +308,14 @@ int OnCalculate(const int rates_total,
    double cumPV   = 0.0;
    double cumVol  = 0.0;
    bool   needEMA = (InpBiasMode != BIAS_VWAP) || InpShowEMABias;
-   int    minScore= (int)MathMax(1,MathMin(4,InpMinScore));
+   int    minVotes= (int)MathMax(1,MathMin(3,InpMinVotes));
+   double pipFac  = (_Digits==3 || _Digits==5) ? 10.0 : 1.0;
+   double spreadPts = MarketInfo(Symbol(),MODE_SPREAD);
 
 //--- oldest -> newest
    for(int i=start; i>=0; i--)
      {
-      //---------------- JOB 1a: VWAP (session anchored) --------------
+      //---------------- VWAP (session anchored) ---------------------
       if(i < rates_total-1 && SessionId(time[i]) != SessionId(time[i+1]))
         {
          cumPV  = 0.0;
@@ -277,9 +328,9 @@ int OnCalculate(const int rates_total,
       double vwap = (cumVol > 0.0) ? cumPV / cumVol : typ;
 
       if(i > limit)
-         continue;                        // still accumulating, nothing to plot
+         continue;
 
-      //---------------- Moving averages ------------------------------
+      //---------------- Moving averages / ATR -----------------------
       double emaBias = 0.0;
       if(needEMA)
          emaBias = iMA(NULL,0,InpEMABiasPeriod,0,MODE_EMA,PRICE_CLOSE,i);
@@ -292,7 +343,7 @@ int OnCalculate(const int rates_total,
       if(atr <= 0.0)
          atr = high[i] - low[i];
 
-      //---------------- JOB 3: momentum ------------------------------
+      //---------------- Momentum ------------------------------------
       double rsi=0.0, rsiPrev=0.0, hist=0.0, histPrev=0.0;
       if(InpMomentumMode == MOM_RSI)
         {
@@ -301,11 +352,11 @@ int OnCalculate(const int rates_total,
         }
       else
         {
-         hist     = MacdHist(i);      // MQL4 has no MODE_HISTOGRAM: main - signal
+         hist     = MacdHist(i);
          histPrev = MacdHist(i+1);
         }
 
-      //---------------- JOB 4: participation (RVOL) ------------------
+      //---------------- RVOL ----------------------------------------
       double rvol  = 0.0;
       bool   volOK = true;
       if(i + InpRVOLPeriod + 1 < rates_total)
@@ -321,7 +372,7 @@ int OnCalculate(const int rates_total,
            }
         }
 
-      //---------------- JOB 1b: bias / fair value --------------------
+      //=========== VOTE 1: bias / fair value ========================
       bool biasBull=false, biasBear=false;
       if(InpBiasMode == BIAS_VWAP)
         {
@@ -342,11 +393,11 @@ int OnCalculate(const int rates_total,
          biasBear = (close[i] < vwap && close[i] < emaBias);
         }
 
-      //---------------- JOB 2: trend structure -----------------------
+      //=========== VOTE 2: trend structure ==========================
       bool trendBull = (emaFast > emaSlow);
       bool trendBear = (emaFast < emaSlow);
 
-      //---------------- JOB 3b: momentum trigger ---------------------
+      //=========== VOTE 3: momentum =================================
       bool momBull=false, momBear=false;
       if(InpMomentumMode == MOM_RSI)
         {
@@ -354,44 +405,159 @@ int OnCalculate(const int rates_total,
                     (rsiPrev <= InpRSIOversold && rsi > rsiPrev));
          momBear = ((rsi < InpRSIMid && rsi < rsiPrev) ||
                     (rsiPrev >= InpRSIOverbought && rsi < rsiPrev));
+         if(InpMomReset)
+           {
+            // require a real pullback first, not a trending continuation
+            momBull = momBull && (MinRSI(i,InpMomResetBars) <= InpRSIMid + InpMomResetBuffer);
+            momBear = momBear && (MaxRSI(i,InpMomResetBars) >= InpRSIMid - InpMomResetBuffer);
+           }
         }
       else
         {
          momBull = ((hist > 0.0 && hist > histPrev) || (histPrev <= 0.0 && hist > 0.0));
          momBear = ((hist < 0.0 && hist < histPrev) || (histPrev >= 0.0 && hist < 0.0));
+         if(InpMomReset)
+           {
+            momBull = momBull && (MinHist(i,InpMomResetBars) <= 0.0);
+            momBear = momBear && (MaxHist(i,InpMomResetBars) >= 0.0);
+           }
         }
 
-      //---------------- Confluence score (out of 4) ------------------
-      int bullScore = (biasBull ?1:0) + (trendBull ?1:0) + (momBull ?1:0) + (volOK ?1:0);
-      int bearScore = (biasBear ?1:0) + (trendBear ?1:0) + (momBear ?1:0) + (volOK ?1:0);
+      int bullVotes = (biasBull ?1:0) + (trendBull ?1:0) + (momBull ?1:0);
+      int bearVotes = (biasBear ?1:0) + (trendBear ?1:0) + (momBear ?1:0);
 
       int dirNow = 0;
-      int score  = 0;
-      if(bullScore >= minScore && bullScore > bearScore)
-        { dirNow = 1;  score = bullScore; }
+      int votes  = 0;
+      if(bullVotes >= minVotes && bullVotes > bearVotes)
+        { dirNow = 1;  votes = bullVotes; }
       else
-      if(bearScore >= minScore && bearScore > bullScore)
-        { dirNow = -1; score = bearScore; }
+      if(bearVotes >= minVotes && bearVotes > bullVotes)
+        { dirNow = -1; votes = bearVotes; }
 
-      //---------------- Plot buffers ---------------------------------
+      //=========== GATES ============================================
+      double fairVal = (InpBiasMode == BIAS_EMA) ? emaBias : vwap;
+      if(fairVal <= 0.0)
+         fairVal = vwap;
+
+      bool gADX=true, gVol=true, gExt=true, gSpr=true, gSes=true, gHTF=true, gATR=true, gCool=true;
+      double adx = 0.0;
+
+      //--- regime: ADX (+ optional DI agreement)
+      if(InpUseADXGate)
+        {
+         adx = iADX(NULL,0,InpADXPeriod,PRICE_CLOSE,MODE_MAIN,i);
+         if(adx < InpADXMin)
+            gADX = false;
+         if(InpUseDIAgree)
+           {
+            double pdi = iADX(NULL,0,InpADXPeriod,PRICE_CLOSE,MODE_PLUSDI,i);
+            double mdi = iADX(NULL,0,InpADXPeriod,PRICE_CLOSE,MODE_MINUSDI,i);
+            if(dirNow == 1  && !(pdi > mdi)) gADX = false;
+            if(dirNow == -1 && !(mdi > pdi)) gADX = false;
+           }
+        }
+      else
+         adx = iADX(NULL,0,InpADXPeriod,PRICE_CLOSE,MODE_MAIN,i);
+
+      //--- participation
+      if(InpUseVolGate && !volOK)
+         gVol = false;
+
+      //--- anti-chase: distance from the regime-appropriate baseline.
+      //    In a range, "extended" means far from fair value (fade risk).
+      //    In a trend, it means far from the fast EMA (chase risk) - using
+      //    VWAP here kills trends, because VWAP resets every session.
+      if(InpUseExtGate && atr > 0.0)
+        {
+         double base = fairVal;
+         double thr  = InpMaxExtATR;
+         if(InpExtAdaptive && adx >= InpADXMin)
+           {
+            base = emaFast;
+            thr  = InpMaxExtEMATrend;
+           }
+         double ext = MathAbs(close[i] - base) / atr;
+         if(ext > thr)
+            gExt = false;
+        }
+
+      //--- cost: spread
+      if(InpUseSpreadGate && spreadPts > InpMaxSpreadPips * pipFac)
+         gSpr = false;
+
+      //--- session window (broker time)
+      if(InpUseSessionGate)
+        {
+         int hr = TimeHour(time[i]);
+         if(InpSessionFrom <= InpSessionTo)
+           { if(hr < InpSessionFrom || hr > InpSessionTo) gSes = false; }
+         else
+           { if(hr < InpSessionFrom && hr > InpSessionTo) gSes = false; }
+        }
+
+      //--- higher timeframe alignment
+      if(InpUseHTFGate && (int)InpHTF > 0 && (int)InpHTF != Period())
+        {
+         int hb = iBarShift(NULL,(int)InpHTF,time[i],false);
+         if(InpHTFUseClosed)
+            hb = hb + 1;
+         if(hb >= 0)
+           {
+            double htfMA    = iMA(NULL,(int)InpHTF,InpHTFPeriod,0,MODE_EMA,PRICE_CLOSE,hb);
+            double htfClose = iClose(NULL,(int)InpHTF,hb);
+            if(htfMA > 0.0 && htfClose > 0.0)
+              {
+               if(dirNow == 1  && !(htfClose > htfMA)) gHTF = false;
+               if(dirNow == -1 && !(htfClose < htfMA)) gHTF = false;
+              }
+           }
+        }
+
+      //--- volatility floor
+      if(InpUseATRFloor && (atr/_Point) < InpMinATRPips * pipFac)
+         gATR = false;
+
+      //--- cooldown since last signal
+      if(g_lastSigIdx - i < InpCooldownBars)
+         gCool = false;
+
+      bool allGates = (gADX && gVol && gExt && gSpr && gSes && gHTF && gATR && gCool);
+
+      int dirFinal = (allGates ? dirNow : 0);
+
+      //---------------- Plot buffers --------------------------------
       VWAPBuf[i]    = (InpShowVWAP ? vwap : 0.0);
       EMABiasBuf[i] = (InpShowEMABias && emaBias > 0.0) ? emaBias : 0.0;
       EMAFastBuf[i] = (InpShowTrendEMAs ? emaFast : 0.0);
       EMASlowBuf[i] = (InpShowTrendEMAs ? emaSlow : 0.0);
 
-      //---------------- JOB 5: ATR trailing stop ---------------------
+      //---------------- RISK: chandelier trail + breakeven ----------
       double stopDist = atr * InpATRStopMult;
-      if(dirNow == 1)
+      if(dirFinal == 1)
         {
-         double s = close[i] - stopDist;
-         g_trailVal = (g_trailDir != 1) ? s : MathMax(g_trailVal,s);
+         double hh = HighestHigh(i,InpTrailLookback);
+         double s  = hh - stopDist;
+         if(g_trailDir != 1)
+           { g_trailVal = close[i] - stopDist; g_beDone = false; }
+         if(InpUseBreakeven && !g_beDone && high[i] >= g_sigPrice + stopDist && g_sigPrice > 0.0)
+            g_beDone = true;
+         if(g_beDone)
+            s = MathMax(s,g_sigPrice);
+         g_trailVal = MathMax(g_trailVal,s);
          g_trailDir = 1;
         }
       else
-      if(dirNow == -1)
+      if(dirFinal == -1)
         {
-         double s = close[i] + stopDist;
-         g_trailVal = (g_trailDir != -1) ? s : MathMin(g_trailVal,s);
+         double ll = LowestLow(i,InpTrailLookback);
+         double s  = ll + stopDist;
+         if(g_trailDir != -1)
+           { g_trailVal = close[i] + stopDist; g_beDone = false; }
+         if(InpUseBreakeven && !g_beDone && low[i] <= g_sigPrice - stopDist && g_sigPrice > 0.0)
+            g_beDone = true;
+         if(g_beDone)
+            s = MathMin(s,g_sigPrice);
+         g_trailVal = MathMin(g_trailVal,s);
          g_trailDir = -1;
         }
 
@@ -403,60 +569,73 @@ int OnCalculate(const int rates_total,
       else
         { TrailUpBuf[i] = 0.0; TrailDnBuf[i] = 0.0; }
 
-      //---------------- Signals (closed bars only, no repaint) -------
-      if(InpShowArrows && i >= 1 && dirNow != 0 && dirNow != g_sigDir)
+      //---------------- Signals (closed bars only) -------------------
+      if(InpShowArrows && i >= 1 && dirFinal != 0 && dirFinal != g_sigDir)
         {
-         if(dirNow == 1)
+         if(dirFinal == 1)
             BuyArrowBuf[i]  = low[i] - atr * 0.35;
          else
             SellArrowBuf[i] = high[i] + atr * 0.35;
 
-         g_sigType   = dirNow;
+         g_sigType   = dirFinal;
          g_sigPrice  = close[i];
-         g_sigStop   = (dirNow == 1) ? close[i] - stopDist : close[i] + stopDist;
-         g_sigTarget = (dirNow == 1) ? close[i] + stopDist * InpRiskReward
-                                     : close[i] - stopDist * InpRiskReward;
+         g_sigStop   = (dirFinal == 1) ? close[i] - stopDist : close[i] + stopDist;
+         g_sigTarget = (dirFinal == 1) ? close[i] + stopDist * InpRiskReward
+                                       : close[i] - stopDist * InpRiskReward;
          g_sigTime   = time[i];
+         g_lastSigIdx= i;
+         g_beDone    = false;
 
-         //--- alert only on the bar that just closed
          if(i == 1 && prev_calculated > 0 && time[i] != g_lastAlertTime)
            {
             g_lastAlertTime = time[i];
             string msg = "JobPick "+Symbol()+" "+TFToString()+" : "
-                         +((dirNow==1) ? "BUY" : "SELL")
+                         +((dirFinal==1) ? "BUY" : "SELL")
                          +" @ "+DoubleToString(close[i],_Digits)
                          +" | SL "+DoubleToString(g_sigStop,_Digits)
                          +" | TP "+DoubleToString(g_sigTarget,_Digits)
                          +" | ATR "+DoubleToString(atr/_Point,1)+"pt"
+                         +" | ADX "+DoubleToString(adx,1)
                          +" | RVOL "+DoubleToString(rvol,2)
-                         +" | score "+IntegerToString(score)+"/4";
+                         +" | votes "+IntegerToString(votes)+"/3";
             if(InpAlertOnSignal)
                Alert(msg);
             if(InpPushOnSignal)
                SendNotification(msg);
            }
         }
-      g_sigDir = dirNow;
+      g_sigDir = dirFinal;
 
       //---------------- Dashboard snapshot (bar 0) -------------------
       if(i == 0)
         {
-         g_dFair      = (InpBiasMode == BIAS_EMA) ? emaBias : vwap;
-         g_dATR       = atr;
-         g_dRSI       = rsi;
-         g_dHist      = hist;
-         g_dRVOL      = rvol;
-         g_bullScore  = bullScore;
-         g_bearScore  = bearScore;
-         g_dirNow     = dirNow;
-         g_bBiasBull  = biasBull;
-         g_bTrendBull = trendBull;
-         g_bMomBull   = momBull;
-         g_bVolOK     = volOK;
+         g_dFair     = fairVal;
+         g_dATR      = atr;
+         g_dRSI      = rsi;
+         g_dHist     = hist;
+         g_dRVOL     = rvol;
+         g_dADX      = adx;
+         g_bullVotes = bullVotes;
+         g_bearVotes = bearVotes;
+         g_dirNow    = dirNow;
+         g_bBiasBull = biasBull;
+         g_bTrendBull= trendBull;
+         g_bMomBull  = momBull;
+         g_gADX=gADX; g_gVol=gVol; g_gExt=gExt; g_gSpr=gSpr;
+         g_gSes=gSes; g_gHTF=gHTF; g_gATR=gATR; g_gCool=gCool;
+
+         g_blockers = "";
+         if(!gADX) g_blockers += "ADX ";
+         if(!gVol) g_blockers += "VOL ";
+         if(!gExt) g_blockers += "EXT ";
+         if(!gSpr) g_blockers += "SPR ";
+         if(!gSes) g_blockers += "SES ";
+         if(!gHTF) g_blockers += "HTF ";
+         if(!gATR) g_blockers += "ATR ";
+         if(!gCool) g_blockers += "COOL ";
         }
      }
 
-//--- on-chart output
    if(InpShowLevels)
       DrawLevels();
    else
@@ -478,20 +657,77 @@ double VolAt(int i,const long &tick_volume[],const long &volume[])
   {
    double v = (InpVolumeSource == VOL_REAL) ? (double)volume[i] : (double)tick_volume[i];
    if(v <= 0.0)
-      v = (double)tick_volume[i];      // fallback
+      v = (double)tick_volume[i];
    if(v <= 0.0)
-      v = 1.0;                          // broker reports no volume -> neutral weight
+      v = 1.0;
    return(v);
   }
 
 //+------------------------------------------------------------------+
-//| MACD histogram (MQL4 iMACD supports MODE_MAIN / MODE_SIGNAL only) |
+//| MACD histogram (MQL4 iMACD has MODE_MAIN / MODE_SIGNAL only)      |
 //+------------------------------------------------------------------+
 double MacdHist(int shift)
   {
    double main   = iMACD(NULL,0,InpMACDFast,InpMACDSlow,InpMACDSignal,PRICE_CLOSE,MODE_MAIN,shift);
    double signal = iMACD(NULL,0,InpMACDFast,InpMACDSlow,InpMACDSignal,PRICE_CLOSE,MODE_SIGNAL,shift);
    return(main - signal);
+  }
+
+//+------------------------------------------------------------------+
+//| Momentum lookback helpers (bounds-safe)                           |
+//+------------------------------------------------------------------+
+double MinRSI(int i,int n)
+  {
+   double m = 1000.0;
+   for(int k=0; k<n; k++)
+      if(i+k < g_ratesTotal)
+         m = MathMin(m,iRSI(NULL,0,InpRSIPeriod,PRICE_CLOSE,i+k));
+   return(m);
+  }
+
+double MaxRSI(int i,int n)
+  {
+   double m = -1000.0;
+   for(int k=0; k<n; k++)
+      if(i+k < g_ratesTotal)
+         m = MathMax(m,iRSI(NULL,0,InpRSIPeriod,PRICE_CLOSE,i+k));
+   return(m);
+  }
+
+double MinHist(int i,int n)
+  {
+   double m = 1e10;
+   for(int k=0; k<n; k++)
+      if(i+k < g_ratesTotal)
+         m = MathMin(m,MacdHist(i+k));
+   return(m);
+  }
+
+double MaxHist(int i,int n)
+  {
+   double m = -1e10;
+   for(int k=0; k<n; k++)
+      if(i+k < g_ratesTotal)
+         m = MathMax(m,MacdHist(i+k));
+   return(m);
+  }
+
+double HighestHigh(int i,int n)
+  {
+   double hh = -1e10;
+   for(int k=0; k<n; k++)
+      if(i+k < g_ratesTotal)
+         hh = MathMax(hh,iHigh(NULL,0,i+k));
+   return(hh);
+  }
+
+double LowestLow(int i,int n)
+  {
+   double ll = 1e10;
+   for(int k=0; k<n; k++)
+      if(i+k < g_ratesTotal)
+         ll = MathMin(ll,iLow(NULL,0,i+k));
+   return(ll);
   }
 
 //+------------------------------------------------------------------+
@@ -503,13 +739,13 @@ int SessionId(datetime t)
    if(!TimeToStruct(t,st))
       return(0);
 
-   if(InpVWAPAnchor == VWAP_WEEK)       // bucket on the week's Monday
+   if(InpVWAPAnchor == VWAP_WEEK)
      {
       int back = (st.day_of_week + 6) % 7;
       return(st.year*1000 + (st.day_of_year - back));
      }
 
-   if(InpVWAPAnchor == VWAP_HOURS)      // custom session start (broker time)
+   if(InpVWAPAnchor == VWAP_HOURS)
      {
       MqlDateTime sd;
       if(!TimeToStruct(t - InpSessionStartHour*3600,sd))
@@ -517,7 +753,7 @@ int SessionId(datetime t)
       return(sd.year*1000 + sd.day_of_year);
      }
 
-   return(st.year*1000 + st.day_of_year);   // broker day
+   return(st.year*1000 + st.day_of_year);
   }
 
 //+------------------------------------------------------------------+
@@ -569,10 +805,9 @@ void DrawPanel()
    int lh     = fs + 4;
    int x      = 14;
    int y      = 22;
-   int w      = fs * 27;
-   int h      = 8 * lh + 10;
+   int w      = fs * 30;
+   int h      = 11 * lh + 10;
 
-//--- background
    string bg = PREFIX+"BG";
    if(ObjectFind(0,bg) < 0)
      {
@@ -595,11 +830,9 @@ void DrawPanel()
    double stopPip = atrPip * InpATRStopMult;
    double targPip = stopPip * InpRiskReward;
 
-//--- rows
-   SetRow(PREFIX+"r0",0," JobPick  "+Symbol()+"  "+TFToString(),
+   SetRow(PREFIX+"r0",0," JobPick v1.10  "+Symbol()+"  "+TFToString(),
           C'235,235,245',corner,x,y,fs,lh);
-
-   SetRow(PREFIX+"r1",1," "+RepStr("-",26),C'70,70,85',corner,x,y,fs,lh);
+   SetRow(PREFIX+"r1",1," "+RepStr("-",29),C'70,70,85',corner,x,y,fs,lh);
 
    string biasSrc = (InpBiasMode==BIAS_VWAP) ? "VWAP"
                   : ((InpBiasMode==BIAS_EMA) ? ("EMA"+IntegerToString(InpEMABiasPeriod)) : "VWAP+EMA");
@@ -620,28 +853,39 @@ void DrawPanel()
                +"  "+((g_bMomBull) ? "^ rising" : "v falling");
    SetRow(PREFIX+"r4",4,momTxt,g_bMomBull ? C'0,230,120' : C'255,90,90',corner,x,y,fs,lh);
 
-   SetRow(PREFIX+"r5",5," VOLUME    RVOL "+Pad(DoubleToString(g_dRVOL,2),5)+"  "
-          +((g_dRVOL<=0.0) ? "n/a" : (g_bVolOK ? "STRONG" : "weak")),
-          (g_dRVOL<=0.0) ? C'150,150,160' : (g_bVolOK ? C'0,230,120' : C'230,180,60'),
-          corner,x,y,fs,lh);
-
-   SetRow(PREFIX+"r6",6," RISK      ATR "+Pad(DoubleToString(atrPip,1)+"pip",9)
+   SetRow(PREFIX+"r5",5," RISK      ATR "+Pad(DoubleToString(atrPip,1)+"pip",9)
           +"  SL "+DoubleToString(stopPip,1)+"  TP "+DoubleToString(targPip,1),
           C'120,190,255',corner,x,y,fs,lh);
 
-   int score = (g_dirNow==1) ? g_bullScore : ((g_dirNow==-1) ? g_bearScore : (int)MathMax(g_bullScore,g_bearScore));
-   string dots = "";
-   for(int k=0; k<4; k++)
-      dots += (k < score) ? "*" : ".";
-   string sigState = (g_dirNow==1) ? "BUY " : ((g_dirNow==-1) ? "SELL" : "WAIT");
-   SetRow(PREFIX+"r7",7," SIGNAL    "+sigState+"  "+dots+"  "+IntegerToString(score)+"/4",
+   SetRow(PREFIX+"r6",6," "+RepStr("-",29),C'70,70,85',corner,x,y,fs,lh);
+
+   int votes = (g_dirNow==1) ? g_bullVotes : ((g_dirNow==-1) ? g_bearVotes : (int)MathMax(g_bullVotes,g_bearVotes));
+   string vdots = "";
+   for(int k=0; k<3; k++)
+      vdots += (k < votes) ? "*" : ".";
+   string vState = (g_dirNow==1) ? "BUY " : ((g_dirNow==-1) ? "SELL" : "WAIT");
+   SetRow(PREFIX+"r7",7," VOTES     "+vState+"  "+vdots+"  "+IntegerToString(votes)+"/3",
           (g_dirNow==1) ? C'0,230,120' : ((g_dirNow==-1) ? C'255,90,90' : C'160,160,175'),
+          corner,x,y,fs,lh);
+
+   string g1 = " GATES     ADX "+Pad(DoubleToString(g_dADX,1),5)+" "+Flag(g_gADX);
+   SetRow(PREFIX+"r8",8,g1,g_gADX ? C'0,230,120' : C'255,90,90',corner,x,y,fs,lh);
+
+   string g2 = "           VOL "+Pad(DoubleToString(g_dRVOL,2),5)+" "+Flag(g_gVol)
+               +"  EXT "+Flag(g_gExt);
+   SetRow(PREFIX+"r9",9,g2,(g_gVol && g_gExt) ? C'0,230,120' : C'255,90,90',corner,x,y,fs,lh);
+
+   string g3 = "           SPR "+Flag(g_gSpr)+"  SES "+Flag(g_gSes)
+               +"  HTF "+Flag(g_gHTF);
+   SetRow(PREFIX+"r10",10,g3,(g_gSpr && g_gSes && g_gHTF) ? C'0,230,120' : C'255,90,90',
           corner,x,y,fs,lh);
   }
 
-//+------------------------------------------------------------------+
-//| Dashboard row helper                                              |
-//+------------------------------------------------------------------+
+string Flag(bool ok)
+  {
+   return(ok ? "ok" : "NO");
+  }
+
 void SetRow(string name,int row,string text,color clr,int corner,int x,int y,int fs,int lh)
   {
    if(ObjectFind(0,name) < 0)

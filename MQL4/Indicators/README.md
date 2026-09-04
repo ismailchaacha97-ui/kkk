@@ -1,65 +1,107 @@
-# JobPick.mq4 — MT4 indicator
+# JobPick.mq4 — MT4 indicator (v1.10)
 
-One overlay for the five jobs: **Bias · Trend · Momentum · Participation · Risk**.
+One overlay, three layers: **VOTES · GATES · RISK**.
 
-| Job | Default tool |
-|---|---|
-| Bias / fair value | VWAP (intraday) or 200 EMA (swing) |
-| Trend structure | 20 / 50 EMA |
-| Momentum / trigger | RSI(14) or MACD histogram |
-| Participation | Volume / RVOL |
-| Risk | ATR (stop, target, trailing stop) |
+```
+VOTES (directional evidence, need 3/3)
+  Bias .......... close vs VWAP (intraday) or EMA200 (swing)
+  Trend ......... EMA fast vs EMA slow
+  Momentum ...... RSI(14) or MACD histogram
+
+GATES (hard pass/fail, all must pass)
+  Regime ........ ADX >= 25 and +/-DI agrees with direction
+  Participation . RVOL >= 1.20
+  Extension ..... not stretched from the regime baseline
+  Spread ........ spread <= 2.0 pips
+  Session ....... broker-hour window      (off by default)
+  HTF ........... higher-TF alignment     (off by default)
+  ATR floor ..... market not dead         (off by default)
+  Cooldown ...... >= 5 bars since last signal
+
+RISK
+  SL = close -/+ ATR x 1.5     TP = SL distance x 2.0
+  Ratcheting chandelier trail + breakeven at 1R
+```
+
+## Why votes and gates are separate
+
+v1.0 counted four "votes" — bias, trend, momentum, volume. That was dishonest:
+bias and trend are heavily collinear, and RVOL is directionless, so the same point
+landed in both the bull and the bear column. A "4/4" read like four independent
+confirmations when it was really about two. Now there are **3 directional votes**
+and **8 pass/fail gates** — the score means what it says.
 
 ## Install
-
-Copy `JobPick.mq4` into your MT4 data folder:
 
 ```
 <MT4 data folder>/MQL4/Indicators/JobPick.mq4
 ```
 
-Then: **File → Open Data Folder** in MT4, or restart / right-click Navigator → Refresh.
-Compile with MetaEditor (F7) or just drag it onto a chart.
+**File → Open Data Folder** in MT4. Compile in MetaEditor (F7) or drag onto a chart.
 
-## What's drawn
+## The adaptive extension gate (important)
 
-* **Orange (thick)** — session VWAP, resets daily / weekly / custom hour
-* **Deep sky blue (thick)** — 200 EMA bias line
-* **Lime / Gold** — fast / slow EMA
-* **Dashed-dot green or red** — ATR trailing stop (active side only)
-* **Arrows** — confluence signals on **closed bars only** (no repaint)
-* **Horizontal lines** — entry / SL / TP of the most recent signal
-* **Dashboard (top-left)** — live readout of all five jobs + score
+Extension = how far price has stretched. The baseline it's measured from must change
+with the regime, or the gate misfires:
 
-## Signal logic
+* **Ranging (ADX < 25)** — measured from **fair value (VWAP)**, limit 2.0 ATR.
+  Far from VWAP in a range means you're buying the top of the range.
+* **Trending (ADX >= 25)** — measured from the **fast EMA**, limit 2.5 ATR.
+  VWAP resets every session, so in a trend price legitimately runs far from it.
+  Measuring extension against VWAP during a trend blocks nearly every valid entry.
 
-Each job votes, out of 4:
+This is not cosmetic — see the numbers below.
 
-1. **Bias** — close above/below fair value (VWAP, EMA200, or both)
-2. **Trend** — EMA fast above/below EMA slow
-3. **Momentum** — RSI above 50 & rising (or bouncing off oversold), or MACD hist > 0 & rising / zero-line cross
-4. **Participation** — RVOL ≥ threshold
+## Backtest: v1.0 vs v1.1
 
-An arrow fires when the required score (`InpMinScore`, default **4/4**) is reached
-*and* the direction flips. Alerts fire once, on the bar that just closed.
+Python re-implementation of the exact signal logic, 20 random seeds × 3 synthetic
+regimes (trending / mean-reverting chop / pure noise), 1200 bars each. Identical
+exits for both versions (SL 1.5 ATR, TP 3.0 ATR = 2R), so this isolates **entry
+selection** only.
 
-Stops/targets use ATR: `SL = close ± ATR × 1.5`, `TP = SL distance × 2.0` (both inputs).
+| Regime | v1.0 trades | v1.0 exp. | v1.1 trades | v1.1 exp. |
+|---|---|---|---|---|
+| Trend | 2211 | +0.879R | 997 | +0.965R |
+| Chop | 1837 | −0.770R | 271 | −0.768R |
+| Noise | 1923 | −0.017R | 557 | +0.034R |
+| **All** | **5971** | **+0.083R** | **1825** | **+0.424R** |
+
+Read it honestly:
+
+* The trend improvement (+0.88R → +0.97R) is real: better entries, fewer of them.
+* **In chop, per-trade expectancy did not improve (−0.77R either way).** v1.1 wins
+  by *not trading* — 1837 trades down to 271. Same bad trade, taken 7x less often.
+* Costs are excluded. Adding spread/slippage widens the gap further, since v1.0
+  places 3.3x more trades.
+
+## Caveats
+
+* Synthetic series, one parameter set, no costs, no walk-forward. This is a
+  **sanity check, not proof.** Validate on your own symbols before trusting it.
+* Chop is *avoided*, not traded. A mean-reversion mode for ADX < 25 is the obvious
+  next step and is not implemented.
+* `MarketInfo(MODE_SPREAD)` is the **current** spread, applied to all bars. The
+  spread gate is meaningful live, and inert on history.
+* VWAP uses tick volume unless `InpVolumeSource = VOL_REAL` (exchange instruments
+  only). No volume at all → RVOL reads 0.00 and the gate is treated as neutral.
+* VWAP anchors on **broker server time**. Use `VWAP_HOURS` + `InpSessionStartHour`
+  for a 17:00 NY session open.
 
 ## Suggested presets
 
-| Style | Bias | Trend | Momentum | RVOL | ATR | Min score |
+| Style | Bias | Trend | Momentum | ADX min | Ext | ATR |
 |---|---|---|---|---|---|---|
-| Scalp M1–M5 | VWAP | 9 / 21 | RSI 14 | 1.5 | 14 × 1.0, R:R 1.5 | 4 |
-| Intraday M15 | VWAP | 20 / 50 | RSI 14 | 1.2 | 14 × 1.5, R:R 2 | 4 |
-| Swing H4–D1 | EMA200 | 20 / 50 | MACD 12/26/9 | 1.0 | 14 × 2.0, R:R 3 | 3 |
+| Scalp M1–M5 | VWAP | 9 / 21 | RSI 14 | 25 | adaptive 1.5 / 2.0 | 14 × 1.0, R:R 1.5 |
+| Intraday M15 | VWAP | 20 / 50 | RSI 14 | 25 | adaptive 2.0 / 2.5 | 14 × 1.5, R:R 2 |
+| Swing H4–D1 | EMA200 | 20 / 50 | MACD | 20 | adaptive 2.5 / 3.0 | 14 × 2.0, R:R 3 |
 
-## Notes / limits
+`InpMomReset` (require a fresh momentum turn) is **off** — in testing it was close
+to neutral: +0.521R vs +0.532R. Kept as an option for pullback-style trading.
 
-* MQL4 can only draw in **one window per indicator**, so the oscillator is reported
-  numerically in the dashboard rather than as a sub-window panel.
-* VWAP uses **tick volume** by default (real volume is only available on exchange
-  instruments). If your broker reports no volume at all, RVOL shows `n/a` and the
-  participation vote is treated as neutral.
-* VWAP resets on **broker server time**. Use `InpVWAPAnchor = VWAP_HOURS` with
-  `InpSessionStartHour` if you want sessions to start at e.g. 17:00 NY.
-* Not financial advice. Backtest / forward-test before risking money.
+## Notes
+
+* MQL4 allows only **one window per indicator**, so the oscillator is reported
+  numerically in the dashboard rather than as a sub-window.
+* The dashboard shows each gate as `ok` / `NO`, so when no signal fires you can see
+  exactly which filter blocked it.
+* Not financial advice.
