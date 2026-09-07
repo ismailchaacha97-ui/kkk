@@ -1,0 +1,329 @@
+//@version=6
+// ============================================================================
+//  APEX OB — Institutional Order Blocks & Breaker Blocks
+//  Pine Script v6
+//
+//  What it does
+//   • Detects swing-validated Order Blocks (bullish & bearish) that are created
+//     only when price displaces away from them (BOS / CHoCH confirmed).
+//   • Filters them by displacement strength, volume, imbalance (FVG) and HTF bias
+//     so you only see the blocks institutions actually defended.
+//   • Auto-converts a violated OB into a Breaker Block and tracks the retest.
+//   • Mitigation engine: partial-touch, 50% (mean threshold) or full-fill.
+//   • Built-in risk box: entry, stop, TP1/TP2/TP3 by R multiple, on every signal.
+//   • Alerts for: new OB, OB retest/entry, breaker retest/entry, invalidation.
+//
+//  Trading it calmly: every signal is objective, drawn before the entry, with a
+//  fixed invalidation level. Nothing repaints once the block is confirmed
+//  (blocks are confirmed on closed bars only).
+// ============================================================================
+
+indicator("APEX OB — Order Blocks & Breaker Blocks", "APEX OB", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ─────────────────────────────── INPUTS ────────────────────────────────────
+gS = "STRUCTURE"
+swingLen    = input.int(10,  "Swing lookback (pivot strength)", minval = 2, maxval = 50, group = gS, tooltip = "Higher = fewer, higher-timeframe structure points.")
+useCHoCH    = input.bool(true, "Require BOS / CHoCH confirmation", group = gS, tooltip = "An OB is only valid if price broke structure away from it. This is the single biggest quality filter.")
+
+gQ = "QUALITY FILTERS"
+useDisp     = input.bool(true,  "Displacement filter", group = gQ)
+dispMult    = input.float(1.6, "Displacement ≥ x ATR", minval = 0.1, step = 0.1, group = gQ, tooltip = "The candle(s) leaving the OB must be an expansion move, not a drift.")
+useFVG      = input.bool(true,  "Require imbalance (FVG) in the leg", group = gQ)
+useVol      = input.bool(true,  "Volume filter", group = gQ)
+volMult     = input.float(1.3, "Volume ≥ x average", minval = 0.1, step = 0.1, group = gQ)
+volLen      = input.int(20,   "Volume average length", minval = 2, group = gQ)
+atrLen      = input.int(14,   "ATR length", minval = 2, group = gQ)
+
+gB = "HTF BIAS"
+useBias     = input.bool(true, "Only take blocks with HTF bias", group = gB)
+biasTF      = input.timeframe("240", "Bias timeframe", group = gB)
+biasLen     = input.int(50, "Bias EMA length", minval = 2, group = gB)
+
+gM = "MITIGATION"
+mitMode     = input.string("50% (mean threshold)", "Block is mitigated on", options = ["Wick touch", "50% (mean threshold)", "Full fill (close through)"], group = gM)
+maxBlocks   = input.int(6, "Max live blocks per side", minval = 1, maxval = 25, group = gM)
+extendBars  = input.int(30, "Extend boxes (bars)", minval = 0, maxval = 500, group = gM)
+deleteMit   = input.bool(false, "Delete mitigated blocks", group = gM, tooltip = "Off = keep them faded so you can study behaviour.")
+
+gK = "BREAKERS"
+useBreaker  = input.bool(true, "Convert violated OBs into Breaker Blocks", group = gK)
+breakerLife = input.int(100, "Breaker max age (bars)", minval = 5, group = gK)
+
+gR = "RISK / TARGETS"
+showRisk    = input.bool(true, "Show entry / stop / targets on retest", group = gR)
+stopBufATR  = input.float(0.25, "Stop buffer (x ATR beyond block)", minval = 0, step = 0.05, group = gR)
+tp1R        = input.float(1.0, "TP1 (R)", minval = 0.1, step = 0.1, group = gR)
+tp2R        = input.float(2.0, "TP2 (R)", minval = 0.1, step = 0.1, group = gR)
+tp3R        = input.float(3.0, "TP3 (R)", minval = 0.1, step = 0.1, group = gR)
+
+gV = "VISUALS"
+bullCol     = input.color(color.new(#089981, 78), "Bullish OB",  group = gV, inline = "c1")
+bearCol     = input.color(color.new(#f23645, 78), "Bearish OB",  group = gV, inline = "c1")
+bullBrkCol  = input.color(color.new(#2962ff, 75), "Bull breaker",group = gV, inline = "c2")
+bearBrkCol  = input.color(color.new(#ff9800, 75), "Bear breaker",group = gV, inline = "c2")
+showMid     = input.bool(true,  "Show 50% line inside blocks", group = gV)
+showLbls    = input.bool(true,  "Show labels", group = gV)
+showStruct  = input.bool(true,  "Show BOS / CHoCH", group = gV)
+showDash    = input.bool(true,  "Show dashboard", group = gV)
+
+// ─────────────────────────────── CORE DATA ─────────────────────────────────
+atr     = ta.atr(atrLen)
+volAvg  = ta.sma(volume, volLen)
+htfEma  = request.security(syminfo.tickerid, biasTF, ta.ema(close, biasLen), lookahead = barmerge.lookahead_off)
+htfCls  = request.security(syminfo.tickerid, biasTF, close,                  lookahead = barmerge.lookahead_off)
+biasUp  = not useBias or htfCls > htfEma
+biasDn  = not useBias or htfCls < htfEma
+
+// ─────────────────────────────── STRUCTURE ─────────────────────────────────
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow (low,  swingLen, swingLen)
+
+var float lastPH    = na
+var int   lastPHbar = na
+var float lastPL    = na
+var int   lastPLbar = na
+if not na(ph)
+    lastPH    := ph
+    lastPHbar := bar_index - swingLen
+if not na(pl)
+    lastPL    := pl
+    lastPLbar := bar_index - swingLen
+
+var int trend = 0                     // 1 = bullish structure, -1 = bearish
+bosUp   = not na(lastPH) and close > lastPH and close[1] <= lastPH
+bosDn   = not na(lastPL) and close < lastPL and close[1] >= lastPL
+chochUp = bosUp and trend <= 0
+chochDn = bosDn and trend >= 0
+if bosUp
+    trend := 1
+if bosDn
+    trend := -1
+
+if showStruct and bosUp
+    line.new(lastPHbar, lastPH, bar_index, lastPH, color = color.new(#089981, 30), style = line.style_dashed)
+    if showLbls
+        label.new(bar_index, lastPH, chochUp ? "CHoCH" : "BOS", style = label.style_label_down, color = color.new(#089981, 20), textcolor = color.white, size = size.tiny)
+if showStruct and bosDn
+    line.new(lastPLbar, lastPL, bar_index, lastPL, color = color.new(#f23645, 30), style = line.style_dashed)
+    if showLbls
+        label.new(bar_index, lastPL, chochDn ? "CHoCH" : "BOS", style = label.style_label_up, color = color.new(#f23645, 20), textcolor = color.white, size = size.tiny)
+
+// ───────────────────────── ORDER BLOCK STRUCTURE ───────────────────────────
+type OB
+    box   bx
+    line  mid
+    label lb
+    float top
+    float bot
+    int   left
+    int   dir        //  1 bull OB, -1 bear OB
+    bool  breaker
+    bool  mitigated
+    int   bornBar
+    float score
+
+var array<OB> bulls = array.new<OB>()
+var array<OB> bears = array.new<OB>()
+
+f_mid(OB o) => (o.top + o.bot) / 2.0
+
+f_draw(OB o) =>
+    col   = o.dir == 1 ? (o.breaker ? bearBrkCol : bullCol) : (o.breaker ? bullBrkCol : bearCol)
+    right = bar_index + extendBars
+    box.set_rightbottom(o.bx, right, o.bot)
+    box.set_lefttop(o.bx, o.left, o.top)
+    box.set_bgcolor(o.bx, o.mitigated ? color.new(col, 92) : col)
+    box.set_border_color(o.bx, color.new(col, 20))
+    if showMid and not na(o.mid)
+        line.set_xy1(o.mid, o.left, f_mid(o))
+        line.set_xy2(o.mid, right, f_mid(o))
+        line.set_color(o.mid, color.new(col, o.mitigated ? 80 : 35))
+    if showLbls and not na(o.lb)
+        label.set_xy(o.lb, right, o.dir == 1 ? o.bot : o.top)
+        txt = (o.breaker ? (o.dir == 1 ? "BEAR BREAKER" : "BULL BREAKER") : (o.dir == 1 ? "BULL OB" : "BEAR OB")) + "  " + str.tostring(o.score, "#.0") + "★"
+        label.set_text(o.lb, txt)
+        label.set_textcolor(o.lb, color.new(chart.fg_color, o.mitigated ? 60 : 0))
+
+f_kill(OB o) =>
+    box.delete(o.bx)
+    line.delete(o.mid)
+    label.delete(o.lb)
+
+// quality score 0-5
+f_score(bool disp, bool fvg, bool vol, bool bias, bool choch) =>
+    (disp ? 1 : 0) + (fvg ? 1 : 0) + (vol ? 1 : 0) + (bias ? 1 : 0) + (choch ? 1 : 0)
+
+// ───────────────── FIND THE ORIGIN CANDLE OF THE BREAK LEG ─────────────────
+// Walk back from the break bar to the last opposite-colour candle: that is the OB.
+f_findOB(int dir) =>
+    int idx = na
+    for i = 1 to 40
+        bullCandle = close[i] > open[i]
+        if dir == 1 and not bullCandle          // last down candle before up move
+            idx := i
+            break
+        if dir == -1 and bullCandle             // last up candle before down move
+            idx := i
+            break
+    idx
+
+// leg quality measured over the displacement
+f_legQuality(int fromIdx) =>
+    float rng   = 0.0
+    float vmax  = 0.0
+    bool  fvg   = false
+    for i = 0 to math.min(fromIdx, 40)
+        rng  += high[i] - low[i]
+        vmax := math.max(vmax, volume[i])
+        if i + 2 <= 40
+            if low[i] > high[i + 2] or high[i] < low[i + 2]
+                fvg := true
+    [rng, vmax, fvg]
+
+f_addOB(int dir, int idx, bool choch) =>
+    float t = math.max(high[idx], math.max(open[idx], close[idx]))
+    float b = math.min(low[idx],  math.min(open[idx], close[idx]))
+    [legRng, legVol, legFVG] = f_legQuality(idx)
+    bool okDisp = not useDisp or legRng >= dispMult * atr
+    bool okFVG  = not useFVG  or legFVG
+    bool okVol  = not useVol  or legVol >= volMult * volAvg
+    bool okBias = dir == 1 ? biasUp : biasDn
+    if okDisp and okFVG and okVol and okBias
+        col = dir == 1 ? bullCol : bearCol
+        OB o = OB.new(
+             box.new(bar_index - idx, t, bar_index + extendBars, b, bgcolor = col, border_color = color.new(col, 20)),
+             showMid ? line.new(bar_index - idx, (t + b) / 2, bar_index, (t + b) / 2, color = color.new(col, 35), style = line.style_dotted) : na,
+             showLbls ? label.new(bar_index, dir == 1 ? b : t, "", style = dir == 1 ? label.style_label_left : label.style_label_left, color = color.new(color.black, 100), textcolor = chart.fg_color, size = size.tiny) : na,
+             t, b, bar_index - idx, dir, false, false, bar_index,
+             f_score(okDisp, legFVG, legVol >= volMult * volAvg, okBias, choch))
+        arr = dir == 1 ? bulls : bears
+        array.unshift(arr, o)
+        while array.size(arr) > maxBlocks
+            f_kill(array.pop(arr))
+        true
+    else
+        false
+
+// ─────────────────────── CREATE BLOCKS ON CONFIRMED BREAKS ─────────────────
+newBull = false
+newBear = false
+if barstate.isconfirmed
+    if bosUp and (not useCHoCH or bosUp)
+        i = f_findOB(1)
+        if not na(i)
+            newBull := f_addOB(1, i, chochUp)
+    if bosDn and (not useCHoCH or bosDn)
+        i = f_findOB(-1)
+        if not na(i)
+            newBear := f_addOB(-1, i, chochDn)
+
+// ──────────────────────── MITIGATION / BREAKER ENGINE ──────────────────────
+f_touch(OB o) =>
+    low <= o.top and high >= o.bot
+
+f_violated(OB o) =>
+    // full body close through the block against its direction
+    o.dir == 1 ? close < o.bot : close > o.top
+
+f_mitigated(OB o) =>
+    m = f_mid(o)
+    result = switch mitMode
+        "Wick touch"              => o.dir == 1 ? low  <= o.top : high >= o.bot
+        "50% (mean threshold)"    => o.dir == 1 ? low  <= m     : high >= m
+        => o.dir == 1 ? close < o.bot : close > o.top
+    result
+
+// returns [retest, breakerRetest] flags for this array
+f_process(array<OB> arr) =>
+    bool sigRetest  = false
+    bool sigBreaker = false
+    if array.size(arr) > 0
+        for i = array.size(arr) - 1 to 0
+            OB o = array.get(arr, i)
+            aged = bar_index - o.bornBar
+            if o.breaker and aged > breakerLife
+                f_kill(o)
+                array.remove(arr, i)
+                continue
+            if not o.mitigated and f_touch(o)
+                // retest signal (fresh block, first touch)
+                if not o.breaker
+                    sigRetest := true
+                else
+                    // breaker retest trades opposite to the original OB direction
+                    sigBreaker := true
+            if not o.mitigated and f_violated(o)
+                if useBreaker and not o.breaker
+                    o.breaker   := true
+                    o.bornBar   := bar_index
+                else
+                    o.mitigated := true
+                    if deleteMit
+                        f_kill(o)
+                        array.remove(arr, i)
+                        continue
+            else if not o.mitigated and f_mitigated(o) and mitMode != "Full fill (close through)"
+                o.mitigated := true
+                if deleteMit
+                    f_kill(o)
+                    array.remove(arr, i)
+                    continue
+            f_draw(o)
+    [sigRetest, sigBreaker]
+
+[retestBullSig, brkBearSig] = f_process(bulls)
+[retestBearSig, brkBullSig] = f_process(bears)
+
+// ────────────────────────── RISK / TARGET RENDERING ────────────────────────
+f_riskBox(bool longSide, float blockTop, float blockBot) =>
+    entry = longSide ? blockTop : blockBot
+    stop  = longSide ? blockBot - stopBufATR * atr : blockTop + stopBufATR * atr
+    r     = math.abs(entry - stop)
+    if r > 0
+        c = longSide ? color.new(#089981, 0) : color.new(#f23645, 0)
+        line.new(bar_index, entry, bar_index + 12, entry, color = c, width = 2)
+        line.new(bar_index, stop,  bar_index + 12, stop,  color = color.new(#f23645, 20), style = line.style_dashed)
+        for [k, m] in array.from(tp1R, tp2R, tp3R)
+            tp = longSide ? entry + m * r : entry - m * r
+            line.new(bar_index, tp, bar_index + 12, tp, color = color.new(#2962ff, 20), style = line.style_dotted)
+            label.new(bar_index + 12, tp, "TP" + str.tostring(k + 1) + " " + str.tostring(m, "#.#") + "R", style = label.style_label_left, color = color.new(color.black, 100), textcolor = color.new(#2962ff, 0), size = size.tiny)
+        label.new(bar_index + 12, stop, "SL", style = label.style_label_left, color = color.new(color.black, 100), textcolor = color.new(#f23645, 0), size = size.tiny)
+
+if showRisk and barstate.isconfirmed
+    if retestBullSig and array.size(bulls) > 0
+        o = array.get(bulls, 0)
+        f_riskBox(true, o.top, o.bot)
+    if retestBearSig and array.size(bears) > 0
+        o = array.get(bears, 0)
+        f_riskBox(false, o.top, o.bot)
+
+// ─────────────────────────────── DASHBOARD ─────────────────────────────────
+if showDash and barstate.islast
+    var table t = table.new(position.top_right, 2, 6, border_width = 1)
+    table.cell(t, 0, 0, "APEX OB", bgcolor = color.new(#2962ff, 20), text_color = color.white, text_size = size.small)
+    table.cell(t, 1, 0, timeframe.period, bgcolor = color.new(#2962ff, 20), text_color = color.white, text_size = size.small)
+    table.cell(t, 0, 1, "Structure", text_size = size.small, text_color = chart.fg_color)
+    table.cell(t, 1, 1, trend == 1 ? "Bullish" : trend == -1 ? "Bearish" : "Neutral", text_size = size.small, text_color = trend == 1 ? #089981 : trend == -1 ? #f23645 : color.gray)
+    table.cell(t, 0, 2, "HTF bias (" + biasTF + ")", text_size = size.small, text_color = chart.fg_color)
+    table.cell(t, 1, 2, htfCls > htfEma ? "Up" : "Down", text_size = size.small, text_color = htfCls > htfEma ? #089981 : #f23645)
+    table.cell(t, 0, 3, "Live bull OBs", text_size = size.small, text_color = chart.fg_color)
+    table.cell(t, 1, 3, str.tostring(array.size(bulls)), text_size = size.small, text_color = chart.fg_color)
+    table.cell(t, 0, 4, "Live bear OBs", text_size = size.small, text_color = chart.fg_color)
+    table.cell(t, 1, 4, str.tostring(array.size(bears)), text_size = size.small, text_color = chart.fg_color)
+    table.cell(t, 0, 5, "ATR", text_size = size.small, text_color = chart.fg_color)
+    table.cell(t, 1, 5, str.tostring(atr, format.mintick), text_size = size.small, text_color = chart.fg_color)
+
+// ─────────────────────────────── PLOTS / ALERTS ────────────────────────────
+plotshape(retestBullSig, "Bull OB retest", shape.triangleup,   location.belowbar, color.new(#089981, 0), size = size.tiny)
+plotshape(retestBearSig, "Bear OB retest", shape.triangledown, location.abovebar, color.new(#f23645, 0), size = size.tiny)
+plotshape(brkBullSig,    "Bull breaker retest", shape.diamond, location.belowbar, color.new(#2962ff, 0), size = size.tiny)
+plotshape(brkBearSig,    "Bear breaker retest", shape.diamond, location.abovebar, color.new(#ff9800, 0), size = size.tiny)
+
+alertcondition(newBull,        "New Bullish OB",        "APEX OB: new bullish order block confirmed")
+alertcondition(newBear,        "New Bearish OB",        "APEX OB: new bearish order block confirmed")
+alertcondition(retestBullSig,  "Bullish OB retest",     "APEX OB: price is retesting a bullish order block")
+alertcondition(retestBearSig,  "Bearish OB retest",     "APEX OB: price is retesting a bearish order block")
+alertcondition(brkBullSig,     "Bullish breaker retest","APEX OB: bullish breaker retest")
+alertcondition(brkBearSig,     "Bearish breaker retest","APEX OB: bearish breaker retest")
+alertcondition(chochUp,        "CHoCH Up",              "APEX OB: bullish change of character")
+alertcondition(chochDn,        "CHoCH Down",            "APEX OB: bearish change of character")
