@@ -1,0 +1,28 @@
+{
+  "name": "Sir Reginald Coo III",
+  "website": "https://coocoin.xyz",
+  "description": "COO is a fixed-supply, zero-tax community meme token on Base. No mint function, ownership renounced, liquidity locked. The Pigeon of Prosperity eats what it is given and asks for nothing.",
+  "explorer": "https://basescan.org/token/0x0000000000000000000000000000000000000000",
+  "type": "BASE",
+  "symbol": "COO",
+  "decimals": 18,
+  "status": "active",
+  "id": "0x0000000000000000000000000000000000000000",
+  "links": [
+    {
+      "name": "twitter",
+      "url": "https://x.com/coocoinbase"
+    },
+    {
+      "name": "telegram",
+      "url": "https://t.me/coocoinbase"
+    },
+    {
+      "name": "github",
+      "url": "https://github.com/ismailchaacha97-ui/kkk"
+    }
+  ],
+  "tags": [
+    "memes"
+  ]
+}

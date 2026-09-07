@@ -1,0 +1,39 @@
+{
+  "name": "coo-token",
+  "version": "1.0.0",
+  "description": "$COO — Sir Reginald Coo III, Pigeon of Prosperity. A fixed-supply, zero-tax meme token on Base.",
+  "directories": {
+    "doc": "docs",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "hardhat test",
+    "compile": "hardhat compile",
+    "site": "npx --yes serve@14 web -l 3000 --no-clipboard",
+    "preflight": "hardhat run scripts/preflight.js",
+    "deploy:testnet": "hardhat run scripts/deploy.js --network baseSepolia",
+    "deploy:mainnet": "hardhat run scripts/deploy.js --network base",
+    "liquidity": "hardhat run scripts/add-liquidity.js --network base",
+    "renounce": "hardhat run scripts/renounce.js --network base",
+    "listing:kit": "node scripts/listing-kit.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ismailchaacha97-ui/kkk.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ismailchaacha97-ui/kkk/issues"
+  },
+  "homepage": "https://github.com/ismailchaacha97-ui/kkk#readme",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts": "5.0.2",
+    "dotenv": "^17.4.2",
+    "hardhat": "^2.29.1",
+    "solc": "^0.8.24"
+  },
+  "private": true
+}

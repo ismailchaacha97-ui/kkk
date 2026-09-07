@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>$COO — Sir Reginald Coo III, Pigeon of Prosperity</title>
+<meta name="description" content="A fixed-supply, zero-tax meme token on Base. No mint function. Ownership renounced. Liquidity locked. The bird cannot be killed." />
+<meta property="og:title" content="$COO — Pigeon of Prosperity" />
+<meta property="og:description" content="Fixed supply. Zero tax. Ownership renounced. On Base." />
+<meta property="og:image" content="assets/coo-512.png" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="assets/favicon.png" />
+<style>
+  :root{
+    --bg:#080a12; --bg2:#0e1220; --card:#141a2e; --line:#242c47;
+    --blue:#2f8bff; --teal:#37e0c4; --purple:#a06bff; --gold:#ffc94d;
+    --txt:#eaf0ff; --mut:#8b96b8;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg); color:var(--txt);
+    font:16px/1.65 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif;
+    overflow-x:hidden;
+  }
+  body::before{
+    content:""; position:fixed; inset:0; z-index:-1; pointer-events:none;
+    background:
+      radial-gradient(60rem 40rem at 15% -10%, rgba(47,139,255,.22), transparent 60%),
+      radial-gradient(50rem 35rem at 90% 5%, rgba(160,107,255,.18), transparent 60%),
+      radial-gradient(45rem 30rem at 50% 100%, rgba(55,224,196,.12), transparent 60%);
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:0 22px}
+  a{color:var(--teal);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* nav */
+  nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);
+      background:rgba(8,10,18,.72);border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;align-items:center;gap:14px;height:64px}
+  nav img{width:34px;height:34px}
+  nav b{font-size:18px;letter-spacing:.5px}
+  nav .links{margin-left:auto;display:flex;gap:22px;font-size:14px;color:var(--mut)}
+  nav .links a{color:var(--mut)}
+  nav .links a:hover{color:var(--txt);text-decoration:none}
+  @media(max-width:720px){nav .links{display:none}}
+
+  /* hero */
+  header{padding:72px 0 56px;text-align:center}
+  .coin{width:min(240px,52vw);filter:drop-shadow(0 24px 60px rgba(47,139,255,.45));
+        animation:bob 4.5s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-16px) rotate(2deg)}}
+  h1{font-size:clamp(40px,8vw,78px);line-height:1.02;margin:22px 0 8px;letter-spacing:-2px}
+  h1 span{background:linear-gradient(100deg,var(--blue),var(--teal),var(--purple));
+          -webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--mut);font-size:clamp(16px,2.4vw,21px);max-width:640px;margin:0 auto}
+  .tagline{margin-top:18px;font-size:15px;color:var(--gold);font-style:italic}
+
+  .btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:34px}
+  .btn{padding:14px 26px;border-radius:999px;font-weight:700;font-size:15px;
+       border:1px solid var(--line);color:var(--txt);transition:.18s;display:inline-block}
+  .btn:hover{transform:translateY(-2px);text-decoration:none}
+  .btn.p{background:linear-gradient(100deg,var(--blue),var(--purple));border-color:transparent;
+         box-shadow:0 10px 30px rgba(47,139,255,.35)}
+  .btn.s{background:var(--card)}
+
+  /* contract bar */
+  .ca{margin:40px auto 0;max-width:760px;background:var(--card);border:1px solid var(--line);
+      border-radius:16px;padding:16px 18px;display:flex;align-items:center;gap:14px;text-align:left}
+  .ca .lbl{font-size:11px;letter-spacing:2px;color:var(--mut);text-transform:uppercase}
+  .ca code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+           word-break:break-all;color:var(--teal)}
+  .ca button{margin-left:auto;flex-shrink:0;background:var(--blue);color:#fff;border:0;
+             padding:10px 18px;border-radius:10px;font-weight:700;cursor:pointer;font-size:14px}
+  .ca button:active{transform:scale(.96)}
+  @media(max-width:640px){.ca{flex-direction:column;align-items:flex-start}.ca button{margin-left:0;width:100%}}
+
+  /* stats */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-top:20px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;text-align:center}
+  .stat b{display:block;font-size:26px;background:linear-gradient(100deg,var(--teal),var(--blue));
+          -webkit-background-clip:text;background-clip:text;color:transparent}
+  .stat span{font-size:12px;color:var(--mut);letter-spacing:1.4px;text-transform:uppercase}
+
+  section{padding:64px 0;border-top:1px solid var(--line)}
+  h2{font-size:clamp(26px,4.5vw,38px);letter-spacing:-1px;margin-bottom:10px}
+  .lead{color:var(--mut);margin-bottom:30px;max-width:680px}
+
+  .grid{display:grid;gap:16px}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+  .g3{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px}
+  .card h3{font-size:17px;margin-bottom:8px;display:flex;align-items:center;gap:9px}
+  .card p{color:var(--mut);font-size:14.5px}
+  .tick{color:var(--teal);font-weight:800}
+
+  table{width:100%;border-collapse:collapse;font-size:14.5px}
+  th,td{padding:13px 12px;text-align:left;border-bottom:1px solid var(--line)}
+  th{color:var(--mut);font-size:11px;letter-spacing:1.6px;text-transform:uppercase;font-weight:600}
+  td:first-child{font-weight:600}
+  .bar{height:7px;border-radius:99px;background:linear-gradient(90deg,var(--blue),var(--teal));min-width:6px}
+
+  ol.steps{counter-reset:s;list-style:none;display:grid;gap:14px}
+  ol.steps li{counter-increment:s;background:var(--card);border:1px solid var(--line);
+              border-radius:16px;padding:20px 22px 20px 66px;position:relative;color:var(--mut);font-size:14.5px}
+  ol.steps li::before{content:counter(s);position:absolute;left:20px;top:18px;width:30px;height:30px;
+    border-radius:50%;background:linear-gradient(100deg,var(--blue),var(--purple));color:#fff;
+    display:grid;place-items:center;font-weight:800;font-size:14px}
+  ol.steps b{color:var(--txt);display:block;margin-bottom:3px;font-size:15.5px}
+
+  .road{display:grid;gap:14px}
+  .ph{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--blue);
+      border-radius:14px;padding:18px 22px}
+  .ph b{color:var(--gold);font-size:12px;letter-spacing:2px;text-transform:uppercase}
+  .ph p{margin-top:5px;color:var(--mut);font-size:14.5px}
+
+  details{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin-bottom:10px}
+  details summary{cursor:pointer;font-weight:650;list-style:none}
+  details summary::-webkit-details-marker{display:none}
+  details summary::after{content:"+";float:right;color:var(--blue);font-weight:800}
+  details[open] summary::after{content:"–"}
+  details p{color:var(--mut);font-size:14.5px;margin-top:12px}
+
+  .warn{background:rgba(255,201,77,.07);border:1px solid rgba(255,201,77,.32);
+        border-radius:16px;padding:22px;color:#ffe3a3;font-size:14.5px}
+  .warn b{color:var(--gold)}
+
+  footer{padding:48px 0;text-align:center;color:var(--mut);font-size:13px;border-top:1px solid var(--line)}
+  footer img{width:44px;opacity:.85;margin-bottom:14px}
+  .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(120px);
+    background:var(--teal);color:#04121a;padding:13px 26px;border-radius:99px;font-weight:800;
+    transition:.3s;z-index:99}
+  .toast.on{transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <img src="assets/coo-128.png" alt="COO" />
+  <b>$COO</b>
+  <div class="links">
+    <a href="#buy">Buy</a><a href="#tokenomics">Tokenomics</a>
+    <a href="#safety">Safety</a><a href="#roadmap">Roadmap</a><a href="#faq">FAQ</a>
+  </div>
+</div></nav>
+
+<header><div class="wrap">
+  <img class="coin" src="assets/coo-512.png" alt="Sir Reginald Coo III" />
+  <h1>Sir Reginald <span>Coo III</span></h1>
+  <p class="sub">Pigeon of Prosperity. Fixed supply, zero tax, ownership renounced, living on Base.</p>
+  <p class="tagline">"He has eaten a cigarette butt and survived. He will survive your candle too."</p>
+
+  <div class="btns">
+    <a class="btn p" href="#buy">Buy $COO</a>
+    <a class="btn s" href="https://dexscreener.com/base/0x0000000000000000000000000000000000000000" target="_blank" rel="noopener">Chart</a>
+    <a class="btn s" href="https://basescan.org/token/0x0000000000000000000000000000000000000000" target="_blank" rel="noopener">Contract</a>
+  </div>
+
+  <div class="ca">
+    <div>
+      <div class="lbl">Contract address · Base</div>
+      <code id="ca">0x0000000000000000000000000000000000000000</code>
+    </div>
+    <button onclick="copyCA()">Copy</button>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b>1,000,000,000</b><span>Fixed supply</span></div>
+    <div class="stat"><b>0 / 0</b><span>Buy / sell tax</span></div>
+    <div class="stat"><b>Renounced</b><span>Ownership</span></div>
+    <div class="stat"><b>Locked</b><span>Liquidity</span></div>
+  </div>
+</div></header>
+
+<section id="buy"><div class="wrap">
+  <h2>How to buy</h2>
+  <p class="lead">Four minutes if you've never touched a wallet before. Base is an Ethereum L2, so fees are cents.</p>
+  <ol class="steps">
+    <li><b>Get a wallet</b>Install Coinbase Wallet, Rabby or MetaMask. Write the seed phrase on paper. Never type it into anything, ever, including a site that looks exactly like this one.</li>
+    <li><b>Put ETH on Base</b>Buy ETH anywhere, then withdraw it choosing the <b>Base</b> network. Coinbase does this with no bridge fee. Keep a couple of dollars for gas.</li>
+    <li><b>Open Uniswap on Base</b>Go to app.uniswap.org, connect the wallet, switch the network to Base, and paste the contract address above into the token field.</li>
+    <li><b>Swap and hold</b>Set slippage to 1–3%, swap ETH for COO, confirm. The token appears in your wallet. There is nothing else to do. That is the whole product.</li>
+  </ol>
+</div></section>
+
+<section id="tokenomics"><div class="wrap">
+  <h2>Tokenomics</h2>
+  <p class="lead">One billion tokens minted once, at deployment, and never again. There is no mint function in the contract to argue about.</p>
+  <table>
+    <tr><th>Allocation</th><th>Share</th><th></th><th>Purpose</th></tr>
+    <tr><td>Liquidity pool</td><td>80%</td><td><div class="bar" style="width:100%"></div></td><td>Paired with ETH, LP locked</td></tr>
+    <tr><td>Community</td><td>10%</td><td><div class="bar" style="width:12.5%"></div></td><td>Airdrops, memes, contests</td></tr>
+    <tr><td>CEX reserve</td><td>5%</td><td><div class="bar" style="width:6.25%"></div></td><td>Untouched unless an exchange asks</td></tr>
+    <tr><td>Team</td><td>5%</td><td><div class="bar" style="width:6.25%"></div></td><td>One public, announced wallet</td></tr>
+  </table>
+</div></section>
+
+<section id="safety"><div class="wrap">
+  <h2>Why this isn't a rug</h2>
+  <p class="lead">Not a promise — properties of the deployed bytecode that you can verify yourself on Basescan in thirty seconds.</p>
+  <div class="grid g3">
+    <div class="card"><h3><span class="tick">✓</span> No mint function</h3><p>The string <code>mint</code> does not appear in the public ABI. Supply is capped by the code, not by a pinky swear.</p></div>
+    <div class="card"><h3><span class="tick">✓</span> Zero tax, no fee code</h3><p>There is no fee logic anywhere in the contract, so there is no hidden dial to turn up to 99% after launch.</p></div>
+    <div class="card"><h3><span class="tick">✓</span> No blacklist or pause</h3><p>Nobody can freeze your balance or block your sell. The honeypot test is in the repo's test suite.</p></div>
+    <div class="card"><h3><span class="tick">✓</span> Not upgradeable</h3><p>No proxy, no delegatecall. What you verify today runs unchanged forever.</p></div>
+    <div class="card"><h3><span class="tick">✓</span> Limits self-destruct</h3><p>The 2% anti-sniper cap can never be lowered, never go under 1%, and expires automatically 24h after deploy.</p></div>
+    <div class="card"><h3><span class="tick">✓</span> Ownership renounced</h3><p><code>owner()</code> returns the zero address. There are no admin keys left to steal or subpoena.</p></div>
+  </div>
+</div></section>
+
+<section id="roadmap"><div class="wrap">
+  <h2>Roadmap</h2>
+  <p class="lead">Deliberately honest.</p>
+  <div class="road">
+    <div class="ph"><b>Phase 1 — Hatch</b><p>Contract deployed and verified on Base. Liquidity added, LP locked, ownership renounced. Chart appears on DexScreener automatically.</p></div>
+    <div class="ph"><b>Phase 2 — Coo</b><p>Listing submissions to DexScreener, CoinGecko, CoinMarketCap and Trust Wallet assets. Logo appears in wallets. Community forms or it doesn't.</p></div>
+    <div class="ph"><b>Phase 3 — Ascend</b><p>Memes. That's the phase. Anyone promising you partnerships, staking yields or a metaverse is selling you something.</p></div>
+    <div class="ph"><b>Phase 4 — Eternal</b><p>The contract keeps running whether or not anyone is watching. The bird outlives us all.</p></div>
+  </div>
+</div></section>
+
+<section id="faq"><div class="wrap">
+  <h2>FAQ</h2>
+  <details><summary>Is this financial advice?</summary><p>No. It is a picture of a bird attached to a number. Meme coins routinely go to zero, and this one very likely will. Spend only what you would happily set on fire.</p></details>
+  <details><summary>Who is Sir Reginald Coo III?</summary><p>A pigeon. He has no team, no VCs, no roadmap beyond eating. He was knighted by nobody and answers to no one.</p></details>
+  <details><summary>Can the developer dump on me?</summary><p>80% of supply is in the locked liquidity pool and ownership is renounced. The team wallet holds 5% and is published before launch — watch it on Basescan.</p></details>
+  <details><summary>Why Base and not Solana or Ethereum?</summary><p>Ethereum mainnet gas would cost more than the whole launch. Base is an Ethereum L2 with cent-level fees, real liquidity, and a Coinbase on-ramp your relatives can actually use.</p></details>
+  <details><summary>Where's the audit?</summary><p>There isn't one — a formal audit costs thousands. Instead the contract is ~120 lines, verified on Basescan, and the full test suite (including honeypot checks) is public on GitHub. Read it yourself; it's shorter than this FAQ.</p></details>
+</div></section>
+
+<section><div class="wrap">
+  <div class="warn">
+    <b>⚠️ Risk disclosure.</b> $COO is a meme token with no intrinsic value, no revenue, no product and no expectation of profit. It is entertainment. The price can go to zero permanently and probably will. Nothing here is an offer, solicitation, or financial advice. Verify the contract address from an official channel before every transaction — impersonator tokens with identical names and logos are launched hourly.
+  </div>
+</div></section>
+
+<footer>
+  <img src="assets/coo-128.png" alt="COO" />
+  <p>$COO · Sir Reginald Coo III, Pigeon of Prosperity · Base</p>
+  <p style="margin-top:8px">Fixed supply. Zero tax. Renounced. Coo.</p>
+</footer>
+
+<div class="toast" id="toast">Contract address copied 🕊️</div>
+
+<script>
+  function copyCA(){
+    const ca = document.getElementById('ca').textContent.trim();
+    const done = () => {
+      const t = document.getElementById('toast');
+      t.classList.add('on');
+      setTimeout(() => t.classList.remove('on'), 1900);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(ca).then(done).catch(fallback);
+    } else fallback();
+    function fallback(){
+      const el = document.createElement('textarea');
+      el.value = ca; document.body.appendChild(el); el.select();
+      try { document.execCommand('copy'); } catch(e){}
+      document.body.removeChild(el); done();
+    }
+  }
+</script>
+</body>
+</html>

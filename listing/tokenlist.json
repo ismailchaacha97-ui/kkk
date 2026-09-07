@@ -1,0 +1,29 @@
+{
+  "name": "COO Token List",
+  "timestamp": "2026-09-07T13:51:56.079Z",
+  "version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "logoURI": "https://coocoin.xyz/assets/coo-logo.png",
+  "keywords": [
+    "memecoin",
+    "base",
+    "coo",
+    "pigeon"
+  ],
+  "tokens": [
+    {
+      "chainId": 8453,
+      "address": "0x0000000000000000000000000000000000000000",
+      "name": "Sir Reginald Coo III",
+      "symbol": "COO",
+      "decimals": 18,
+      "logoURI": "https://coocoin.xyz/assets/coo-logo.png",
+      "tags": [
+        "memecoin"
+      ]
+    }
+  ]
+}
