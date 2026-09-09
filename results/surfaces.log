@@ -1,0 +1,100 @@
+
+[long] constrained practical optimum: 60/132 (nb_min 0.414); unconstrained 60/132; raw-best 80/144
+
+[ls] constrained practical optimum: 16/384 (nb_min 0.215); unconstrained 120/398; raw-best 116/378
+
+[long] constrained practical optimum: 150/710 (nb_min 0.455); unconstrained 150/718; raw-best 34/694
+
+[ls] constrained practical optimum: 86/526 (nb_min 0.259); unconstrained 150/726; raw-best 150/738
+
+vol-scaled: median best slow = 6.9 months (IQR 3.5-16.4); median slow/fast ratio 3.5; slow x vol median 26.69 (IQR 11.90-62.12)
+
+extended ridge [long]: peak median Sharpe 0.492 at slow=694, still >=peak-0.01 up to slow=698
+
+extended ridge [ls]: peak median Sharpe 0.366 at slow=738, still >=peak-0.01 up to slow=742
+
+saved results/summary_surfaces.json
+{
+  "best_long": {
+    "rule": "max-min over +/-4 fast, +/-16 slow, interior, 0.75-14 trades/yr, >=75% markets positive",
+    "fast": 150,
+    "slow": 710,
+    "nb_min_sharpe": 0.4553415669438592,
+    "med_sharpe": 0.46717759808364645,
+    "share_pos": 0.7804878048780488,
+    "share_beat_bh": 0.45121951219512196,
+    "med_calmar": 0.18208969598699862,
+    "med_dd": -0.33534148746533116,
+    "trades_yr": 0.318992353585976,
+    "n_considered": 11325,
+    "unconstrained": {
+      "fast": 150,
+      "slow": 718,
+      "nb_min_sharpe": 0.4553415669438592,
+      "med_sharpe": 0.45751126462477376,
+      "trades_yr": 0.29795346522985877
+    },
+    "raw_median_sharpe_best": {
+      "fast": 34,
+      "slow": 694,
+      "med_sharpe": 0.49233299139171494,
+      "nb_min_sharpe": 0.42035549692875873,
+      "trades_yr": 0.7692357630683737
+    },
+    "calmar_rule": {
+      "fast": 78,
+      "slow": 678,
+      "nb_min_calmar": 0.19088490901469524,
+      "med_calmar": 0.19698211214419312,
+      "med_sharpe": 0.45013116304599865,
+      "share_pos": 0.8048780487804879,
+      "trades_yr": 0.5015494417645611
+    }
+  },
+  "best_ls": {
+    "rule": "max-min over +/-4 fast, +/-16 slow, interior, 0.75-14 trades/yr, >=75% markets positive",
+    "fast": 86,
+    "slow": 526,
+    "nb_min_sharpe": 0.25901463603740194,
+    "med_sharpe": 0.2961715449395492,
+    "share_pos": 0.7560975609756098,
+    "share_beat_bh": 0.2682926829268293,
+    "med_calmar": 0.06523334739891362,
+    "med_dd": -0.44460943599146613,
+    "trades_yr": 0.291585401459854,
+    "n_considered": 3235,
+    "unconstrained": {
+      "fast": 150,
+      "slow": 726,
+      "nb_min_sharpe": 0.3223884865183084,
+      "med_sharpe": 0.34936334646059647,
+      "trades_yr": 0.14933284302832528
+    },
+    "raw_median_sharpe_best": {
+      "fast": 150,
+      "slow": 738,
+      "med_sharpe": 0.36564187100833684,
+      "nb_min_sharpe": 0.25904704317894967,
+      "trades_yr": 0.13891951488423376
+    },
+    "calmar_rule": {
+      "fast": 74,
+      "slow": 610,
+      "nb_min_calmar": 0.05846987989205482,
+      "med_calmar": 0.05999776634564942,
+      "med_sharpe": 0.2712973957970204,
+      "share_pos": 0.7682926829268293,
+      "trades_yr": 0.2616813157362764
+    }
+  },
+  "scaling": {
+    "corr_slow_vol": -0.1992183701634137,
+    "corr_slow_x_vol_autocorr": -0.06253386037955078,
+    "slow_x_vol_median": 26.694499999999998,
+    "slow_x_vol_iqr": [
+      11.904,
+      62.1195
+    ],
+    "months_slow_median": 6.9,
+    "months_slow_iqr": [
+     

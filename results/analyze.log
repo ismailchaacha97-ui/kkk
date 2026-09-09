@@ -1,0 +1,319 @@
+universe: 82 markets  ({'Commodity futures': 10, 'Crypto spot': 3, 'FX (futures marks)': 16, 'Global equity-index futures': 10, 'Rate futures': 7, 'US ETFs': 4, 'US equity indices': 6, 'US single stocks': 26})
+  grid[long]: 762,518 backtests over 9299 pairs x 82 markets
+  grid[ls]: 762,518 backtests over 9299 pairs x 82 markets
+/usr/local/lib/python3.11/dist-packages/numpy/lib/_function_base_impl.py:2882: RuntimeWarning: invalid value encountered in subtract
+  X -= avg[:, None]
+/usr/local/lib/python3.11/dist-packages/pandas/core/nanops.py:1028: RuntimeWarning: invalid value encountered in subtract
+  sqr = _ensure_numeric((avg - values) ** 2)
+
+per-market in-sample winner: slow median 162 bars (IQR 88-373, max 400). 71% of markets pick slow>=100, 7% pick slow<=30.
+
+=== mode=long: top 10 by the max-min plateau rule ===
+ fast  slow  nb_min_sharpe  med_sharpe  share_pos  share_beat_bh  med_calmar  med_dd  med_rt_yr  markets  robust_rank  is_rank
+   60   132          0.414       0.431      0.939          0.402       0.150  -0.329      1.458     82.0            2      209
+   62   130          0.414       0.433      0.939          0.427       0.153  -0.324      1.457     82.0            2      138
+   62   128          0.414       0.430      0.939          0.415       0.146  -0.335      1.457     82.0            2      235
+   58   134          0.414       0.415      0.939          0.402       0.149  -0.338      1.501     82.0            4      918
+   60   130          0.413       0.432      0.939          0.427       0.154  -0.340      1.457     82.0            5      167
+   78   118          0.413       0.435      0.915          0.427       0.149  -0.347      1.449     82.0            6       81
+   60   134          0.413       0.432      0.939          0.378       0.136  -0.324      1.462     82.0            7      159
+   64   130          0.412       0.428      0.951          0.402       0.151  -0.327      1.457     82.0            8      284
+   64   128          0.412       0.427      0.927          0.402       0.146  -0.329      1.457     82.0            8      323
+   58   132          0.412       0.430      0.939          0.415       0.153  -0.331      1.541     82.0           10      213
+--- top 6 by raw median Sharpe (what a naive grid search would hand you) ---
+ fast  slow  nb_min_sharpe  med_sharpe  share_pos  share_beat_bh  med_calmar  med_dd  med_rt_yr  markets  robust_rank  is_rank
+   80   144          0.403       0.455      0.902          0.366       0.158  -0.323      1.226     82.0          239        1
+   60   116          0.382       0.447      0.963          0.427       0.158  -0.320      1.655     82.0         1256        2
+   50   138          0.400       0.446      0.951          0.390       0.152  -0.327      1.656     82.0          359        3
+   70   146          0.402       0.445      0.902          0.354       0.149  -0.327      1.362     82.0          273        4
+   84   140          0.400       0.445      0.902          0.366       0.143  -0.332      1.239     82.0          341        5
+   62   166          0.376       0.445      0.915          0.366       0.140  -0.333      1.281     82.0         1850        6
+
+=== mode=ls: top 10 by the max-min plateau rule ===
+ fast  slow  nb_min_sharpe  med_sharpe  share_pos  share_beat_bh  med_calmar  med_dd  med_rt_yr  markets  robust_rank  is_rank
+  120   398          0.252       0.269      0.732          0.305       0.052  -0.482      0.292     82.0            4       62
+  120   400          0.252       0.259      0.720          0.256       0.049  -0.483      0.292     82.0            4      188
+  120   394          0.252       0.259      0.732          0.305       0.045  -0.491      0.291     82.0            4      185
+  120   388          0.252       0.259      0.744          0.341       0.050  -0.494      0.291     82.0            4      182
+  120   390          0.252       0.264      0.732          0.354       0.051  -0.491      0.291     82.0            4      118
+  120   392          0.252       0.258      0.744          0.317       0.047  -0.491      0.291     82.0            4      206
+  120   386          0.252       0.262      0.744          0.293       0.053  -0.494      0.290     82.0            4      147
+  120   396          0.252       0.268      0.732          0.317       0.048  -0.488      0.295     82.0            4       72
+  120   380          0.251       0.270      0.756          0.341       0.052  -0.484      0.290     82.0           10       55
+  120   384          0.251       0.266      0.744          0.305       0.049  -0.497      0.291     82.0           10       87
+--- top 6 by raw median Sharpe (what a naive grid search would hand you) ---
+ fast  slow  nb_min_sharpe  med_sharpe  share_pos  share_beat_bh  med_calmar  med_dd  med_rt_yr  markets  robust_rank  is_rank
+  116   378          0.246       0.281      0.720          0.341       0.053  -0.499      0.290     82.0           25        1
+  106   378          0.224       0.279      0.744          0.329       0.059  -0.473      0.320     82.0          297        2
+  104   374          0.220       0.278      0.744          0.317       0.050  -0.469      0.332     82.0          456        3
+  104   378          0.220       0.277      0.732          0.341       0.059  -0.471      0.320     82.0          456        4
+  120   376          0.249       0.276      0.756          0.329       0.046  -0.493      0.290     82.0           12        5
+  104   376          0.220       0.276      0.732          0.329       0.050  -0.474      0.328     82.0          456        6
+
+=== famous settings vs the study's picks (long/short) ===
+   pair              label  med_sharpe  nb_min_sharpe  share_pos  share_beat_bh  med_calmar  rank_raw  rank_robust
+120/398 study top-3 robust       0.269          0.252      0.732          0.305       0.052        62            4
+120/400 study top-3 robust       0.259          0.252      0.720          0.256       0.049       188            4
+120/394 study top-3 robust       0.259          0.252      0.732          0.305       0.045       185            4
+116/378 study top-3 robust       0.281          0.246      0.720          0.341       0.053         1           25
+106/378 study top-3 robust       0.279          0.224      0.744          0.329       0.059         2          297
+ 50/200             50/200       0.194          0.177      0.829          0.293       0.036      6992         6189
+ 20/100             20/100       0.128          0.095      0.732          0.244      -0.007      8611         8484
+ 10/100             10/100       0.101          0.041      0.646          0.207      -0.007      8805         8838
+  20/50              20/50       0.065          0.015      0.622          0.232      -0.019      8977         8993
+  12/26         12/26 MACD       0.057         -0.086      0.573          0.195      -0.029      9011         9210
+  10/20              10/20       0.001         -0.139      0.512          0.220      -0.054      9219         9240
+
+walk-forward over 82 markets x 47 candidate pairs ...
+   walk-forward judging 24 fixed pairs + the per-fold grid optimum
+      walk-forward 12/82 markets (45 folds)
+      walk-forward 24/82 markets (105 folds)
+      walk-forward 36/82 markets (165 folds)
+      walk-forward 48/82 markets (225 folds)
+      walk-forward 60/82 markets (280 folds)
+      walk-forward 72/82 markets (340 folds)
+
+[long] walk-forward summary:
+                                     rule  markets  folds  is_sharpe  oos_sharpe  oos_pos_share  regret_vs_oracle  vs_median_pair  oos_pctile
+grid-optimal pair, re-optimised each fold       78    390      1.004       0.243          0.600             0.734          -0.072         NaN
+ oracle (best pair chosen with hindsight)       78    390        NaN       0.965          0.962             0.000           0.667         NaN
+   median pair on the grid (no selection)       78    390        NaN       0.298          0.631               NaN           0.000         NaN
+                        fixed pair 50/138       78    390      0.358       0.284          0.623             0.686          -0.020       0.503
+                        fixed pair 58/132       78    390      0.381       0.294          0.628             0.676          -0.010       0.515
+      walk-forward 12/82 markets (45 folds)
+      walk-forward 24/82 markets (105 folds)
+      walk-forward 36/82 markets (165 folds)
+      walk-forward 48/82 markets (225 folds)
+      walk-forward 60/82 markets (280 folds)
+      walk-forward 72/82 markets (340 folds)
+
+[ls] walk-forward summary:
+                                     rule  markets  folds  is_sharpe  oos_sharpe  oos_pos_share  regret_vs_oracle  vs_median_pair  oos_pctile
+grid-optimal pair, re-optimised each fold       78    390      1.041       0.121          0.554             0.867          -0.136         NaN
+ oracle (best pair chosen with hindsight)       78    390        NaN       0.988          0.992             0.000           0.732         NaN
+   median pair on the grid (no selection)       78    390        NaN       0.257          0.633               NaN           0.000         NaN
+                        fixed pair 50/138       78    390      0.266       0.210          0.597             0.778          -0.047       0.496
+                        fixed pair 58/132       78    390      0.276       0.213          0.595             0.776          -0.044       0.498
+   walk-forward took 93s; IS winner median 0.96 -> OOS 0.09 (91% decay)
+
+split-sample OOS (rank on the first 60% of history, score on the last 40%) ...
+   40 pairs judged on 82 markets
+      split-sample 20/82 markets (760 rows)
+      split-sample 40/82 markets (1554 rows)
+      split-sample 60/82 markets (2337 rows)
+      split-sample 80/82 markets (3137 rows)
+
+[long] split-sample: what a 60%-of-history pick would have earned on the rest
+ fast  slow  markets  med_is  nb_is  med_oos  pos_oos  med_oos_calmar  med_oos_dd  med_bh_oos  rank_is  rank_oos                                              picked
+   60   132       81   0.476  0.537    0.261    0.728           0.073      -0.242       0.409        1         9                                                 NaN
+   60   120       81   0.489  0.537    0.294    0.728           0.109      -0.239       0.411        1         4 by IS neighbour-robust Sharpe + by IS median Sharpe
+   40   100       81   0.486  0.530    0.247    0.765           0.104      -0.247       0.408        3        19                                                 NaN
+   80   144       81   0.475  0.529    0.256    0.704           0.099      -0.243       0.409        4        14                                                 NaN
+  100   200       81   0.458  0.518    0.227    0.741           0.079      -0.234       0.407        5        27                                                 NaN
+   50   150       81   0.471  0.518    0.235    0.753           0.078      -0.228       0.381        6        24                                                 NaN
+  116   378       80   0.464  0.510    0.321    0.700           0.122      -0.237       0.407        7         2                                                 NaN
+   60   180       81   0.448  0.509    0.252    0.728           0.078      -0.235       0.414        8        16                                                 NaN
+   50   200       81   0.431  0.506    0.229    0.728           0.061      -0.234       0.407        9        26                                                 NaN
+   30    90       81   0.471  0.503    0.252    0.691           0.076      -0.243       0.401       10        15                                                 NaN
+   30   200       81   0.450  0.499    0.245    0.753           0.082      -0.228       0.407       11        21                                                 NaN
+  174   698       79   0.471  0.499    0.247    0.658           0.087      -0.241       0.463       12        20                                                 NaN
+  100   300       80   0.463  0.498    0.257    0.750           0.077      -0.241       0.422       13        12                                                 NaN
+  100   250       80   0.462  0.498    0.248    0.750           0.084      -0.237       0.402       14        18                                                 NaN
+      split-sample 20/82 markets (760 rows)
+      split-sample 40/82 markets (1560 rows)
+      split-sample 60/82 markets (2343 rows)
+      split-sample 80/82 markets (3143 rows)
+
+[ls] split-sample: what a 60%-of-history pick would have earned on the rest
+ fast  slow  markets  med_is  nb_is  med_oos  pos_oos  med_oos_calmar  med_oos_dd  med_bh_oos  rank_is  rank_oos                          picked
+  116   378       80   0.326  0.409    0.196    0.662           0.050      -0.342       0.407        1         9   by IS neighbour-robust Sharpe
+  174   698       80   0.357  0.406    0.213    0.638           0.065      -0.287       0.441        2         8                             NaN
+   60   400       80   0.345  0.398    0.141    0.675           0.023      -0.333       0.404        3        15                             NaN
+  134   750       80   0.393  0.398    0.233    0.638           0.101      -0.263       0.443        4         6             by IS median Sharpe
+  162   678       80   0.363  0.398    0.235    0.625           0.080      -0.283       0.442        5         5                             NaN
+  150   710       80   0.380  0.397    0.240    0.650           0.092      -0.273       0.448        6         4                             NaN
+  100   400       80   0.333  0.389    0.182    0.600           0.043      -0.323       0.404        7        11                             NaN
+  120   398       80   0.346  0.388    0.169    0.625           0.029      -0.327       0.407        8        13                             NaN
+   74   758       80   0.274  0.387    0.284    0.675           0.151      -0.264       0.443        9         1 by OOS median Sharpe (cheating)
+  100   300       80   0.338  0.379    0.118    0.588           0.015      -0.373       0.422       10        18                             NaN
+  100   200       81   0.360  0.375    0.035    0.568          -0.019      -0.366       0.407       11        26                             NaN
+   62   758       80   0.265  0.372    0.282    0.650           0.111      -0.278       0.443       12         2                             NaN
+  150   400       80   0.284  0.371    0.222    0.662           0.070      -0.342       0.404       13         7                             NaN
+   80   300       80   0.293  0.368    0.129    0.612           0.007      -0.375       0.422       14        16                             NaN
+   split-sample took 31s
+
+=== deflated Sharpe (multiple-testing adjusted; best-of-9299-trials hurdle) ===
+   pair  med_sharpe  hurdle  dsr_literal  dsr_effective
+116/378       0.281   1.305        0.001          0.024
+106/378       0.279   1.305        0.001          0.023
+104/374       0.278   1.304        0.001          0.023
+104/378       0.277   1.305        0.001          0.023
+120/376       0.276   1.305        0.001          0.023
+104/376       0.276   1.305        0.001          0.023
+120/380       0.270   1.306        0.001          0.022
+120/398       0.269   1.311        0.001          0.021
+
+trend book: full history (equal weight among markets alive each day); dense cross-check window 2009-01-01..2019-02-28
+  pair  sharpe  vt_sharpe  vt_cagr  vt_dd  vt_calmar
+60/116   0.507      0.756    0.072 -0.306      0.235
+50/138   0.501      0.744    0.071 -0.308      0.230
+58/132   0.485      0.732    0.070 -0.310      0.224
+56/134   0.477      0.723    0.069 -0.302      0.227
+10/100   0.417      0.714    0.068 -0.532      0.128
+60/132   0.477      0.712    0.067 -0.320      0.210
+58/134   0.477      0.711    0.067 -0.318      0.212
+60/130   0.472      0.710    0.067 -0.320      0.210
+60/134   0.469      0.703    0.066 -0.316      0.210
+62/128   0.469      0.702    0.066 -0.321      0.207
+  buy&hold of the same book: Sharpe 0.63  CAGR 10.1%  MaxDD -52%
+
+execution check (signal close -> trade next open, 39 markets with real opens):
+   pair  markets  med_sharpe_close_exec  med_sharpe_next_open  med_sharpe_no_cost  open_minus_close
+120/396       39                  0.603                 0.632               0.607             0.029
+120/398       39                  0.589                 0.615               0.594             0.025
+120/394       39                  0.573                 0.614               0.577             0.042
+120/392       39                  0.581                 0.589               0.585             0.008
+106/378       39                  0.575                 0.586               0.579             0.011
+120/376       39                  0.615                 0.586               0.620            -0.029
+
+negative control (stale-timestamp FX spot vs clean FX futures marks):
+  pair  contaminated_fx_spot_med_sharpe  n_ctrl  fx_futures_med_sharpe  n_clean  inflation
+  5/20                             0.45       1                   0.06       16       0.40
+  5/35                             0.51       1                   0.03       16       0.47
+  8/21                             0.46       1                   0.07       16       0.40
+  9/21                             0.44       1                   0.05       16       0.39
+ 10/20                             0.42       1                   0.02       16       0.41
+10/100                             0.18       1                   0.11       16       0.07
+ 12/26                             0.46       1                   0.04       16       0.42
+ 13/48                             0.32       1                   0.02       16       0.30
+ 20/50                             0.37       1                   0.11       16       0.27
+20/100                             0.13       1                   0.13       16       0.01
+
+median Sharpe by decade [long/short]:
+         1970s_ls  1980s_ls  1990s_ls  2000s_ls  2010s_ls  2020s_ls
+pair                                                               
+10/100       1.07      0.59      0.22      0.29     -0.07      0.03
+10/20        1.02      0.30      0.15      0.24     -0.14     -0.02
+104/374      0.51      0.33      0.03      0.12      0.17      0.22
+104/376      0.52      0.32      0.03      0.12      0.19      0.18
+104/378      0.51      0.28      0.05      0.15      0.19      0.20
+106/378      0.51      0.29      0.06      0.13      0.21      0.19
+116/378      0.43      0.38      0.06      0.12      0.20      0.22
+12/26        0.71      0.44      0.15      0.24     -0.11     -0.08
+120/376      0.47      0.41      0.09      0.16      0.21      0.20
+120/380      0.40      0.39      0.08      0.14      0.18      0.16
+120/382      0.40      0.40      0.06      0.10      0.18      0.16
+120/384      0.41      0.40      0.02      0.11      0.15      0.18
+120/386      0.42      0.39      0.01      0.10      0.16      0.15
+120/388      0.44      0.40      0.03      0.10      0.17      0.19
+120/390      0.48      0.39      0.08      0.10      0.15      0.19
+120/392      0.66      0.43      0.03      0.10      0.16      0.20
+120/394      0.62      0.45      0.04      0.09      0.13      0.20
+120/396      0.62      0.42      0.02      0.08      0.15      0.20
+120/398      0.60      0.45      0.00      0.05      0.13      0.24
+120/400      0.64      0.44     -0.01      0.10      0.14      0.22
+13/48        0.99      0.48      0.10      0.22     -0.07     -0.08
+20/100       0.92      0.71      0.24      0.22     -0.03      0.08
+20/50        0.98      0.48      0.12      0.21     -0.06     -0.09
+21/55        0.93      0.49      0.16      0.23     -0.08     -0.08
+5/20         0.94      0.35     -0.04      0.16     -0.25     -0.06
+5/35         0.89      0.35      0.14      0.17     -0.20     -0.18
+50/138       0.65      0.65      0.11      0.36      0.17      0.20
+50/200       0.74      0.74      0.17      0.34      0.17      0.17
+56/134       0.62      0.64      0.14      0.33      0.17      0.19
+58/132       0.62      0.64      0.16      0.32      0.19      0.17
+58/134       0.60      0.65      0.15      0.33      0.16      0.17
+60/116       0.59      0.68      0.13      0.43      0.14      0.15
+60/130       0.60      0.68      0.15      0.33      0.18      0.16
+60/132       0.60      0.62      0.14      0.30      0.18      0.20
+60/134       0.59      0.63      0.13      0.34      0.18      0.16
+62/128       0.62      0.64      0.15      0.37      0.17      0.19
+62/130       0.58      0.63      0.13      0.29      0.18      0.22
+62/166       0.64      0.64      0.18      0.30      0.17      0.21
+64/128       0.60      0.62      0.15      0.30      0.17      0.21
+64/130       0.59      0.62      0.12      0.29      0.18      0.20
+70/146       0.61      0.62      0.12      0.34      0.21      0.18
+76/114       0.59      0.58      0.14      0.32      0.17      0.13
+78/118       0.64      0.62      0.18      0.29      0.18      0.19
+8/21         1.07      0.31      0.00      0.25     -0.15      0.00
+80/144       0.74      0.71      0.14      0.31      0.21      0.19
+84/140       0.74      0.71      0.12      0.26      0.20      0.19
+9/21         1.01      0.31      0.14      0.20     -0.14     -0.02
+  summary.json written
+
+figures ...
+
+wrote tables to /home/user/kkk/results/tables, figures to /home/user/kkk/results/figs, summary.json (395s)
+
+HEADLINE: {
+  "robust_best_long": {
+    "fast": 60,
+    "slow": 132,
+    "med_sharpe": 0.43051768166214976,
+    "nb_min": 0.41434707167819157,
+    "share_pos": 0.9390243902439024,
+    "share_beat_bh": 0.4024390243902439,
+    "med_calmar": 0.1502645936797847,
+    "med_dd": -0.32865512693597404,
+    "med_cagr": 0.04727252858384066,
+    "trades_per_year": 1.4578512396694214,
+    "spike": 0.00322354374520617
+  },
+  "robust_best_ls": {
+    "fast": 120,
+    "slow": 398,
+    "med_sharpe": 0.2688245170984547,
+    "nb_min": 0.2517741084021333,
+    "share_pos": 0.7317073170731707,
+    "share_beat_bh": 0.3048780487804878,
+    "med_calmar": 0.052079226001328256,
+    "med_dd": -0.4815013645093526,
+    "med_cagr": 0.023529264921936292,
+    "trades_per_year": 0.2918512564452083,
+    "spike": 0.0067909396528020305
+  },
+  "raw_best_ls": {
+    "fast": 116,
+    "slow": 378,
+    "med_sharpe": 0.28110074070835717,
+    "nb_min": 0.2459542702219406,
+    "share_pos": 0.7195121951219512,
+    "share_beat_bh": 0.34146341463414637,
+    "med_calmar": 0.05345439320944133,
+    "med_dd": -0.4991223115114737,
+    "med_cagr": 0.029299052155003818,
+    "trades_per_year": 0.28978840846366144,
+    "spike": 0.018997697350964293
+  },
+  "wf_stats": {
+    "folds": 390,
+    "markets": 78,
+    "is_winner_med_oos": 0.08743492891611147,
+    "is_winner_med_is": 0.961894986195605,
+    "oracle_med_oos": 0.9048688484090903,
+    "median_pair_med_oos": 0.21417524634174517,
+    "decay_pct": 0.9091013778313517,
+    "share_oos_positive": 0.5538461538461539,
+    "share_is_winner_positive": 0.9923076923076923,
+    "corr_is_oos": -0.1545391534026699
+  },
+  "bh_book": {
+    "sharpe": 0.6270559998039908,
+    "cagr": 0.10082938677149172,
+    "max_dd": -0.5214017802914255
+  },
+  "per_market": {
+    "best_slow_median": 162.0,
+    "best_slow_min": 6,
+    "best_slow_max": 400,
+    "best_slow_iqr": [
+      88.5,
+      373.0
+    ],
+    "best_fast_median": 39.0,
+    "share_slow_ge_100": 0.7073170731707317,
+    "share_slow_le_30": 0.073170731
+A rc=0
+S rc=0
+SH rc=0
+CHAIN_DONE

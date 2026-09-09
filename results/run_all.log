@@ -1,0 +1,212 @@
+[1/5] daily grid, realistic costs
+loading universe (D bars) ...
+  data-hygiene screen dropped 1 series:
+      - etf/SHV                      stale/timestamp artefact, lag1 autocorr -0.34
+  82 markets across 8 families
+    Commodity futures             10
+    Crypto spot                    3
+    FX (futures marks)            16
+    Global equity-index futures   10
+    Rate futures                   7
+    US ETFs                        4
+    US equity indices              6
+    US single stocks              26
+
+grid: 9299 (fast,slow) pairs  x  82 markets  =  762,518 backtests
+
+== mode=long  (cost x1.0)
+    grid  15/82 assets   (last: fut_commodity/SILVER,   9299 pairs)
+    grid  30/82 assets   (last: fut_rates/GILT,   9299 pairs)
+    grid  45/82 assets   (last: fx_futures/NOK,   9299 pairs)
+    grid  60/82 assets   (last: stock/CAT,   9299 pairs)
+    grid  75/82 assets   (last: stock/MSFT,   9299 pairs)
+    grid  82/82 assets   (last: stock/XOM,   9299 pairs)
+   -> 762,518 rows  in 116s
+
+== mode=ls  (cost x1.0)
+    grid  15/82 assets   (last: fut_commodity/SILVER,   9299 pairs)
+    grid  30/82 assets   (last: fut_rates/GILT,   9299 pairs)
+    grid  45/82 assets   (last: fx_futures/NOK,   9299 pairs)
+    grid  60/82 assets   (last: stock/CAT,   9299 pairs)
+    grid  75/82 assets   (last: stock/MSFT,   9299 pairs)
+    grid  82/82 assets   (last: stock/XOM,   9299 pairs)
+   -> 762,518 rows  in 117s
+
+total 235s
+[2/5] weekly-bar grid
+loading universe (W bars) ...
+  data-hygiene screen dropped 1 series:
+      - etf/SHV                      stale/timestamp artefact, lag1 autocorr -0.34
+  82 markets across 8 families
+    Commodity futures             10
+    Crypto spot                    3
+    FX (futures marks)            16
+    Global equity-index futures   10
+    Rate futures                   7
+    US ETFs                        4
+    US equity indices              6
+    US single stocks              26
+
+grid: 9299 (fast,slow) pairs  x  82 markets  =  762,518 backtests
+
+== mode=long  (cost x1.0)
+    grid  15/82 assets   (last: fut_commodity/SILVER,   9299 pairs)
+    grid  30/82 assets   (last: fut_rates/GILT,   9299 pairs)
+    grid  45/82 assets   (last: fx_futures/NOK,   9299 pairs)
+    grid  60/82 assets   (last: stock/CAT,   9299 pairs)
+    grid  75/82 assets   (last: stock/MSFT,   9299 pairs)
+    grid  82/82 assets   (last: stock/XOM,   9299 pairs)
+   -> 734,621 rows  in 24s
+
+== mode=ls  (cost x1.0)
+    grid  15/82 assets   (last: fut_commodity/SILVER,   9299 pairs)
+    grid  30/82 assets   (last: fut_rates/GILT,   9299 pairs)
+    grid  45/82 assets   (last: fx_futures/NOK,   9299 pairs)
+    grid  60/82 assets   (last: stock/CAT,   9299 pairs)
+    grid  75/82 assets   (last: stock/MSFT,   9299 pairs)
+    grid  82/82 assets   (last: stock/XOM,   9299 pairs)
+   -> 734,621 rows  in 25s
+
+total 51s
+[3/5] frictionless (zero cost) grid
+loading universe (D bars) ...
+  data-hygiene screen dropped 1 series:
+      - etf/SHV                      stale/timestamp artefact, lag1 autocorr -0.34
+  82 markets across 8 families
+    Commodity futures             10
+    Crypto spot                    3
+    FX (futures marks)            16
+    Global equity-index futures   10
+    Rate futures                   7
+    US ETFs                        4
+    US equity indices              6
+    US single stocks              26
+
+grid: 9299 (fast,slow) pairs  x  82 markets  =  762,518 backtests
+
+== mode=long  (cost x0.0)
+    grid  15/82 assets   (last: fut_commodity/SILVER,   9299 pairs)
+    grid  30/82 assets   (last: fut_rates/GILT,   9299 pairs)
+    grid  45/82 assets   (last: fx_futures/NOK,   9299 pairs)
+    grid  60/82 assets   (last: stock/CAT,   9299 pairs)
+    grid  75/82 assets   (last: stock/MSFT,   9299 pairs)
+    grid  82/82 assets   (last: stock/XOM,   9299 pairs)
+   -> 762,518 rows  in 110s
+
+== mode=ls  (cost x0.0)
+    grid  15/82 assets   (last: fut_commodity/SILVER,   9299 pairs)
+    grid  30/82 assets   (last: fut_rates/GILT,   9299 pairs)
+    grid  45/82 assets   (last: fx_futures/NOK,   9299 pairs)
+    grid  60/82 assets   (last: stock/CAT,   9299 pairs)
+    grid  75/82 assets   (last: stock/MSFT,   9299 pairs)
+    grid  82/82 assets   (last: stock/XOM,   9299 pairs)
+   -> 762,518 rows  in 119s
+
+total 230s
+[4/5] high-cost (3x) grid
+loading universe (D bars) ...
+  data-hygiene screen dropped 1 series:
+      - etf/SHV                      stale/timestamp artefact, lag1 autocorr -0.34
+  82 markets across 8 families
+    Commodity futures             10
+    Crypto spot                    3
+    FX (futures marks)            16
+    Global equity-index futures   10
+    Rate futures                   7
+    US ETFs                        4
+    US equity indices              6
+    US single stocks              26
+
+grid: 9299 (fast,slow) pairs  x  82 markets  =  762,518 backtests
+
+== mode=long  (cost x3.0)
+    grid  15/82 assets   (last: fut_commodity/SILVER,   9299 pairs)
+    grid  30/82 assets   (last: fut_rates/GILT,   9299 pairs)
+    grid  45/82 assets   (last: fx_futures/NOK,   9299 pairs)
+    grid  60/82 assets   (last: stock/CAT,   9299 pairs)
+    grid  75/82 assets   (last: stock/MSFT,   9299 pairs)
+    grid  82/82 assets   (last: stock/XOM,   9299 pairs)
+   -> 762,518 rows  in 118s
+
+== mode=ls  (cost x3.0)
+    grid  15/82 assets   (last: fut_commodity/SILVER,   9299 pairs)
+    grid  30/82 assets   (last: fut_rates/GILT,   9299 pairs)
+    grid  45/82 assets   (last: fx_futures/NOK,   9299 pairs)
+    grid  60/82 assets   (last: stock/CAT,   9299 pairs)
+    grid  75/82 assets   (last: stock/MSFT,   9299 pairs)
+    grid  82/82 assets   (last: stock/XOM,   9299 pairs)
+   -> 762,518 rows  in 123s
+
+total 242s
+[5/5] SMA control (same grid, simple instead of exponential)
+loading universe (D bars) ...
+  data-hygiene screen dropped 1 series:
+      - etf/SHV                      stale/timestamp artefact, lag1 autocorr -0.34
+  82 markets across 8 families
+    Commodity futures             10
+    Crypto spot                    3
+    FX (futures marks)            16
+    Global equity-index futures   10
+    Rate futures                   7
+    US ETFs                        4
+    US equity indices              6
+    US single stocks              26
+
+grid: 9299 (fast,slow) pairs  x  82 markets  =  762,518 backtests
+
+== mode=long  (cost x1.0)
+    grid  15/82 assets   (last: fut_commodity/SILVER,   9299 pairs)
+    grid  30/82 assets   (last: fut_rates/GILT,   9299 pairs)
+    grid  45/82 assets   (last: fx_futures/NOK,   9299 pairs)
+    grid  60/82 assets   (last: stock/CAT,   9299 pairs)
+    grid  75/82 assets   (last: stock/MSFT,   9299 pairs)
+    grid  82/82 assets   (last: stock/XOM,   9299 pairs)
+   -> 762,518 rows  in 113s
+
+== mode=ls  (cost x1.0)
+    grid  15/82 assets   (last: fut_commodity/SILVER,   9299 pairs)
+    grid  30/82 assets   (last: fut_rates/GILT,   9299 pairs)
+    grid  45/82 assets   (last: fx_futures/NOK,   9299 pairs)
+    grid  60/82 assets   (last: stock/CAT,   9299 pairs)
+    grid  75/82 assets   (last: stock/MSFT,   9299 pairs)
+    grid  82/82 assets   (last: stock/XOM,   9299 pairs)
+   -> 762,518 rows  in 122s
+
+total 236s
+ALL DONE
+EXIT:0
+loading universe (D bars) ...
+  data-hygiene screen dropped 1 series:
+      - etf/SHV                      stale/timestamp artefact, lag1 autocorr -0.34
+  82 markets across 8 families
+    Commodity futures             10
+    Crypto spot                    3
+    FX (futures marks)            16
+    Global equity-index futures   10
+    Rate futures                   7
+    US ETFs                        4
+    US equity indices              6
+    US single stocks              26
+
+grid: 13368 (fast,slow) pairs  x  82 markets  =  1,096,176 backtests
+
+== mode=long  (cost x1.0)
+    grid  15/82 assets   (last: fut_commodity/SILVER,  13368 pairs)
+    grid  30/82 assets   (last: fut_rates/GILT,  13368 pairs)
+    grid  45/82 assets   (last: fx_futures/NOK,  13368 pairs)
+    grid  60/82 assets   (last: stock/CAT,  13368 pairs)
+    grid  75/82 assets   (last: stock/MSFT,  13368 pairs)
+    grid  82/82 assets   (last: stock/XOM,  13368 pairs)
+   -> 1,096,176 rows  in 153s
+
+== mode=ls  (cost x1.0)
+    grid  15/82 assets   (last: fut_commodity/SILVER,  13368 pairs)
+    grid  30/82 assets   (last: fut_rates/GILT,  13368 pairs)
+    grid  45/82 assets   (last: fx_futures/NOK,  13368 pairs)
+    grid  60/82 assets   (last: stock/CAT,  13368 pairs)
+    grid  75/82 assets   (last: stock/MSFT,  13368 pairs)
+    grid  82/82 assets   (last: stock/XOM,  13368 pairs)
+   -> 1,096,176 rows  in 180s
+
+total 334s
+EXT DONE

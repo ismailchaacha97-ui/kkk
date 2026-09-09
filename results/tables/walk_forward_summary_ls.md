@@ -1,0 +1,6 @@
+                                     rule  markets  folds  is_sharpe  oos_sharpe  oos_pos_share  regret_vs_oracle  vs_median_pair  oos_pctile
+grid-optimal pair, re-optimised each fold       78    390      1.041       0.121          0.554             0.867          -0.136         NaN
+ oracle (best pair chosen with hindsight)       78    390        NaN       0.988          0.992             0.000           0.732         NaN
+   median pair on the grid (no selection)       78    390        NaN       0.257          0.633               NaN           0.000         NaN
+                        fixed pair 50/138       78    390      0.266       0.210          0.597             0.778          -0.047       0.496
+                        fixed pair 58/132       78    390      0.276       0.213          0.595             0.776          -0.044       0.498
