@@ -541,6 +541,15 @@ python  scripts/key_results.py          # every number quoted above, read from t
 python  -m pytest tests/ -q             # 29 tests: engine, alignment, costs, annualisation, OOS
 ```
 
+**MT4:** [`mt4/EMAStudy_Signals.mq4`](mt4/EMAStudy_Signals.mq4) draws this pair with non-repainting
+flip arrows and replays the study's own accounting on whatever chart it is attached to;
+[`mt4/EMAStudy_AutoTrade.mq4`](mt4/EMAStudy_AutoTrade.mq4) is the same rule as an Expert Advisor for
+the Strategy Tester. `scripts/check_mt4_parity.py` measures the one place the platforms genuinely differ
+— MetaTrader seeds an EMA with a simple average of the first `Period` values, this study seeded with the
+first observation — and finds it changes nothing that matters: 77 of 83 markets end up with exactly the
+same number of trades and the median Sharpe gap is 0.0000 (worst ±0.030) once at least a few years of
+history are loaded. Details and install steps in [`mt4/README.md`](mt4/README.md).
+
 Machine-readable results: `results/summary.json` (design, surfaces, walk-forward, split-sample, DSR,
 decades), `results/summary_surfaces.json` (bands/ridges/constrained picks), `results/summary_shortlist.json`,
 plus CSV and markdown for every table under `results/tables/` and 14 figures under `results/figs/`.

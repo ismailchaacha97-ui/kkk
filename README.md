@@ -32,6 +32,10 @@ Re-tuning the pair per market or per year is worse than not trying at all (§5).
 
 ## Layout
 
+Two MT4 implementations of the recommended rule live in [`mt4/`](mt4/README.md)
+(`EMAStudy_Signals.mq4` indicator, `EMAStudy_AutoTrade.mq4` Expert Advisor), including a measured
+check that MetaTrader's SMA-seeded EMA reproduces the signals this study backtested.
+
 ```
 scripts/fetch_data.py         download + normalise the raw price files, with hygiene screens
 scripts/run_study.py          one grid sweep (mode, bar size, cost multiplier, MA type)
@@ -42,6 +46,8 @@ scripts/analyze_shortlist.py  per-asset-class tables, 3-year consistency, decade
 scripts/benchmark_book.py     buy & hold rebuilt on the identical book, window and per-market starts
 scripts/key_results.py        every number quoted in REPORT.md, read back out of the result files
 scripts/fix_annualisation.py  exact rescale of cached grids when annualisation changes (+ self-check)
+scripts/check_mt4_parity.py   MT4's EMA seeding vs this study's: do the trades survive the port?
+scripts/check_mql4.py         structural checks on mt4/*.mq4 (no MetaEditor here, so no compiler)
 src/ema_study/data.py         loader, annualisation from bars-per-calendar-year, hygiene screens
 src/ema_study/engine.py       EMA, position/state construction, metrics, single-pair backtests
 src/ema_study/grid.py         batched full-grid evaluator (grouped by slow period)
