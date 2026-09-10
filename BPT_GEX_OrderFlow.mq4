@@ -1,33 +1,33 @@
 //+------------------------------------------------------------------+
 //|                                           BPT_GEX_OrderFlow.mq4 |
-//|        BPT ULTIMATE INSTITUTIONAL MASTER EDITION (v6.0 FINAL)   |
-//|               (GEX + Order Flow + Compounding Engine)           |
+//|          BPT APEX 7-FIGURE INSTITUTIONAL TERMINAL (v7.0 FINAL)  |
+//|         (GEX + Order Flow Tape + Confluence Score + Compounding)|
 //|                                    https://www.youtube.com/@bptnq|
 //+------------------------------------------------------------------+
-#property copyright "BPT Order Flow & GEX Method - Master Edition v6.0"
+#property copyright "BPT 7-Figure Institutional Terminal - Apex Edition v7.0"
 #property link      "https://www.youtube.com/@bptnq"
-#property version   "6.00"
+#property version   "7.00"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 7
 #property indicator_plots   7
 
-// --- Plot 1: Buy Signal Arrow ---
-#property indicator_label1  "BPT Master A+ Buy"
+// --- Plot 1: AAA+ Buy Signal Arrow ---
+#property indicator_label1  "AAA+ Apex Buy Setup"
 #property indicator_type1   DRAW_ARROW
 #property indicator_color1  clrLime
 #property indicator_style1  STYLE_SOLID
 #property indicator_width1  3
 
-// --- Plot 2: Sell Signal Arrow ---
-#property indicator_label2  "BPT Master A+ Sell"
+// --- Plot 2: AAA+ Sell Signal Arrow ---
+#property indicator_label2  "AAA+ Apex Sell Setup"
 #property indicator_type2   DRAW_ARROW
 #property indicator_color2  clrRed
 #property indicator_style2  STYLE_SOLID
 #property indicator_width2  3
 
-// --- Plot 3: GEX Call Wall (Upper Resistance) ---
-#property indicator_label3  "GEX Call Wall (Resistance)"
+// --- Plot 3: GEX Call Wall (Institutional Ceiling) ---
+#property indicator_label3  "GEX Call Wall (Ceiling)"
 #property indicator_type3   DRAW_LINE
 #property indicator_color3  clrCrimson
 #property indicator_style3  STYLE_SOLID
@@ -40,8 +40,8 @@
 #property indicator_style4  STYLE_DOT
 #property indicator_width4  1
 
-// --- Plot 5: GEX Put Wall (Lower Support) ---
-#property indicator_label5  "GEX Put Wall (Support)"
+// --- Plot 5: GEX Put Wall (Institutional Floor) ---
+#property indicator_label5  "GEX Put Wall (Floor)"
 #property indicator_type5   DRAW_LINE
 #property indicator_color5  clrDodgerBlue
 #property indicator_style5  STYLE_SOLID
@@ -72,55 +72,56 @@ enum ENUM_GEX_MODE
 
 enum ENUM_ENTRY_MODE
 {
-   ENTRY_SNIPER_MSS     = 0, // Master Mode: 2-Bar Market Structure Shift (MSS) Reclaim
+   ENTRY_APEX_MSS       = 0, // 7-Figure Mode: 2-Bar Market Structure Shift (MSS) Reclaim
    ENTRY_DIRECT_SWEEP   = 1  // Direct Mode: Immediate Wick Liquidity Sweep Absorption
 };
 
 //+------------------------------------------------------------------+
 //| INPUT PARAMETERS                                                 |
 //+------------------------------------------------------------------+
-// --- 1. Account Risk & Position Sizing Calculator ---
-input string          Section_Compounding     = "=== 1. RISK & COMPOUNDING CALCULATOR ===";
+// --- 1. Account Risk & 7-Figure Compounding Calculator ---
+input string          Section_Compounding     = "=== 1. 7-FIGURE RISK & COMPOUNDING ===";
 input double          InpRiskPercent          = 1.0;             // Risk Per Trade (% of Account Balance)
-input double          InpCustomBalance        = 0.0;             // Custom Balance Override (0 = Use Live Balance)
-input double          InpStopBufferATR        = 0.35;            // SL Volatility Buffer (x ATR)
+input double          InpCustomBalance        = 0.0;             // Custom Account Balance (0 = Use Live Balance)
+input double          InpStopBufferATR        = 0.35;            // Anti-Slippage SL Cushion (x ATR)
 
-// --- 2. GEX & Institutional Volatility Engine ---
+// --- 2. Institutional GEX & Volatility Engine ---
 input string          Section_GEX             = "=== 2. GAMMA EXPOSURE (GEX) ===";
 input ENUM_GEX_MODE   InpGexMode              = GEX_MODE_AUTO;   // GEX Calculation Mode
-input double          InpManualCallWall       = 0.0;             // Manual Call Wall (0 = Auto)
-input double          InpManualPutWall        = 0.0;             // Manual Put Wall (0 = Auto)
-input double          InpManualZeroGamma      = 0.0;             // Manual Zero Gamma (0 = Auto)
-input int             InpAutoPeriod           = 30;              // Auto Volatility Lookback Period
-input double          InpGexDevMultiplier     = 2.2;             // GEX Wall StdDev Multiplier
+input double          InpManualCallWall       = 0.0;             // Manual Call Wall Strike (0 = Auto)
+input double          InpManualPutWall        = 0.0;             // Manual Put Wall Strike (0 = Auto)
+input double          InpManualZeroGamma      = 0.0;             // Manual Zero Gamma Strike (0 = Auto)
+input int             InpAutoPeriod           = 30;              // Volatility Lookback Period
+input double          InpGexDevMultiplier     = 2.2;             // GEX Wall Multiplier (2.0 - 2.5)
 
-// --- 3. Order Flow & Anti-Reversal Filters ---
-input string          Section_OrderFlow       = "=== 3. ORDER FLOW & MSS TRIGGER ===";
-input ENUM_ENTRY_MODE InpEntryMode            = ENTRY_SNIPER_MSS; // Entry Trigger Mechanism
-input bool            InpRequireDeltaFlip     = true;            // Require Real Aggressive Delta Direction
-input bool            InpRequireLiquiditySweep= true;            // Require Liquidity Sweep of Previous Extreme
+// --- 3. Institutional Order Flow & Confluence Quality ---
+input string          Section_OrderFlow       = "=== 3. CONFLUENCE & MSS FILTERS ===";
+input ENUM_ENTRY_MODE InpEntryMode            = ENTRY_APEX_MSS;  // Entry Trigger Mechanism
+input int             InpMinConfluenceScore   = 75;              // Minimum Confluence Score (75% = AAA+ Setup)
+input bool            InpRequireDeltaFlip     = true;            // Require Aggressive Delta Momentum
+input bool            InpRequireLiquiditySweep= true;            // Require Liquidity Sweep of Extreme
 input bool            InpUseTrendFilter       = true;            // Filter by Higher Timeframe Trend (200 EMA)
 input int             InpTrendEmaPeriod       = 200;             // HTF Trend Baseline EMA Period
-input bool            InpUseSessionFilter     = false;           // Filter by High Liquidity Hours (NY / London)
+input bool            InpUseSessionFilter     = false;           // Filter by High-Liquidity Hours (NY / London)
 input int             InpSessionStartHour     = 8;               // Trading Start Hour (Broker Time)
 input int             InpSessionEndHour       = 17;              // Trading End Hour (Broker Time)
 input bool            InpRequireGexConfluence = true;            // Strict Mode: ONLY Trigger at GEX Walls
 input double          InpGexToleranceATR      = 0.85;            // Max Distance to GEX Wall (x ATR)
 input int             InpVolAvgPeriod         = 20;              // Volume Moving Average Period
-input double          InpVolSpikeFactor       = 1.6;             // Minimum Institutional Volume Spike (1.6x SMA)
-input double          InpWickAbsorptionRatio  = 0.40;            // Minimum Absorption Wick Ratio (40%)
+input double          InpVolSpikeFactor       = 1.6;             // Volume Spike Threshold (1.6x SMA)
+input double          InpWickAbsorptionRatio  = 0.40;            // Minimum Wick Absorption Ratio (40%)
 input int             InpSignalCooldownBars   = 6;               // Min Bars Between Consecutive Signals
 
-// --- 4. Multi-Stage Compounding Profit Targets (BPT Master Rules) ---
-input string          Section_Targets         = "=== 4. ASYMMETRIC 3-STAGE TARGETS ===";
+// --- 4. Asymmetric Multi-Stage Targets (The BPT Blueprint) ---
+input string          Section_Targets         = "=== 4. ASYMMETRIC WEALTH TARGETS ===";
 input double          InpBreakevenTrigger_R   = 0.8;             // Trigger to Move SL to Breakeven (+0.8R)
 input double          InpTarget1_R            = 3.0;             // TP1: Bank 50% Position (+3R Locked)
 input double          InpTarget2_R            = 7.0;             // TP2: Bank 30% Position (+7R Expansion)
 input double          InpTarget3_R            = 10.0;            // TP3: Runner Home-Run (+10R Structural)
 input bool            InpShowPersistentPlan   = true;            // Keep Trade Plan Anchored on Chart
 
-// --- 5. Visuals & Deluxe HUD Dashboard ---
-input string          Section_Visuals         = "=== 5. VISUALS & TERMINAL HUD ===";
+// --- 5. Visuals & Deluxe Bloomberg-Style HUD ---
+input string          Section_Visuals         = "=== 5. DELUXE TERMINAL HUD ===";
 input bool            InpShowDashboard        = true;            // Show On-Chart HUD Terminal
 input int             InpDashboardX           = 20;              // Terminal X Position
 input int             InpDashboardY           = 30;              // Terminal Y Position
@@ -161,6 +162,7 @@ struct TradeSetup
    double   riskPts;
    double   lotSize;
    double   riskDollars;
+   int      confluenceScore;
 };
 
 TradeSetup g_LastSetup;
@@ -231,7 +233,7 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
-//| Calculate Lot Size Based on Account Balance and Stop Loss        |
+//| Calculate Optimal Lot Size Based on Account Balance & Stop Loss  |
 //+------------------------------------------------------------------+
 double CalculateOptimalLotSize(double slPoints)
 {
@@ -326,7 +328,7 @@ int OnCalculate(const int rates_total,
          BufferCVD[i] = BufferCVD[i + 1] + BufferEstimatedDelta[i];
    }
 
-   // 2. MAIN CALCULATION & FILTERING LOOP
+   // 2. MAIN CALCULATION & CONFLUENCE GRADING LOOP
    int lastBuyBar  = -999;
    int lastSellBar = -999;
 
@@ -436,17 +438,32 @@ int OnCalculate(const int rates_total,
       bool deltaBullish = (!InpRequireDeltaFlip || BufferEstimatedDelta[i] > 0);
       bool deltaBearish = (!InpRequireDeltaFlip || BufferEstimatedDelta[i] < 0);
 
-      // --- MASTER A+ BUY SETUP ---
+      // --- CONFLUENCE SCORING ENGINE (0 TO 100%) ---
+      int buyScore = 0;
+      if(nearPutWall)            buyScore += 25;
+      if(isBullSweep)            buyScore += 25;
+      if(deltaBullish)           buyScore += 20;
+      if(isBullTrend)            buyScore += 15;
+      if(inSession)              buyScore += 15;
+
+      int sellScore = 0;
+      if(nearCallWall)           sellScore += 25;
+      if(isBearSweep)            sellScore += 25;
+      if(deltaBearish)           sellScore += 20;
+      if(isBearTrend)            sellScore += 15;
+      if(inSession)              sellScore += 15;
+
+      // --- APEX AAA+ BUY SETUP TRIGGER ---
       bool buyCondition = false;
       double buySweepLow = low[i];
 
-      if(InpEntryMode == ENTRY_SNIPER_MSS)
+      if(InpEntryMode == ENTRY_APEX_MSS)
       {
          if(i + 1 < rates_total)
          {
             bool prevWasSweep = (BufferBullAbsorption[i + 1] > 0.0 || (MathMin(open[i + 1], close[i + 1]) - low[i + 1]) / (high[i + 1] - low[i + 1]) >= 0.35);
             bool mssReclaim   = (close[i] > high[i + 1] && close[i] > open[i]);
-            if(prevWasSweep && mssReclaim && nearPutWall && deltaBullish)
+            if(prevWasSweep && mssReclaim && nearPutWall && deltaBullish && buyScore >= InpMinConfluenceScore)
             {
                buyCondition = true;
                buySweepLow  = MathMin(low[i], low[i + 1]);
@@ -455,7 +472,7 @@ int OnCalculate(const int rates_total,
       }
       else
       {
-         if(nearPutWall && isBullSweep && close[i] > open[i] && deltaBullish)
+         if(nearPutWall && isBullSweep && close[i] > open[i] && deltaBullish && buyScore >= InpMinConfluenceScore)
          {
             buyCondition = true;
             buySweepLow  = low[i];
@@ -472,42 +489,43 @@ int OnCalculate(const int rates_total,
 
             if(i == 0 || !g_LastSetup.valid || time[i] >= g_LastSetup.time)
             {
-               g_LastSetup.valid       = true;
-               g_LastSetup.isLong      = true;
-               g_LastSetup.time        = time[i];
-               g_LastSetup.entry       = close[i];
-               g_LastSetup.sl          = buySweepLow - (atr * InpStopBufferATR);
-               g_LastSetup.riskPts     = MathAbs(g_LastSetup.entry - g_LastSetup.sl);
-               g_LastSetup.be          = g_LastSetup.entry + (g_LastSetup.riskPts * InpBreakevenTrigger_R);
-               g_LastSetup.tp1         = g_LastSetup.entry + (g_LastSetup.riskPts * InpTarget1_R);
-               g_LastSetup.tp2         = g_LastSetup.entry + (g_LastSetup.riskPts * InpTarget2_R);
-               g_LastSetup.tp3         = g_LastSetup.entry + (g_LastSetup.riskPts * InpTarget3_R);
+               g_LastSetup.valid           = true;
+               g_LastSetup.isLong          = true;
+               g_LastSetup.time            = time[i];
+               g_LastSetup.entry           = close[i];
+               g_LastSetup.sl              = buySweepLow - (atr * InpStopBufferATR);
+               g_LastSetup.riskPts         = MathAbs(g_LastSetup.entry - g_LastSetup.sl);
+               g_LastSetup.be              = g_LastSetup.entry + (g_LastSetup.riskPts * InpBreakevenTrigger_R);
+               g_LastSetup.tp1             = g_LastSetup.entry + (g_LastSetup.riskPts * InpTarget1_R);
+               g_LastSetup.tp2             = g_LastSetup.entry + (g_LastSetup.riskPts * InpTarget2_R);
+               g_LastSetup.tp3             = g_LastSetup.entry + (g_LastSetup.riskPts * InpTarget3_R);
+               g_LastSetup.confluenceScore = buyScore;
 
                double pts = g_LastSetup.riskPts / Point;
-               g_LastSetup.lotSize     = CalculateOptimalLotSize(pts);
+               g_LastSetup.lotSize         = CalculateOptimalLotSize(pts);
                double bal = (InpCustomBalance > 0.0) ? InpCustomBalance : AccountBalance();
-               g_LastSetup.riskDollars = bal * (InpRiskPercent / 100.0);
+               g_LastSetup.riskDollars     = bal * (InpRiskPercent / 100.0);
             }
 
             if(i == 0 && time[0] != g_LastAlertTime)
             {
-               TriggerMasterAlert(true, close[0], g_LastSetup.sl, g_LastSetup.tp1, g_LastSetup.tp2, g_LastSetup.tp3, g_LastSetup.lotSize);
+               TriggerMasterAlert(true, close[0], g_LastSetup.sl, g_LastSetup.tp1, g_LastSetup.tp2, g_LastSetup.tp3, g_LastSetup.lotSize, buyScore);
                g_LastAlertTime = time[0];
             }
          }
       }
 
-      // --- MASTER A+ SELL SETUP ---
+      // --- APEX AAA+ SELL SETUP TRIGGER ---
       bool sellCondition = false;
       double sellSweepHigh = high[i];
 
-      if(InpEntryMode == ENTRY_SNIPER_MSS)
+      if(InpEntryMode == ENTRY_APEX_MSS)
       {
          if(i + 1 < rates_total)
          {
             bool prevWasSweep = (BufferBearAbsorption[i + 1] > 0.0 || (high[i + 1] - MathMax(open[i + 1], close[i + 1])) / (high[i + 1] - low[i + 1]) >= 0.35);
             bool mssRejection = (close[i] < low[i + 1] && close[i] < open[i]);
-            if(prevWasSweep && mssRejection && nearCallWall && deltaBearish)
+            if(prevWasSweep && mssRejection && nearCallWall && deltaBearish && sellScore >= InpMinConfluenceScore)
             {
                sellCondition = true;
                sellSweepHigh = MathMax(high[i], high[i + 1]);
@@ -516,7 +534,7 @@ int OnCalculate(const int rates_total,
       }
       else
       {
-         if(nearCallWall && isBearSweep && close[i] < open[i] && deltaBearish)
+         if(nearCallWall && isBearSweep && close[i] < open[i] && deltaBearish && sellScore >= InpMinConfluenceScore)
          {
             sellCondition = true;
             sellSweepHigh = high[i];
@@ -533,26 +551,27 @@ int OnCalculate(const int rates_total,
 
             if(i == 0 || !g_LastSetup.valid || time[i] >= g_LastSetup.time)
             {
-               g_LastSetup.valid       = true;
-               g_LastSetup.isLong      = false;
-               g_LastSetup.time        = time[i];
-               g_LastSetup.entry       = close[i];
-               g_LastSetup.sl          = sellSweepHigh + (atr * InpStopBufferATR);
-               g_LastSetup.riskPts     = MathAbs(g_LastSetup.entry - g_LastSetup.sl);
-               g_LastSetup.be          = g_LastSetup.entry - (g_LastSetup.riskPts * InpBreakevenTrigger_R);
-               g_LastSetup.tp1         = g_LastSetup.entry - (g_LastSetup.riskPts * InpTarget1_R);
-               g_LastSetup.tp2         = g_LastSetup.entry - (g_LastSetup.riskPts * InpTarget2_R);
-               g_LastSetup.tp3         = g_LastSetup.entry - (g_LastSetup.riskPts * InpTarget3_R);
+               g_LastSetup.valid           = true;
+               g_LastSetup.isLong          = false;
+               g_LastSetup.time            = time[i];
+               g_LastSetup.entry           = close[i];
+               g_LastSetup.sl              = sellSweepHigh + (atr * InpStopBufferATR);
+               g_LastSetup.riskPts         = MathAbs(g_LastSetup.entry - g_LastSetup.sl);
+               g_LastSetup.be              = g_LastSetup.entry - (g_LastSetup.riskPts * InpBreakevenTrigger_R);
+               g_LastSetup.tp1             = g_LastSetup.entry - (g_LastSetup.riskPts * InpTarget1_R);
+               g_LastSetup.tp2             = g_LastSetup.entry - (g_LastSetup.riskPts * InpTarget2_R);
+               g_LastSetup.tp3             = g_LastSetup.entry - (g_LastSetup.riskPts * InpTarget3_R);
+               g_LastSetup.confluenceScore = sellScore;
 
                double pts = g_LastSetup.riskPts / Point;
-               g_LastSetup.lotSize     = CalculateOptimalLotSize(pts);
+               g_LastSetup.lotSize         = CalculateOptimalLotSize(pts);
                double bal = (InpCustomBalance > 0.0) ? InpCustomBalance : AccountBalance();
-               g_LastSetup.riskDollars = bal * (InpRiskPercent / 100.0);
+               g_LastSetup.riskDollars     = bal * (InpRiskPercent / 100.0);
             }
 
             if(i == 0 && time[0] != g_LastAlertTime)
             {
-               TriggerMasterAlert(false, close[0], g_LastSetup.sl, g_LastSetup.tp1, g_LastSetup.tp2, g_LastSetup.tp3, g_LastSetup.lotSize);
+               TriggerMasterAlert(false, close[0], g_LastSetup.sl, g_LastSetup.tp1, g_LastSetup.tp2, g_LastSetup.tp3, g_LastSetup.lotSize, sellScore);
                g_LastAlertTime = time[0];
             }
          }
@@ -594,7 +613,7 @@ void DrawMasterTradePlan(const TradeSetup &setup)
    datetime endTime   = TimeCurrent() + PeriodSeconds() * 45;
 
    // 1. Entry Line (Gold)
-   DrawRayLine(PREFIX + "Plan_Entry", startTime, setup.entry, endTime, setup.entry, clrGold, STYLE_DOT, 1, "A+ Entry");
+   DrawRayLine(PREFIX + "Plan_Entry", startTime, setup.entry, endTime, setup.entry, clrGold, STYLE_DOT, 1, "AAA+ Entry");
 
    // 2. Stop Loss Line (Red)
    DrawRayLine(PREFIX + "Plan_SL", startTime, setup.sl, endTime, setup.sl, clrCrimson, STYLE_SOLID, 2, "1R Invalidation SL");
@@ -641,14 +660,14 @@ void DrawRayLine(string name, datetime t1, double p1, datetime t2, double p2, co
 }
 
 //+------------------------------------------------------------------+
-//| Deluxe HUD Dashboard Rendering                                   |
+//| Deluxe Bloomberg-Style HUD Dashboard Rendering                   |
 //+------------------------------------------------------------------+
 void RenderDashboard(double currentPrice)
 {
    int x = InpDashboardX;
    int y = InpDashboardY;
-   int width = 340;
-   int height = 265;
+   int width = 345;
+   int height = 270;
 
    // Background Box
    string bgName = PREFIX + "HUD_BG";
@@ -660,23 +679,23 @@ void RenderDashboard(double currentPrice)
       ObjectSetInteger(0, bgName, OBJPROP_YDISTANCE, y);
       ObjectSetInteger(0, bgName, OBJPROP_XSIZE, width);
       ObjectSetInteger(0, bgName, OBJPROP_YSIZE, height);
-      ObjectSetInteger(0, bgName, OBJPROP_BGCOLOR, C'10,14,22');
+      ObjectSetInteger(0, bgName, OBJPROP_BGCOLOR, C'8,12,18');
       ObjectSetInteger(0, bgName, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-      ObjectSetInteger(0, bgName, OBJPROP_COLOR, C'32,48,70');
+      ObjectSetInteger(0, bgName, OBJPROP_COLOR, C'28,42,62');
       ObjectSetInteger(0, bgName, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, bgName, OBJPROP_BACK, false);
    }
 
-   // Title
-   CreateLabel(PREFIX + "HUD_Title", "BPT INSTITUTIONAL MASTER TERMINAL", x + 15, y + 10, clrGold, 10, true);
-   CreateLabel(PREFIX + "HUD_Sep1", "-------------------------------------------------------------", x + 15, y + 25, clrDimGray, 7, false);
+   // Header
+   CreateLabel(PREFIX + "HUD_Title", "BPT 7-FIGURE INSTITUTIONAL TERMINAL", x + 15, y + 10, clrGold, 10, true);
+   CreateLabel(PREFIX + "HUD_Sep1", "--------------------------------------------------------------", x + 15, y + 25, clrDimGray, 7, false);
 
-   // GEX Information
+   // GEX Levels
    CreateLabel(PREFIX + "HUD_Call", StringFormat("Call Wall (Res):   %.2f", BufferCallWall[0]), x + 15, y + 38, clrCrimson, 8, true);
    CreateLabel(PREFIX + "HUD_Zero", StringFormat("Zero Gamma Flip:  %.2f", BufferZeroGamma[0]), x + 15, y + 54, clrGold, 8, true);
    CreateLabel(PREFIX + "HUD_Put",  StringFormat("Put Wall (Supp):   %.2f", BufferPutWall[0]), x + 15, y + 70, clrDodgerBlue, 8, true);
 
-   // Regime
+   // Market Regime
    CreateLabel(PREFIX + "HUD_RegimeVal", g_RegimeText, x + 15, y + 90, g_RegimeColor, 8, true);
 
    // Order Flow Status
@@ -685,7 +704,7 @@ void RenderDashboard(double currentPrice)
    color deltaCol = (curDelta >= 0) ? clrLime : clrRed;
    CreateLabel(PREFIX + "HUD_Delta", deltaStr, x + 15, y + 110, deltaCol, 8, true);
 
-   CreateLabel(PREFIX + "HUD_Sep2", "-------------------------------------------------------------", x + 15, y + 126, clrDimGray, 7, false);
+   CreateLabel(PREFIX + "HUD_Sep2", "--------------------------------------------------------------", x + 15, y + 126, clrDimGray, 7, false);
 
    // Active Setup & Compounding Engine
    if(g_LastSetup.valid)
@@ -699,8 +718,8 @@ void RenderDashboard(double currentPrice)
 
       double estProfitDollars = curR * g_LastSetup.riskDollars;
 
-      string setupStr = StringFormat("Setup: %s @ %.2f | Size: %.2f Lots",
-                                     g_LastSetup.isLong ? "MASTER BUY" : "MASTER SELL", g_LastSetup.entry, g_LastSetup.lotSize);
+      string setupStr = StringFormat("Setup: %s @ %.2f | Size: %.2f Lots [%d%% AAA+]",
+                                     g_LastSetup.isLong ? "APEX BUY" : "APEX SELL", g_LastSetup.entry, g_LastSetup.lotSize, g_LastSetup.confluenceScore);
       color setupCol = g_LastSetup.isLong ? clrLime : clrRed;
       CreateLabel(PREFIX + "HUD_Setup", setupStr, x + 15, y + 138, setupCol, 8, true);
 
@@ -723,7 +742,7 @@ void RenderDashboard(double currentPrice)
       string tp3Str = StringFormat("TP3 (+%.0fR - 20%%): %.2f (+$%.0f)", InpTarget3_R, g_LastSetup.tp3, g_LastSetup.riskDollars * InpTarget3_R);
       CreateLabel(PREFIX + "HUD_TP3", tp3Str, x + 15, y + 226, clrMagenta, 7, true);
 
-      CreateLabel(PREFIX + "HUD_Rule", "Plan: Secure TP1 & Trail Runner to TP3", x + 15, y + 244, clrSilver, 7, false);
+      CreateLabel(PREFIX + "HUD_Rule", "Strategy: Bank 50% @ TP1 -> Trail Runner to TP3", x + 15, y + 246, clrSilver, 7, false);
    }
    else
    {
@@ -731,12 +750,12 @@ void RenderDashboard(double currentPrice)
       double riskMoney = bal * (InpRiskPercent / 100.0);
       string idleStr = StringFormat("Account: $%.0f | Risk Per Trade: $%.0f (%.1f%%)", bal, riskMoney, InpRiskPercent);
       CreateLabel(PREFIX + "HUD_Setup", idleStr, x + 15, y + 138, clrGold, 8, true);
-      CreateLabel(PREFIX + "HUD_BeStatus", "Status: Scanning for GEX Liquidity Sweep...", x + 15, y + 158, clrSilver, 8, false);
-      CreateLabel(PREFIX + "HUD_Pnl", "Asymmetric Compounding Targets:", x + 15, y + 178, clrWhite, 7, false);
+      CreateLabel(PREFIX + "HUD_BeStatus", "Status: Scanning for AAA+ Institutional Confluence...", x + 15, y + 158, clrSilver, 8, false);
+      CreateLabel(PREFIX + "HUD_Pnl", "7-Figure Compounding Distribution Matrix:", x + 15, y + 178, clrWhite, 7, false);
       CreateLabel(PREFIX + "HUD_TP1", StringFormat("TP 1 (+%.0fR - 50%% Banked):  +$%.0f", InpTarget1_R, riskMoney * InpTarget1_R), x + 15, y + 196, clrMediumSeaGreen, 7, false);
       CreateLabel(PREFIX + "HUD_TP2", StringFormat("TP 2 (+%.0fR - 30%% Expansion): +$%.0f", InpTarget2_R, riskMoney * InpTarget2_R), x + 15, y + 212, clrDeepSkyBlue, 7, false);
       CreateLabel(PREFIX + "HUD_TP3", StringFormat("TP 3 (+%.0fR - 20%% Runner):    +$%.0f", InpTarget3_R, riskMoney * InpTarget3_R), x + 15, y + 228, clrMagenta, 7, false);
-      CreateLabel(PREFIX + "HUD_Rule", "Rule: Zero-Risk Protection Triggered at +0.8R", x + 15, y + 246, clrAqua, 7, false);
+      CreateLabel(PREFIX + "HUD_Rule", "Rule: Zero-Risk Protection Triggered at +0.8R", x + 15, y + 248, clrAqua, 7, false);
    }
 }
 
@@ -768,10 +787,10 @@ void CreateLabel(string name, string text, int x, int y, color col, int fontSize
 //+------------------------------------------------------------------+
 //| Trigger Master Alert with Complete Trade Ticket Details          |
 //+------------------------------------------------------------------+
-void TriggerMasterAlert(bool isLong, double entry, double sl, double tp1, double tp2, double tp3, double lotSize)
+void TriggerMasterAlert(bool isLong, double entry, double sl, double tp1, double tp2, double tp3, double lotSize, int score)
 {
-   string fullMsg = StringFormat("[BPT MASTER %s] %s | Lot: %.2f | Entry: %.2f | SL: %.2f | TP1 (+3R): %.2f | TP2 (+7R): %.2f | TP3 (+10R): %.2f",
-                                 isLong ? "BUY" : "SELL", _Symbol, lotSize, entry, sl, tp1, tp2, tp3);
+   string fullMsg = StringFormat("[BPT APEX AAA+ %s (%d%% Confluence)] %s | Lot: %.2f | Entry: %.2f | SL: %.2f | TP1 (+3R): %.2f | TP2 (+7R): %.2f | TP3 (+10R): %.2f",
+                                 isLong ? "BUY" : "SELL", score, _Symbol, lotSize, entry, sl, tp1, tp2, tp3);
 
    if(InpAlertPopup)
       Alert(fullMsg);
