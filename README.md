@@ -1,54 +1,81 @@
-# Liquidity EMA 9 / SMA 20 MT4 indicator
+# Liquidity EMA 9 / SMA 20 MT4 tools
 
-`LiquidityEMA9SMA20.mq4` is an MT4 custom indicator based on the method in the supplied video.
+This repository contains an MT4 indicator and an optional execution EA based on the trading method in the supplied video.
 
-## What it plots
+## Files
 
-- Black line: 9-period EMA
-- Blue line: 20-period SMA
-- Green up arrow: bullish liquidity-sweep setup
-- Red down arrow: bearish liquidity-sweep setup
+- `LiquidityEMA9SMA20.mq4` — analysis indicator. It draws moving averages, signals, zones, Fibonacci levels, SL/TP projections, virtual exits and risk estimates. It does **not** place orders.
+- `LiquidityEMA9SMA20_EA.mq4` — optional Expert Advisor. It can place and manage trades when `EnableTrading = true`. Trading is disabled by default.
 
-Signals are generated from **closed candles only**. The indicator does not place trades.
+## Indicator features
 
-## Signal logic
+### Core signal
 
-### Buy
+A buy signal requires:
 
-1. EMA 9 is above SMA 20.
-2. The optional range and higher-timeframe filters pass.
-3. The candle is bullish and touches/intersects EMA 9.
-4. The candle sweeps the low of the preceding candle(s), based on `SweepLookback`.
-5. The candle closes back above the swept low.
+1. EMA 9 above SMA 20.
+2. A bullish candle touching/intersecting EMA 9.
+3. The candle sweeps the low of the preceding candle(s), controlled by `SweepLookback`.
+4. It closes back above the swept low.
 
-### Sell
+Sell signals use the inverse conditions.
 
-The inverse conditions are required:
+### Added video-method components
 
-1. EMA 9 is below SMA 20.
-2. The optional filters pass.
-3. The candle is bearish and touches/intersects EMA 9.
-4. It sweeps the high of the preceding candle(s).
-5. It closes back below the swept high.
+- Closed higher-timeframe liquidity setup followed by a lower-timeframe entry filter.
+- Higher-timeframe setup zones projected onto the entry chart.
+- Supply and demand / order-block approximation.
+- Bullish and bearish fair-value-gap approximation.
+- Optional rejection of signals near opposing zones.
+- Stop levels below/above the signal candle with an ATR buffer.
+- Fibonacci projection, including the default 1.25R extension.
+- Fixed-pip or risk/reward target alternatives.
+- Entry, SL, TP and Fibonacci drawings.
+- Inside-bar and accumulation exit approximation.
+- Moving-average-flip and opposite-liquidity exit signals.
+- Virtual pyramiding/add-on entries for chart analysis.
+- Percentage-risk lot estimate displayed beside projected trades.
+- Popup, sound and push notifications.
 
-## Installation
+### Important indicator inputs
 
-1. Copy `LiquidityEMA9SMA20.mq4` to your MT4 data folder under `MQL4/Indicators`.
-2. Open MetaEditor and compile the file.
-3. Restart MT4 or refresh the Navigator panel.
-4. Attach **Liquidity EMA9/SMA20** to a chart.
+- `UseMultiTimeframeSetup`: requires a closed `HigherTimeframe` liquidity setup before accepting a lower-timeframe signal.
+- `RequireEntryInHTFZone`: requires the entry candle to overlap the higher-timeframe setup candle range.
+- `UseZoneFilter`: rejects entries near detected opposing supply/demand or FVG zones.
+- `TargetMode`: `0` Fibonacci extension, `1` fixed pips, `2` risk/reward.
+- `FibExtension`: default `1.25`.
+- `MaxPyramids`: maximum virtual entries in one directional sequence.
+- `ShowRiskEstimate`: displays an estimated lot size using the account balance and stop distance. It does not place an order.
 
-## Important inputs
+## EA safety and usage
 
-- `SweepLookback = 1`: use the immediately preceding candle. Increase it to sweep the highest/lowest level in a larger lookback window.
-- `UseRangeFilter = true`: rejects signals when the two moving averages are too close relative to ATR. This is an objective approximation of the video's advice to avoid ranging markets.
-- `MinMASpreadATR = 0.10`: increase to filter more consolidation, or set to `0`/disable the filter to use only the raw EMA/SMA relationship.
-- `UseHigherTF = false`: optionally require the last fully closed higher-timeframe EMA/SMA trend to agree with the signal.
-- `UseADXFilter = false`: optional additional trend-strength filter; not part of the video's core two-average setup.
-- `EnableAlerts = true`: alerts only once when a new candle closes with a signal. Sound and push notifications are optional.
+1. Compile the indicator and EA in MetaEditor.
+2. Test the indicator on historical data and a demo account.
+3. Attach the EA with `EnableTrading = false` first.
+4. Review its signals, broker minimum stop distance, spread filter and calculated lot size.
+5. Only enable live execution after separate forward testing.
 
-## Interpretation and limitations
+The EA includes:
 
-The video does not define “liquidity candle” mathematically. This implementation interprets it as a candle that takes the prior high/low and then closes back through that level. The video's supply/demand, consolidation, Fibonacci, stop-loss, and take-profit decisions are discretionary and are not automatically drawn by this indicator.
+- Risk-based or fixed lots
+- Broker lot-step/minimum/max-lot normalization
+- Maximum spread filter
+- Magic-number isolation
+- Market entries after a closed-candle signal
+- SL/TP placement
+- MTF confirmation and zone filtering
+- Pyramiding limit
+- MA-flip, inside-bar, accumulation and opposite-signal exits
 
-The arrows are signals for research and manual evaluation, not trading advice. Test on historical data and a demo account, include spread/slippage/commission, and define position sizing and exits before using real money.
+## Interpretation limitations
+
+The video does not define “liquidity candle,” accumulation, supply/demand, order blocks, fair-value gaps, Fibonacci anchoring, or ranging markets mathematically. This implementation uses explicit approximations so the method can be coded and tested:
+
+- Liquidity candle: same-colour candle that sweeps a prior high/low and closes back through it.
+- Demand/supply: an opposite-colour base candle followed by a displacement candle.
+- FVG: a three-candle gap between the first and third candle.
+- Accumulation: an inside bar or a configurable sequence of small-body candles.
+- Stop: signal-candle extreme plus an ATR buffer.
+- Target: Fibonacci extension, fixed pips, or risk/reward according to `TargetMode`.
+
+These approximations can produce different results from the original creator's discretionary chart reading. Neither file guarantees profitability. Include spread, commission, slippage, news risk and drawdown in testing.
