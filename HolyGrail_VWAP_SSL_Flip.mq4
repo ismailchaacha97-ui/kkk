@@ -211,7 +211,9 @@ int OnInit()
    gLastAlertTime = 0;
    gLastAlertTrend = 0;
    gAlertsPrimed = false;
-   gHUDPrefix = "HGSSL_HUD_" + LongToString(ChartID()) + "_" +
+   // IntegerToString is used instead of LongToString for older MT4 builds.
+   // The chart id is only a namespace suffix, so a 32-bit cast is sufficient.
+   gHUDPrefix = "HGSSL_HUD_" + IntegerToString((int)ChartID()) + "_" +
                 HUDInstanceTag + "_";
    if(ShowHUD)
       EnsureHUDObjects();
