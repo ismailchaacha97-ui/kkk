@@ -20,7 +20,7 @@
 2. Open it in MetaEditor and compile it.
 3. Attach **Holy Grail VWAP SSL** to a chart.
 4. Session times are interpreted in the broker/server time shown by MT4. Adjust London, New York, and Asia inputs for the broker's timezone and daylight-saving changes.
-5. The HUD is a chart panel rather than a chart-global comment. Use `HUDCorner`, `HUDX`, `HUDY`, colors, and `HUDFont` to match your template. If several copies run on one chart, give each a different `HUDInstanceTag`.
+5. The HUD opens in the top-left by default so it remains visible on narrow charts. It is a chart panel rather than a chart-global comment; use `HUDCorner`, `HUDX`, `HUDY`, colors, and `HUDFont` to customize it. If several copies run on one chart, give each a different `HUDInstanceTag`.
 
 ## Signal model
 

@@ -102,15 +102,16 @@ input bool AlertOnAttach = false;
 
 // Chart display.
 input bool ShowHUD = true;
-input int HUDCorner = CORNER_RIGHT_UPPER;
-input int HUDX = 16;
-input int HUDY = 18;
+// Top-left is the safest default across MT4 themes and chart layouts.
+input int HUDCorner = CORNER_LEFT_UPPER;
+input int HUDX = 18;
+input int HUDY = 24;
 input int HUDWidth = 250;
 input int HUDHeight = 222;
 input string HUDInstanceTag = "main";
 input string HUDFont = "Arial";
-input color HUDBackgroundColor = clrBlack;
-input color HUDBorderColor = clrDimGray;
+input color HUDBackgroundColor = clrDarkSlateGray;
+input color HUDBorderColor = clrGray;
 input color HUDTitleColor = clrWhite;
 input color HUDTextColor = clrSilver;
 input color HUDMutedColor = clrGray;
@@ -215,6 +216,8 @@ int OnInit()
    // The chart id is only a namespace suffix, so a 32-bit cast is sufficient.
    gHUDPrefix = "HGSSL_HUD_" + IntegerToString((int)ChartID()) + "_" +
                 HUDInstanceTag + "_";
+   // Remove stale objects left by an older copy before rebuilding the layout.
+   DeleteHUDObjects();
    if(ShowHUD)
       EnsureHUDObjects();
    return(INIT_SUCCEEDED);
@@ -714,10 +717,22 @@ bool EnsureHUDObjects()
    }
 
    int corner = ClampInt(HUDCorner, 0, 3);
-   int x = ClampInt(HUDX, 0, 2000);
-   int y = ClampInt(HUDY, 0, 2000);
    int width = ClampInt(HUDWidth, 210, 600);
    int height = ClampInt(HUDHeight, 220, 500);
+
+   // Keep the panel inside the currently visible chart even when an old
+   // template contains an excessive X/Y offset.
+   int chartWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0);
+   int chartHeight = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS, 0);
+   int maxX = 2000;
+   int maxY = 2000;
+   if(chartWidth > 0)
+      maxX = MathMax(0, chartWidth - width - 6);
+   if(chartHeight > 0)
+      maxY = MathMax(0, chartHeight - height - 6);
+
+   int x = ClampInt(HUDX, 0, maxX);
+   int y = ClampInt(HUDY, 0, maxY);
    string font = HUDFont;
    if(font == "")
       font = "Arial";
