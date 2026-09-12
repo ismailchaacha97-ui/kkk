@@ -2,10 +2,11 @@
 //|                HolyGrail_VWAP_SSL_Flip.mq4                      |
 //| Anchored High/Low VWAP SSL flip with bands, arrows, alerts, HUD |
 //| FINAL RELEASE • clean dashboard • closed-bar confirmation default |
+//| Optional risk planner • sizing only, never automatic execution    |
 //+------------------------------------------------------------------+
 #property copyright   "Holy Grail VWAP SSL Flip"
-#property description "Confirmed anchored High/Low VWAP SSL flip with sessions, bands, arrows, alerts and HUD"
-#property version     "5.00"
+#property description "Confirmed anchored High/Low VWAP SSL flip with sessions, bands, alerts and risk planner"
+#property version     "5.10"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 8
@@ -90,6 +91,15 @@ input double ArrowOffsetATR = 0.20;
 input int ArrowATRPeriod = 14;
 input bool SignalsOnClosedBarsOnly = true;
 
+// Optional risk planner. It only displays a stop, target and conservative
+// lot-size estimate; it never opens, modifies or closes an MT4 order.
+input bool ShowRiskPlanner = true;
+input bool UseEquityForRisk = true;
+input double ManualRiskCapital = 0.0;
+input double RiskPercent = 0.50;
+input double StopLossATR = 1.50;
+input double RewardRiskRatio = 2.00;
+
 // Alert settings.
 input bool EnableAlerts = true;
 input bool PopupAlert = false;
@@ -107,7 +117,7 @@ input int HUDCorner = CORNER_LEFT_UPPER;
 input int HUDX = 18;
 input int HUDY = 24;
 input int HUDWidth = 250;
-input int HUDHeight = 222;
+input int HUDHeight = 250;
 input string HUDInstanceTag = "main";
 input string HUDFont = "Arial";
 input color HUDBackgroundColor = clrDarkSlateGray;
@@ -169,7 +179,12 @@ int OnInit()
    if(ArrowATRPeriod < 1 ||
       ArrowOffsetATR < 0.0 ||
       Band1Deviation < 0.0 ||
-      Band2Deviation < 0.0)
+      Band2Deviation < 0.0 ||
+      ManualRiskCapital < 0.0 ||
+      RiskPercent < 0.0 ||
+      RiskPercent > 100.0 ||
+      StopLossATR <= 0.0 ||
+      RewardRiskRatio <= 0.0)
    {
       Print("HolyGrail_VWAP_SSL_Flip: invalid numeric input.");
       return(INIT_PARAMETERS_INCORRECT);
@@ -474,6 +489,104 @@ void CalculateATR(const int rates_total,
 }
 
 //+------------------------------------------------------------------+
+//| Build a display-only risk plan from the current signal            |
+//+------------------------------------------------------------------+
+//| The plan uses a logical ATR stop and converts the chosen account   |
+//| risk into an approximate lot size. It never sends an order.        |
+//+------------------------------------------------------------------+
+bool CalculateRiskPlan(const double entryPrice,
+                       const int trend,
+                       double &stopPrice,
+                       double &targetPrice,
+                       double &riskMoney,
+                       double &lots)
+{
+   stopPrice = 0.0;
+   targetPrice = 0.0;
+   riskMoney = 0.0;
+   lots = -1.0; // -1 means broker tick-value data is unavailable.
+
+   if(!ShowRiskPlanner || RiskPercent <= 0.0 || trend == 0)
+      return(false);
+   if(ArraySize(gATR) < 1 || gATR[0] <= 0.0 || gATR[0] == EMPTY_VALUE)
+      return(false);
+
+   double capital = ManualRiskCapital;
+   if(capital <= 0.0)
+      capital = UseEquityForRisk ? AccountEquity() : AccountBalance();
+   if(capital <= 0.0)
+      return(false);
+
+   double stopDistance = gATR[0] * StopLossATR;
+   if(stopDistance <= 0.0)
+      return(false);
+
+   riskMoney = capital * RiskPercent / 100.0;
+   stopPrice = NormalizeDouble(trend > 0 ? entryPrice - stopDistance :
+                                            entryPrice + stopDistance, Digits);
+   targetPrice = NormalizeDouble(trend > 0 ? entryPrice +
+                                             stopDistance * RewardRiskRatio :
+                                             entryPrice -
+                                             stopDistance * RewardRiskRatio, Digits);
+
+   double tickValue = MarketInfo(Symbol(), MODE_TICKVALUE);
+   double tickSize = MarketInfo(Symbol(), MODE_TICKSIZE);
+   double minLot = MarketInfo(Symbol(), MODE_MINLOT);
+   double maxLot = MarketInfo(Symbol(), MODE_MAXLOT);
+   double lotStep = MarketInfo(Symbol(), MODE_LOTSTEP);
+   if(tickValue <= 0.0 || tickSize <= 0.0 ||
+      minLot <= 0.0 || maxLot <= 0.0)
+   {
+      return(true);
+   }
+
+   if(lotStep <= 0.0)
+      lotStep = minLot;
+   double moneyPerLot = stopDistance / tickSize * tickValue;
+   if(moneyPerLot <= 0.0)
+      return(true);
+
+   double rawLots = riskMoney / moneyPerLot;
+   if(rawLots >= minLot)
+   {
+      lots = MathFloor(rawLots / lotStep + 0.000000001) * lotStep;
+      lots = MathMin(lots, maxLot);
+      lots = NormalizeDouble(lots, LotDigits(lotStep));
+      if(lots < minLot)
+         lots = 0.0;
+   }
+   else
+   {
+      lots = 0.0; // the requested risk is below the broker's minimum lot.
+   }
+   return(true);
+}
+
+int LotDigits(const double lotStep)
+{
+   int digits = 0;
+   double scaled = lotStep;
+   while(digits < 8 && MathAbs(scaled - MathRound(scaled)) > 0.000000001)
+   {
+      scaled *= 10.0;
+      digits++;
+   }
+   return(digits);
+}
+
+string RiskLotsLabel(const double lots)
+{
+   if(lots < 0.0)
+      return("n/a");
+   if(lots == 0.0)
+      return("below min");
+   double step = MarketInfo(Symbol(), MODE_LOTSTEP);
+   if(step <= 0.0)
+      step = 0.01;
+   return(DoubleToString(lots, LotDigits(step)));
+}
+
+//+------------------------------------------------------------------+
 //| Set the first state in a valid segment                           |
 //+------------------------------------------------------------------+
 int InitialTrendState(const double closePrice,
@@ -697,7 +810,46 @@ void UpdateHUD(const double currentClose, const int rates_total)
                             DoubleToString(gTypicalVWAP[0] -
                                            Band2Deviation * gStdDev[0], Digits)),
                HUDTextColor);
-   SetHUDLabel("FOOTER", "Signals: " + signalMode, HUDMutedColor);
+
+   double stopPrice = 0.0;
+   double targetPrice = 0.0;
+   double riskMoney = 0.0;
+   double lots = -1.0;
+   bool hasRiskPlan = CalculateRiskPlan(currentClose, gTrend[0],
+                                        stopPrice, targetPrice,
+                                        riskMoney, lots);
+   if(!ShowRiskPlanner)
+   {
+      SetHUDLabel("RISK", "Risk planner: disabled", HUDMutedColor);
+   }
+   else if(hasRiskPlan)
+   {
+      SetHUDLabel("RISK",
+                  StringFormat("Risk %.2f%%  %s %.2f  Lots %s",
+                               RiskPercent,
+                               AccountCurrency(),
+                               riskMoney,
+                               RiskLotsLabel(lots)),
+                  HUDTextColor);
+   }
+   else
+   {
+      SetHUDLabel("RISK", "Risk plan: unavailable", HUDMutedColor);
+   }
+
+   if(hasRiskPlan)
+   {
+      SetHUDLabel("FOOTER",
+                  StringFormat("SL %s  |  TP %s  |  %s",
+                               DoubleToString(stopPrice, Digits),
+                               DoubleToString(targetPrice, Digits),
+                               signalMode),
+                  HUDMutedColor);
+   }
+   else
+   {
+      SetHUDLabel("FOOTER", "Signals: " + signalMode, HUDMutedColor);
+   }
    ChartRedraw();
 }
 
@@ -711,6 +863,7 @@ bool EnsureHUDObjects()
 
    // The layout is static; only text/colors are updated on each tick.
    if(ObjectFind(0, HUDName("PANEL")) >= 0 &&
+      ObjectFind(0, HUDName("RISK")) >= 0 &&
       ObjectFind(0, HUDName("FOOTER")) >= 0)
    {
       return(true);
@@ -718,7 +871,7 @@ bool EnsureHUDObjects()
 
    int corner = ClampInt(HUDCorner, 0, 3);
    int width = ClampInt(HUDWidth, 210, 600);
-   int height = ClampInt(HUDHeight, 220, 500);
+   int height = ClampInt(HUDHeight, 250, 500);
 
    // Keep the panel inside the currently visible chart even when an old
    // template contains an excessive X/Y offset.
@@ -766,6 +919,8 @@ bool EnsureHUDObjects()
                   "Band 1 SD   -- / --", HUDTextColor, 9, font);
    CreateHUDLabel(HUDName("ROW_BAND2"), corner, x + 14, y + 184,
                   "Band 2 SD   -- / --", HUDTextColor, 9, font);
+   CreateHUDLabel(HUDName("RISK"), corner, x + 14, y + 202,
+                  "Risk plan   --", HUDTextColor, 8, font);
    CreateHUDLabel(HUDName("FOOTER"), corner, x + 14, y + height - 22,
                   "Signals: closed candles", HUDMutedColor, 8, font);
    return(true);
@@ -791,6 +946,8 @@ void UpdateHUDWaiting(const string message)
    SetHUDLabel("ROW_MID", "", HUDTextColor);
    SetHUDLabel("ROW_BAND1", "", HUDTextColor);
    SetHUDLabel("ROW_BAND2", "", HUDTextColor);
+   SetHUDLabel("RISK", ShowRiskPlanner ? "Risk plan: waiting" :
+                              "Risk planner: disabled", HUDMutedColor);
    SetHUDLabel("FOOTER", "Signals: closed candles", HUDMutedColor);
    ChartRedraw();
 }
@@ -894,6 +1051,7 @@ void DeleteHUDObjects()
    DeleteHUDObject("ROW_MID");
    DeleteHUDObject("ROW_BAND1");
    DeleteHUDObject("ROW_BAND2");
+   DeleteHUDObject("RISK");
    DeleteHUDObject("FOOTER");
 }
 

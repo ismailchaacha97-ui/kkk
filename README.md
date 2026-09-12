@@ -1,6 +1,6 @@
 # Holy Grail VWAP SSL Flip
 
-`HolyGrail_VWAP_SSL_Flip.mq4` is the final 5.00 release of a production-oriented MT4 indicator based on the supplied anchored High/Low VWAP SSL idea.
+`HolyGrail_VWAP_SSL_Flip.mq4` is the final 5.10 release of a production-oriented MT4 indicator based on the supplied anchored High/Low VWAP SSL idea.
 
 ## What is improved
 
@@ -13,6 +13,7 @@
 - Wilder ATR is calculated once per pass for consistent arrow placement rather than calling `iATR()` for every bar.
 - Preserves the active SSL line and bridges a flip candle to avoid visual gaps.
 - Popup, sound, email, push, and a polished chart-object HUD with configurable corner, sizing, colors, and font; stale-on-attach alerts are suppressed by default.
+- Optional display-only risk planner: account-risk budget, ATR stop, reward/risk target, and broker-aware approximate lot size. It never places orders.
 
 ## Install
 
@@ -25,5 +26,7 @@
 ## Signal model
 
 The state is hysteretic: a bearish state changes to bullish only when a candle closes above the anchored High VWAP, and a bullish state changes to bearish only when a candle closes below the anchored Low VWAP. Price between those levels leaves the state unchanged.
+
+The risk planner is intentionally separate from the signal engine. It displays a position-size estimate from the selected account/equity risk, the current ATR stop distance, broker tick value, and a target based on the selected reward/risk multiple. Spread, commission, slippage, gaps, and execution errors are not fully modeled, so the displayed size is only an estimate.
 
 No indicator can guarantee a 1% return, a win rate, or profitability. Validate the settings with spread, commission, slippage, out-of-sample, and forward testing before using real money; the indicator is a signal/visualization tool, not financial advice.
