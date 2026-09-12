@@ -1,6 +1,6 @@
 # Holy Grail VWAP SSL Flip
 
-`HolyGrail_VWAP_SSL_Flip.mq4` is a production-oriented MT4 indicator based on the supplied anchored High/Low VWAP SSL idea.
+`HolyGrail_VWAP_SSL_Flip.mq4` is the final 5.00 release of a production-oriented MT4 indicator based on the supplied anchored High/Low VWAP SSL idea.
 
 ## What is improved
 

@@ -1,11 +1,11 @@
 //+------------------------------------------------------------------+
 //|                HolyGrail_VWAP_SSL_Flip.mq4                      |
 //| Anchored High/Low VWAP SSL flip with bands, arrows, alerts, HUD |
-//| Clean chart-object dashboard • closed-bar confirmation by default |
+//| FINAL RELEASE • clean dashboard • closed-bar confirmation default |
 //+------------------------------------------------------------------+
 #property copyright   "Holy Grail VWAP SSL Flip"
-#property description "Anchored High/Low VWAP SSL flip with sessions, bands, arrows, alerts and HUD"
-#property version     "4.10"
+#property description "Confirmed anchored High/Low VWAP SSL flip with sessions, bands, arrows, alerts and HUD"
+#property version     "5.00"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 8
