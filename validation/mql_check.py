@@ -237,6 +237,19 @@ def check_duplicate_inputs(src, path):
     return errs
 
 
+def check_objset_form(src, path):
+    """ObjectSetInteger/Double/String must use the chart-id-first form
+    (0, name, prop, value) - the only form accepted by the unified
+    MetaEditor's MQL compiler (see compile errors reported by the user)."""
+    errs = []
+    for m in re.finditer(r"\bObjectSet(?:Integer|Double|String)\s*\(", src):
+        rest = src[m.end():]
+        if not re.match(r"\s*0\s*,", rest):
+            line = src[:m.start()].count("\n") + 1
+            errs.append(f"{path}:{line}: ObjectSet* call must use the chart-id form 'ObjectSetXxx(0, name, ...)'")
+    return errs
+
+
 def main():
     all_errs = []
     for fname, banned_mt5, banned_mt4 in (
@@ -250,6 +263,7 @@ def main():
         all_errs += check_functions(src, path)
         all_errs += check_stringformats(src, path)
         all_errs += check_duplicate_inputs(src, path)
+        all_errs += check_objset_form(src, path)
         print(f"{fname}: {len(src)} chars, {src.count(chr(10))} lines")
 
     if all_errs:

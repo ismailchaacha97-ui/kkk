@@ -375,7 +375,7 @@ void ShowObj(string id, bool visible)
   {
    string name = O(id);
    if(ObjectFind(name) >= 0)
-      ObjectSetInteger(name, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
+      ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
   }
 
 bool EnsureObj(string id, int type)
@@ -391,17 +391,17 @@ void SetRect(string id, datetime t0, double p0, datetime t1, double p1,
   {
    EnsureObj(id, OBJ_RECTANGLE);
    string name = O(id);
-   ObjectSetInteger(name, OBJPROP_TIME1, (long)t0);
-   ObjectSetDouble(name, OBJPROP_PRICE1, p0);
-   ObjectSetInteger(name, OBJPROP_TIME2, (long)t1);
-   ObjectSetDouble(name, OBJPROP_PRICE2, p1);
-   ObjectSetInteger(name, OBJPROP_COLOR, clr);
-   ObjectSetInteger(name, OBJPROP_STYLE, STYLE_SOLID);
-   ObjectSetInteger(name, OBJPROP_WIDTH, 1);
-   ObjectSetInteger(name, OBJPROP_BACK, true);      // behind candles
-   ObjectSetInteger(name, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(name, OBJPROP_HIDDEN, true);
-   ObjectSetInteger(name, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
+   ObjectSetInteger(0, name, OBJPROP_TIME1, (long)t0);
+   ObjectSetDouble(0, name, OBJPROP_PRICE1, p0);
+   ObjectSetInteger(0, name, OBJPROP_TIME2, (long)t1);
+   ObjectSetDouble(0, name, OBJPROP_PRICE2, p1);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, name, OBJPROP_STYLE, STYLE_SOLID);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, 1);
+   ObjectSetInteger(0, name, OBJPROP_BACK, true);      // behind candles
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, visible ? OBJ_ALL_PERIODS : OBJ_NO_PERIODS);
   }
 
 void SetLine(string id, datetime t0, datetime t1, double p, int style, int width,
@@ -409,32 +409,32 @@ void SetLine(string id, datetime t0, datetime t1, double p, int style, int width
   {
    EnsureObj(id, OBJ_TREND);
    string name = O(id);
-   ObjectSetInteger(name, OBJPROP_TIME1, (long)t0);
-   ObjectSetDouble(name, OBJPROP_PRICE1, p);
-   ObjectSetInteger(name, OBJPROP_TIME2, (long)t1);
-   ObjectSetDouble(name, OBJPROP_PRICE2, p);
-   ObjectSetInteger(name, OBJPROP_RAY, true);
-   ObjectSetInteger(name, OBJPROP_COLOR, clr);
-   ObjectSetInteger(name, OBJPROP_STYLE, style);
-   ObjectSetInteger(name, OBJPROP_WIDTH, width);
-   ObjectSetInteger(name, OBJPROP_BACK, false);
-   ObjectSetInteger(name, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(name, OBJPROP_HIDDEN, true);
-   ObjectSetInteger(name, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+   ObjectSetInteger(0, name, OBJPROP_TIME1, (long)t0);
+   ObjectSetDouble(0, name, OBJPROP_PRICE1, p);
+   ObjectSetInteger(0, name, OBJPROP_TIME2, (long)t1);
+   ObjectSetDouble(0, name, OBJPROP_PRICE2, p);
+   ObjectSetInteger(0, name, OBJPROP_RAY, true);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, name, OBJPROP_STYLE, style);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
    if(showLabel && label != "")
      {
       EnsureObj("T_" + id, OBJ_TEXT);
       string lname = O("T_" + id);
-      ObjectSetInteger(lname, OBJPROP_TIME1, (long)t1);
-      ObjectSetDouble(lname, OBJPROP_PRICE1, p);
-      ObjectSetInteger(lname, OBJPROP_COLOR, clr);
-      ObjectSetInteger(lname, OBJPROP_FONTSIZE, 9);
-      ObjectSetString(lname, OBJPROP_FONT, "Arial");
-      ObjectSetString(lname, OBJPROP_TEXT, " " + label);
-      ObjectSetInteger(lname, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(lname, OBJPROP_HIDDEN, true);
-      ObjectSetInteger(lname, OBJPROP_BACK, false);
-      ObjectSetInteger(lname, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+      ObjectSetInteger(0, lname, OBJPROP_TIME1, (long)t1);
+      ObjectSetDouble(0, lname, OBJPROP_PRICE1, p);
+      ObjectSetInteger(0, lname, OBJPROP_COLOR, clr);
+      ObjectSetInteger(0, lname, OBJPROP_FONTSIZE, 9);
+      ObjectSetString(0, lname, OBJPROP_FONT, "Arial");
+      ObjectSetString(0, lname, OBJPROP_TEXT, " " + label);
+      ObjectSetInteger(0, lname, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, lname, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, lname, OBJPROP_BACK, false);
+      ObjectSetInteger(0, lname, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
      }
    else
       ShowObj("T_" + id, false);
@@ -444,17 +444,17 @@ void SetPanelLabel(string id, int corner, int x, int y, string text, color clr, 
   {
    EnsureObj(id, OBJ_LABEL);
    string name = O(id);
-   ObjectSetInteger(name, OBJPROP_CORNER, corner);
-   ObjectSetInteger(name, OBJPROP_XDISTANCE, x);
-   ObjectSetInteger(name, OBJPROP_YDISTANCE, y);
-   ObjectSetString(name, OBJPROP_TEXT, text);
-   ObjectSetInteger(name, OBJPROP_COLOR, clr);
-   ObjectSetInteger(name, OBJPROP_FONTSIZE, size);
-   ObjectSetString(name, OBJPROP_FONT, "Consolas");
-   ObjectSetInteger(name, OBJPROP_SELECTABLE, false);
-   ObjectSetInteger(name, OBJPROP_HIDDEN, true);
-   ObjectSetInteger(name, OBJPROP_BACK, false);
-   ObjectSetInteger(name, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, corner);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, size);
+   ObjectSetString(0, name, OBJPROP_FONT, "Consolas");
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_TIMEFRAMES, OBJ_ALL_PERIODS);
   }
 
 void HideLevelObjects()
