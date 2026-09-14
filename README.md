@@ -92,6 +92,10 @@ current-price line, panel + corner, all colors, line widths.
 
 ## How to trade with it
 
+Full playbook: **[TRADING_GUIDE.md](TRADING_GUIDE.md)** — setups, entries, stops,
+targets, risk rules and when not to trade. Summary below:
+
+
 1. **Wait for a sweep into a deep level**: price pushes to the 70.5% deep premium (look to
    **sell**) or the 29.5% deep discount (look to **buy**) — ideally inside a kill zone.
 2. **Confirm** on your own entry model (a close back through the deep level, a displacement
