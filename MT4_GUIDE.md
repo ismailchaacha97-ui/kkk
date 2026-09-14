@@ -89,6 +89,8 @@ Verify: dashboard clock `ET HH:MM` matches US Eastern time, and day-boxes start 
 
 | Symptom | Fix |
 |---|---|
+| **Nothing at all on chart** | Check Experts tab for errors. If you see the yellow `loading history...` note: wait for ticks / load history (scroll left, raise Max bars, restart). If truly blank: confirm the indicator is attached (smiley/indicator list), you're on an **M30 with 100+ bars**, and D1 has 30+ bars — the DBG dashboard row shows all three counts |
+| What the DBG row means | `bars` = chart bars, `D1` = daily bars, `etSh` = server→ET shift (hours), `boxes` = day-boxes drawn, `err` = last MQL error code (0 = none). Send these 5 numbers if asking for help |
 | Boxes/arrows at wrong times | `InpETOffset` wrong (−4 summer / −5 winter); check dashboard ET clock |
 | No boxes, empty dashboard labels | Not enough history — scroll left / raise Max bars, restart MT4 |
 | `leadership: n/a` | Need 260 D1 + 14 MN1 bars (common on new charts — load history) |

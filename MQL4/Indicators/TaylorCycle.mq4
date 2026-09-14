@@ -73,6 +73,7 @@ input color  InpTomColor      = clrGold;        // ToM marker color
 input bool   InpAlerts = true;   // Popup alerts on trigger
 input bool   InpPush   = false;  // Push notifications (configure MetaQuotes ID)
 input bool   InpMail   = false;  // Email alerts (configure SMTP)
+input bool   InpDebug  = true;   // Debug: Experts-log trail + DBG dashboard row
 
 //--- buffers
 double g_dt1[], g_dt2[], g_dt3l[], g_dt3s[];
@@ -81,6 +82,8 @@ int    g_macroKeys[];
 //--- alert memory
 int    g_lastAlertKey = -1;
 string g_lastAlertTag = "";
+int    g_boxCount = 0;
+int    g_lastErr = 0;
 
 //+------------------------------------------------------------------+
 //| Date math (Howard Hinnant civil algorithms, ET-day keys)          |
@@ -326,6 +329,21 @@ void DeleteIfExists(string name)
    string n = PREF + name;
    if(ObjectFind(0, n) >= 0) ObjectDelete(0, n);
 }
+void DrawNote(string text)
+{
+   string n = PREF + "NOTE";
+   if(ObjectFind(0, n) < 0) ObjectCreate(0, n, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, n, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, n, OBJPROP_XDISTANCE, 200);
+   ObjectSetInteger(0, n, OBJPROP_YDISTANCE, 200);
+   ObjectSetInteger(0, n, OBJPROP_COLOR, clrYellow);
+   ObjectSetInteger(0, n, OBJPROP_FONTSIZE, 12);
+   ObjectSetString(0, n, OBJPROP_FONT, "Arial");
+   ObjectSetString(0, n, OBJPROP_TEXT, text);
+   ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, n, OBJPROP_BACK, false);
+}
+void DeleteNote() { DeleteIfExists("NOTE"); }
 void UpsertDayBox(int key, datetime t1, datetime t2, double p1, double p2, color clr, bool tom)
 {
    string n = StringFormat("%sBOX_%d", PREF, key);
@@ -336,6 +354,7 @@ void UpsertDayBox(int key, datetime t1, datetime t2, double p1, double p2, color
    ObjectSetInteger(0, n, OBJPROP_BACK, true);
    ObjectSetInteger(0, n, OBJPROP_WIDTH, tom ? 2 : 1);
    ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
+   g_boxCount++;
 }
 void PruneDayObjects(int minKey)
 {
@@ -427,7 +446,14 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
-   if(rates_total < 100 || Bars(_Symbol, PERIOD_D1) < 30) return 0;
+   int d1bars = Bars(_Symbol, PERIOD_D1);
+   if(rates_total < 100 || d1bars < 30)
+   {
+      DrawNote(StringFormat("TaylorCycle: loading history...  bars=%d  D1=%d (need 100 / 30)",
+                            rates_total, d1bars));
+      return 0;
+   }
+   DeleteNote();
    ArraySetAsSeries(time, true); ArraySetAsSeries(open, true);
    ArraySetAsSeries(high, true); ArraySetAsSeries(low, true);
    ArraySetAsSeries(close, true);
@@ -437,9 +463,15 @@ int OnCalculate(const int rates_total,
    int nowMin = ETMinutes(TimeCurrent(), etSh);
    ArrayInitialize(g_dt1, 0.0); ArrayInitialize(g_dt2, 0.0);
    ArrayInitialize(g_dt3l, 0.0); ArrayInitialize(g_dt3s, 0.0);
+   ResetLastError();
+   g_boxCount = 0;
 
    double atrD = iATR(_Symbol, PERIOD_D1, InpAtrPeriod, 1);
-   if(atrD <= 0) return 0;
+   if(atrD <= 0)
+   {
+      DrawNote("TaylorCycle: waiting for daily ATR data (no tick yet?)...");
+      return 0;
+   }
    double prevH = iHigh(_Symbol, PERIOD_D1, 1);
    double prevL = iLow(_Symbol, PERIOD_D1, 1);
    double prevC = iClose(_Symbol, PERIOD_D1, 1);
@@ -506,9 +538,19 @@ int OnCalculate(const int rates_total,
       UpsertHLine("H52", h52px, clrDarkOrange, STYLE_DOT, 1, "52W " + DoubleToString(h52px, _Digits));
    else DeleteIfExists("H52");
 
+   g_lastErr = GetLastError();
    DrawDashboard(nowKey, nowMin, isBuy, isShort, isSell, isSuper, tom, preM, macT,
                  prevH, prevL, prevC, atrD, h52r, h52rec, has52, sret, sz, hasSe,
                  score, time, open, high, low, close, etSh);
+   static int dbgDay = -99;
+   if(InpDebug && nowKey != dbgDay)
+   {
+      dbgDay = nowKey;
+      Print(StringFormat("TaylorCycle: bars=%d D1=%d atrD=%s etSh=%dh label=%s score=%d boxes=%d err=%d",
+         rates_total, Bars(_Symbol, PERIOD_D1), DoubleToString(atrD, _Digits), etSh / 3600,
+         (isSuper ? "SUPER" : (isBuy ? "BUY" : (isShort ? "SHORT" : (isSell ? "SELL" : "NONE")))),
+         score, g_boxCount, g_lastErr));
+   }
    return rates_total;
 }
 
@@ -703,7 +745,7 @@ void DrawDashboard(int nowKey, int nowMin,
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_XDISTANCE, 4);
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_YDISTANCE, 4);
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_XSIZE, 340);
-   ObjectSetInteger(0, PREF + "DBG", OBJPROP_YSIZE, lh * 13 + 12);
+   ObjectSetInteger(0, PREF + "DBG", OBJPROP_YSIZE, lh * 14 + 12);
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_BGCOLOR, C'16,16,16');
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_COLOR, clrDimGray);
@@ -730,6 +772,9 @@ void DrawDashboard(int nowKey, int nowMin,
    MkLabel("D" + IntegerToString(r++), x0 + 9 * lh, "ENTRY/STOP/TP lines plot on trigger (EOD exit, flat 15:58)", clrGray);
    MkLabel("D" + IntegerToString(r++), x0 + 10 * lh, "Risk: 0.25-0.5%/trade  Daily stop 1-1.5%  Max 3/day", clrGray);
    MkLabel("D" + IntegerToString(r++), x0 + 11 * lh, "Edu research - not financial advice. See MT4_GUIDE.md", clrDimGray);
+   MkLabel("D" + IntegerToString(r++), x0 + 12 * lh, StringFormat("DBG bars=%d D1=%d etSh=%dh boxes=%d err=%d",
+            Bars(_Symbol, _Period), Bars(_Symbol, PERIOD_D1), ETShiftSeconds() / 3600,
+            g_boxCount, g_lastErr), clrDimGray);
 }
 color sLeadColor(bool has52, bool hasSe, double h52r, double h52rec, double sz)
 {
