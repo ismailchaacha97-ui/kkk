@@ -87,6 +87,11 @@ Verify: dashboard clock `ET HH:MM` matches US Eastern time, and day-boxes start 
 
 ## 8. Troubleshooting
 
+**v2.02 fixes flickering/repainting:** signals now evaluate only after the 11:00 ET window
+completes (never on partial data), the full redraw runs once per bar (ticks only refresh the
+clock + setup rows), and the live day gets a real label. If arrows still move after F7 + re-attach,
+check the dashboard title says `v2.02` — otherwise the old .ex4 is running.
+
 | Symptom | Fix |
 |---|---|
 | **Nothing at all on chart** | Go down this list: ① MetaEditor shows **0 errors** after F7? (if not, paste them) ② File is at DataFolder → `MQL4/Indicators/TaylorCycle.mq4` with a fresh `.ex4` timestamp? ③ **Removed the old instance and re-dragged** onto the chart? (the old .ex4 keeps running otherwise) ④ Terminal is **MT4** (not MT5 — .mq4 can't run there), chart is M30 with 100+ bars, ticks flowing? ⑤ Experts tab (View → Toolbox → Experts) shows the `TaylorCycle: bars=...` line? If yes but still blank → send the DBG row numbers + symbol name |

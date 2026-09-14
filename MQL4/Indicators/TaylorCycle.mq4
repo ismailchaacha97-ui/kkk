@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| TaylorCycle.mq4  —  Taylor 3-Day Overnight/Daytrade Cycle        |
-//| Version 2.01  (MQL4, MT4 build 600+)                              |
+//| Version 2.02  (MQL4, MT4 build 600+)                              |
 //|                                                                    |
 //| Pre-open day labels (BUY / SHORT / SELL), prev-day High/Low,       |
 //| Turn-of-Month + pre-macro flags, DT1/DT2/DT3 setup arrows with     |
@@ -12,7 +12,7 @@
 //| Educational research — NOT financial advice.                       |
 //+------------------------------------------------------------------+
 #property copyright "TaylorCycle v2.0 — educational"
-#property version   "2.01"
+#property version   "2.02"
 #property description "Taylor 3-day cycle: day labels, prev H/L, ToM/macro, DT1-DT3 arrows, dashboard"
 #property strict
 #property indicator_chart_window
@@ -129,7 +129,8 @@ bool IsToMKey(int key)
 int ETShiftSeconds()
 {
    long serverGmt = (long)TimeCurrent() - (long)TimeGMT();
-   return (int)(InpETOffset * 3600.0 - (double)serverGmt);
+   int sh = (int)(InpETOffset * 3600.0 - (double)serverGmt);
+   return (sh / 60) * 60; // minute-rounded: kills tick-to-tick wobble
 }
 int BarETKey(datetime t, int sh) { return (int)(((long)t + sh + 12 * 3600) / 86400); }
 int ETMinutes(datetime t, int sh) // minutes since ET midnight
@@ -384,7 +385,7 @@ void FireAlert(string tag, string msg, int key)
 void ProcessDay(int dFirst, int dLast, int key, int nowKey,
                 const datetime &time[], const double &open[], const double &high[],
                 const double &low[], const double &close[], int etSh,
-                double atrD, bool tomNow, bool preMNow, bool macTNow, int scoreNow);
+                double atrD, int b0key, int b0mm, int scoreNow);
 void DrawDashboard(int nowKey, int nowMin,
                    bool isBuy, bool isShort, bool isSell, bool isSuper,
                    bool tom, bool preM, bool macT,
@@ -393,6 +394,7 @@ void DrawDashboard(int nowKey, int nowMin,
                    double sret, double sz, bool hasSe, int score,
                    const datetime &time[], const double &open[], const double &high[],
                    const double &low[], const double &close[], int etSh);
+void UpdateLiveRows(int nowKey, int nowMin, const datetime &time[], int etSh);
 color sLeadColor(bool has52, bool hasSe, double h52r, double h52rec, double sz);
 string TFName();
 
@@ -450,6 +452,13 @@ int OnCalculate(const int rates_total,
    int etSh = ETShiftSeconds();
    int nowKey = (int)(((long)TimeGMT() + (long)(InpETOffset * 3600.0) + 12 * 3600) / 86400);
    int nowMin = ETMinutes(TimeCurrent(), etSh);
+   static datetime lastFullBar = 0;
+   if(prev_calculated > 0 && time[0] == lastFullBar)
+   {
+      UpdateLiveRows(nowKey, nowMin, time, etSh); // clock + setup rows only
+      return rates_total;
+   }
+   lastFullBar = time[0];
    ArrayInitialize(g_dt1, 0.0); ArrayInitialize(g_dt2, 0.0);
    ArrayInitialize(g_dt3l, 0.0); ArrayInitialize(g_dt3s, 0.0);
    ResetLastError();
@@ -485,6 +494,8 @@ int OnCalculate(const int rates_total,
    int rangeOldest = j;
    if(rangeOldest < 1)
       DrawNote("TaylorCycle: chart data stale/offline (no bars in scan range) - check connection");
+   int b0key = BarETKey(time[0], etSh);
+   int b0mm = ETMinutes(time[0], etSh);
    int dk = -1, dFirst = -1, dLast = -1;
    for(int b = rangeOldest; b >= 1; b--)
    {
@@ -492,13 +503,13 @@ int OnCalculate(const int rates_total,
       if(key != dk)
       {
          if(dk != -1) ProcessDay(dFirst, dLast, dk, nowKey, time, open, high, low, close, etSh,
-                                 atrD, tom, preM, macT, score);
+                                 atrD, b0key, b0mm, score);
          dk = key; dFirst = b; dLast = b;
       }
       else dLast = b;
       if(b == 1) // finalize newest day
          ProcessDay(dFirst, dLast, dk, nowKey, time, open, high, low, close, etSh,
-                    atrD, tom, preM, macT, score);
+                    atrD, b0key, b0mm, score);
    }
    if(InpShowDayBoxes) PruneDayObjects(minKey);
 
@@ -535,11 +546,12 @@ int OnCalculate(const int rates_total,
 void ProcessDay(int dFirst, int dLast, int key, int nowKey,
                 const datetime &time[], const double &open[], const double &high[],
                 const double &low[], const double &close[], int etSh,
-                double atrD, bool tomNow, bool preMNow, bool macTNow, int scoreNow)
+                double atrD, int b0key, int b0mm, int scoreNow)
 {
    // dFirst = oldest bar index of day (highest index), dLast = newest (lowest)
    // collect session bars ET 9:30..16:00
    int f0 = -1, f1 = -1; // first-90m range (oldest..newest indices)
+   int maxMM = -1;
    double fLow = 0, fHigh = 0, sessOpen = 0;
    bool haveF = false;
    double dHigh = -1.0, dLow = 1e12;
@@ -548,6 +560,7 @@ void ProcessDay(int dFirst, int dLast, int key, int nowKey,
    {
       int mm = ETMinutes(time[b], etSh);
       if(mm < 570 || mm > 960) continue; // 9:30..16:00 ET
+      if(mm > maxMM) maxMM = mm;
       if(tFirst == 0) tFirst = time[b];
       tLast = time[b];
       if(sessOpen == 0) sessOpen = open[b];
@@ -567,13 +580,15 @@ void ProcessDay(int dFirst, int dLast, int key, int nowKey,
    int dsh = iBarShift(_Symbol, PERIOD_D1, tFirst, false);
    bool isBuy = false, isShort = false, isSell = false, isSuper = false;
    double atrRef = atrD;
-   if(dsh >= 1 && dsh + 8 < Bars(_Symbol, PERIOD_D1))
+   bool isToday = (key == nowKey);
+   if(isToday)
+      DayLabel(1, isBuy, isShort, isSell, isSuper); // live day: pre-open label
+   else if(dsh >= 1 && dsh + 8 < Bars(_Symbol, PERIOD_D1))
    {
       DayLabel(dsh + 1, isBuy, isShort, isSell, isSuper);
       double a = iATR(_Symbol, PERIOD_D1, InpAtrPeriod, dsh + 1);
       if(a > 0) atrRef = a;
    }
-   bool isToday = (key == nowKey);
    bool dayTom = IsToMKey(key);
    bool dayPreM = IsPreMacroKey(key);
    bool dayMac = IsMacroKey(key);
@@ -586,14 +601,15 @@ void ProcessDay(int dFirst, int dLast, int key, int nowKey,
    bool rallied = (fHigh > sessOpen);
    bool reclaim = (entryPx > fLow + InpReclaimAtr * atrRef);
    bool reject = (entryPx < fHigh - InpReclaimAtr * atrRef);
-   bool trigL = (isBuy && dipped && reclaim && !isSuper);
-   bool trigS = (isShort && rallied && reject && !isSuper);
+   bool windowDone = (maxMM >= 660) || (key == b0key && b0mm >= 660);
+   bool trigL = (windowDone && isBuy && dipped && reclaim && !isSuper);
+   bool trigS = (windowDone && isShort && rallied && reject && !isSuper);
    if(trigL) g_dt1[f1] = low[f1] - off;
    if(trigS) g_dt2[f1] = high[f1] + off;
    //--- DT3 gap fade
-   if(InpUseGapFade && dsh >= 1)
+   if(InpUseGapFade && (isToday || dsh >= 1))
    {
-      double pc = iClose(_Symbol, PERIOD_D1, dsh + 1);
+      double pc = isToday ? iClose(_Symbol, PERIOD_D1, 1) : iClose(_Symbol, PERIOD_D1, dsh + 1);
       if(pc > 0)
       {
          double gap = (sessOpen / pc - 1.0) / (atrRef / pc);
@@ -649,6 +665,38 @@ void ProcessDay(int dFirst, int dLast, int key, int nowKey,
       }
       else { DeleteIfExists("ENTRY"); DeleteIfExists("STOP"); DeleteIfExists("TP1"); }
    }
+}
+
+//+------------------------------------------------------------------+
+//| Per-tick refresh: clock/session + setup rows only (no redraw)    |
+//+------------------------------------------------------------------+
+void UpdateLiveRows(int nowKey, int nowMin, const datetime &time[], int etSh)
+{
+   if(!InpShowDashboard) return;
+   int y, m, d; KeyToDate(nowKey, y, m, d);
+   int hh = nowMin / 60, mm = nowMin % 60;
+   bool macT = IsMacroKey(nowKey);
+   string sess = "WAIT"; color sessC = clrGray;
+   if(macT) { sess = "MACRO DAY-BLACKOUT"; sessC = clrRed; }
+   else if(nowMin >= 570 && nowMin < 600) { sess = "OPEN DRIVE"; sessC = clrYellow; }
+   else if(nowMin >= 600 && nowMin < 690) { sess = "AM CONFIRM"; sessC = clrAqua; }
+   else if(nowMin >= 690 && nowMin < 840) { sess = "DEAD ZONE-NO ENTRY"; sessC = clrGray; }
+   else if(nowMin >= 840 && nowMin < 930) { sess = "TAYLOR MOVE"; sessC = clrLime; }
+   else if(nowMin >= 930 && nowMin < 958) { sess = "CLOSE ONLY-FLAT 15:58"; sessC = clrOrange; }
+   string st = "WAITING 9:30 ET", tag = "";
+   for(int b = 1; b < MathMin(300, Bars(_Symbol, _Period)); b++)
+   {
+      if(BarETKey(time[b], etSh) != nowKey) { if(BarETKey(time[b], etSh) < nowKey) break; else continue; }
+      if(g_dt1[b] > 0) { tag = "DT1"; break; }
+      if(g_dt2[b] > 0) { tag = "DT2"; break; }
+   }
+   if(tag == "DT1") st = "TRIGGERED LONG (see ENTRY line)";
+   else if(tag == "DT2") st = "TRIGGERED SHORT (see ENTRY line)";
+   else if(nowMin >= 690) st = "NO TRIGGER - window passed";
+   else if(nowMin >= 570) st = "ARMED - trigger @11:00 ET bar";
+   int lh = InpFontSize + 8, x0 = 8;
+   MkLabel("D1", x0 + 1 * lh, StringFormat("ET %04d.%02d.%02d %02d:%02d  |  %s", y, m, d, hh, mm, sess), sessC);
+   MkLabel("D8", x0 + 8 * lh, "SETUP: " + st, (tag != "" ? clrYellow : clrSilver));
 }
 
 //+------------------------------------------------------------------+
@@ -728,7 +776,7 @@ void DrawDashboard(int nowKey, int nowMin,
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_SELECTABLE, false);
 
    int r = 0;
-   MkLabel("D" + IntegerToString(r++), x0 + 0 * lh, "TAYLOR CYCLE v2.01 " + _Symbol + "  " + TFName(), clrGold);
+   MkLabel("D" + IntegerToString(r++), x0 + 0 * lh, "TAYLOR CYCLE v2.02 " + _Symbol + "  " + TFName(), clrGold);
    MkLabel("D" + IntegerToString(r++), x0 + 1 * lh, StringFormat("ET %04d.%02d.%02d %02d:%02d  |  %s", y, m, d, hh, mm, sess), sessC);
    MkLabel("D" + IntegerToString(r++), x0 + 2 * lh, "DAY: " + dayS, dayC);
    MkLabel("D" + IntegerToString(r++), x0 + 3 * lh, "CAL: " + cal + "   SCORE: " + IntegerToString(score) + "/3", tom || preM ? clrGold : clrSilver);
