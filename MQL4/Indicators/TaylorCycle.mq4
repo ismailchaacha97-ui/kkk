@@ -339,7 +339,7 @@ void UpsertDayBox(int key, datetime t1, datetime t2, double p1, double p2, color
 }
 void PruneDayObjects(int minKey)
 {
-   for(int i = ObjectsTotal(0) - 1; i >= 0; i--)
+   for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
    {
       string n = ObjectName(0, i);
       if(StringFind(n, PREF + "BOX_") != 0 && StringFind(n, PREF + "TAG_") != 0) continue;
