@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| TaylorCycle.mq4  —  Taylor 3-Day Overnight/Daytrade Cycle        |
-//| Version 2.00  (MQL4, MT4 build 600+)                              |
+//| Version 2.01  (MQL4, MT4 build 600+)                              |
 //|                                                                    |
 //| Pre-open day labels (BUY / SHORT / SELL), prev-day High/Low,       |
 //| Turn-of-Month + pre-macro flags, DT1/DT2/DT3 setup arrows with     |
@@ -12,7 +12,7 @@
 //| Educational research — NOT financial advice.                       |
 //+------------------------------------------------------------------+
 #property copyright "TaylorCycle v2.0 — educational"
-#property version   "2.00"
+#property version   "2.01"
 #property description "Taylor 3-day cycle: day labels, prev H/L, ToM/macro, DT1-DT3 arrows, dashboard"
 #property strict
 #property indicator_chart_window
@@ -202,17 +202,6 @@ int UpStreak(int fromSh)
       else break;
    }
    return c;
-}
-int SwingHighShift() // shift of max High in last InpSwingN+1 completed dailies
-{
-   int best = 1; double mx = -1.0;
-   for(int s = 1; s <= InpSwingN + 1; s++)
-   {
-      if(s >= Bars(_Symbol, PERIOD_D1)) break;
-      double h = iHigh(_Symbol, PERIOD_D1, s);
-      if(h > mx) { mx = h; best = s; }
-   }
-   return best;
 }
 double DayClosePos(int sh)
 {
@@ -490,26 +479,12 @@ int OnCalculate(const int rates_total,
 
    //--- scan last N ET-days for history arrows + boxes (skip forming bar 0)
    int minKey = nowKey - InpHistoryDays - 2;
-   int i = rates_total - 1;
-   // find oldest bar within range
-   int oldest = 1;
-   for(int k = rates_total - 1; k >= 1; k--)
-   {
-      if(BarETKey(time[k], etSh) < minKey) { oldest = k + 1; break; }
-      oldest = k;
-   }
-   // walk old -> new, grouping by ET day
-   int dayStart = oldest, curKey = BarETKey(time[oldest], etSh);
-   for(int k = oldest; k >= 1; k--) {} // (direction guard, no-op)
-   for(int k = oldest; k <= rates_total - 1; k++)
-   {
-      // NOTE: arrays are series; iterate k ascending = old -> new is WRONG direction.
-      break;
-   }
-   // series arrays: index rates_total-1 = oldest. iterate j from oldest down to 1:
+   // series arrays: index rates_total-1 = oldest. find oldest bar in range:
    int j = rates_total - 1;
    while(j >= 1 && BarETKey(time[j], etSh) < minKey) j--;
    int rangeOldest = j;
+   if(rangeOldest < 1)
+      DrawNote("TaylorCycle: chart data stale/offline (no bars in scan range) - check connection");
    int dk = -1, dFirst = -1, dLast = -1;
    for(int b = rangeOldest; b >= 1; b--)
    {
@@ -753,7 +728,7 @@ void DrawDashboard(int nowKey, int nowMin,
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_SELECTABLE, false);
 
    int r = 0;
-   MkLabel("D" + IntegerToString(r++), x0 + 0 * lh, "TAYLOR CYCLE v2.0  " + _Symbol + "  " + TFName(), clrGold);
+   MkLabel("D" + IntegerToString(r++), x0 + 0 * lh, "TAYLOR CYCLE v2.01 " + _Symbol + "  " + TFName(), clrGold);
    MkLabel("D" + IntegerToString(r++), x0 + 1 * lh, StringFormat("ET %04d.%02d.%02d %02d:%02d  |  %s", y, m, d, hh, mm, sess), sessC);
    MkLabel("D" + IntegerToString(r++), x0 + 2 * lh, "DAY: " + dayS, dayC);
    MkLabel("D" + IntegerToString(r++), x0 + 3 * lh, "CAL: " + cal + "   SCORE: " + IntegerToString(score) + "/3", tom || preM ? clrGold : clrSilver);

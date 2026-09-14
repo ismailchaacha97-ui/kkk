@@ -89,7 +89,8 @@ Verify: dashboard clock `ET HH:MM` matches US Eastern time, and day-boxes start 
 
 | Symptom | Fix |
 |---|---|
-| **Nothing at all on chart** | Check Experts tab for errors. If you see the yellow `loading history...` note: wait for ticks / load history (scroll left, raise Max bars, restart). If truly blank: confirm the indicator is attached (smiley/indicator list), you're on an **M30 with 100+ bars**, and D1 has 30+ bars — the DBG dashboard row shows all three counts |
+| **Nothing at all on chart** | Go down this list: ① MetaEditor shows **0 errors** after F7? (if not, paste them) ② File is at DataFolder → `MQL4/Indicators/TaylorCycle.mq4` with a fresh `.ex4` timestamp? ③ **Removed the old instance and re-dragged** onto the chart? (the old .ex4 keeps running otherwise) ④ Terminal is **MT4** (not MT5 — .mq4 can't run there), chart is M30 with 100+ bars, ticks flowing? ⑤ Experts tab (View → Toolbox → Experts) shows the `TaylorCycle: bars=...` line? If yes but still blank → send the DBG row numbers + symbol name |
+| Dashboard shows v2.0 instead of v2.01 | Stale .ex4 is running — re-copy file, F7, remove + re-attach |
 | What the DBG row means | `bars` = chart bars, `D1` = daily bars, `etSh` = server→ET shift (hours), `boxes` = day-boxes drawn, `err` = last MQL error code (0 = none). Send these 5 numbers if asking for help |
 | Boxes/arrows at wrong times | `InpETOffset` wrong (−4 summer / −5 winter); check dashboard ET clock |
 | No boxes, empty dashboard labels | Not enough history — scroll left / raise Max bars, restart MT4 |
