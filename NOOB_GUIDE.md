@@ -49,7 +49,7 @@ Total screen time: well under an hour once you're used to it.
 **Arrows (appear at 16:00 Morocco, never move once printed):**
 - Blue ↑ below price = **buy here** (DT1 dip-long).
 - Orange ↓ above price = **sell here** (DT2 fade-short).
-- Aqua/magenta small arrows = gap-fade bonus signals (DT3). Ignore these until month 2.
+- Aqua/magenta small arrows = gap-fade bonus signals (DT3). **Beginners: switch these off** — put `MQL4/Presets/TaylorCycle_DT1_DT2.set` in your Data Folder's `MQL4/Presets` folder, then in the indicator's Inputs tab click **Load** and select it (or just set `InpUseGapFade=false`). **DT1+DT2 only is the recommended beginner configuration.**
 
 **The 3 lines (only on trade days):**
 - **ENTRY** (blue/orange) = where you buy/sell.

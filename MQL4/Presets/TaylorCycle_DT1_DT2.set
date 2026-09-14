@@ -1,0 +1,12 @@
+InpStopAtr=0.5
+InpReclaimAtr=0.1
+InpGapFadeAtr=0.5
+InpUseGapFade=0
+InpHistoryDays=30
+InpShowDashboard=1
+InpShowDayBoxes=1
+InpShowPrevHL=1
+InpAlerts=1
+InpPush=0
+InpMail=0
+InpDebug=1
