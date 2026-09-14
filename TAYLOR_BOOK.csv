@@ -1,0 +1,3 @@
+date,ticker,prev_high,prev_low,open,high,low,close,close_pos_pct,high_low_first,penetrated_prior,day_label,quality_score,setup_taken,entry_price,exit_price,ret_bps,score_tom,score_premacro,score_leadership,notes
+2026-09-10,SPY,648.20,641.05,642.10,646.90,640.40,646.10,82,low_first,penetrated_low_failed,BUY,78,YES_HOLD_OVERN,645.80,647.50,26,0,1,0,"low first under prev low then reclaim; CPI 9/11 premacro +1; sold 09:45 strength"
+2026-09-11,SPY,646.90,640.40,647.50,648.80,643.20,644.00,29,high_first,penetrated_high_failed,SELL,—,EXIT_ONLY,—,647.50,—,"—","—","—","sell day: sold open+30m per plan; faded rest of day as expected; flat EOD"

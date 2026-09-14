@@ -63,3 +63,18 @@
 - Anomaly overviews (for context that most anomalies fade, these survive):
   - https://mpra.ub.uni-muenchen.de/119039/1/MPRA_paper_119039.pdf
   - https://www.sciencedirect.com/science/article/pii/S0165410124000181
+
+## Calendars + formula references (Part 2)
+
+- FOMC meeting calendars/statements (verified 2023–2026 announcement dates in `data/fomc_dates.csv`):
+  - https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+- BLS CPI release schedule (verified 2026 dates in `data/macro_dates.csv`):
+  - https://www.bls.gov/schedule/news_release/cpi.htm
+  - https://www.bls.gov/cpi/
+- BLS Employment Situation (NFP) release schedule (verified 2026 dates):
+  - https://www.bls.gov/ces/publications/news-release-schedule.htm
+- Bhootra–Hur recency ratio formula (RR = 1 − N/365), as restated in Lasfer et al. (2023):
+  - https://openaccess.city.ac.uk/id/eprint/31667/8/The%20Financial%20Review%20-%202023%20-%20Lasfer%20-%20Corporate%20insiders%20%20exploitation%20of%20investors%20%20anchoring%20bias%20at%20the%2052%E2%80%90week%20high.pdf
+- 2026 FOMC schedule cross-checks:
+  - https://thriveinmarkets.com/calendar/indicator/fomc/
+  - https://www.mnimarkets.com/calendars/fomc-meeting-calendar
