@@ -22,6 +22,7 @@ Examples:
   python taylor_engine.py --ticker SPY --start 2015-01-01 --source stooq
   python taylor_engine.py --ticker SPY --start 2015-01-01 --source yf --exit limit --shorts
   python taylor_engine.py --screen SPY,QQQ,AAPL,MSFT,NVDA --source stooq
+  python taylor_engine.py --demo --daytrade [--dt-gap-fade]   (intraday only, flat EOD)
 """
 import argparse
 import csv
@@ -403,6 +404,91 @@ def _regime(p):
     return "low" if p < 0.33 else ("mid" if p < 0.67 else "high")
 
 
+# ----------------------------------------------------- day-trade engine ---
+def _dt_row(t, setup, entry, exitpx, ret, r, rp):
+    return dict(entry_date=t, exit_date=t, side=setup, entry=entry, exit=exitpx,
+                ret=ret, stop_pct=max(float(rp["ATR"]) / entry, 0.002),
+                score=int(rp["score"]), tom=bool(r["tom"]),
+                premacro=bool(rp["pre_macro"]), exit_macro=False,
+                quality=float(rp["quality"]), close_pos=float(rp["close_pos"]),
+                weekday=t.strftime("%a"), year=t.year, atr_reg=_regime(rp["atr_pctile"]))
+
+
+def build_daytrades(df, bars, args):
+    """Intraday-only Taylor slices. Flat every close — no overnight holds.
+
+    Labels are strictly PRE-OPEN: streaks / swing / ATR / score through t-1 only.
+    Setups (see DAYTRADING.md §3):
+      DT-DIP-LONG  : pre-open BUY day, low in first 90m + reclaim -> buy, EOD exit
+      DT-FADE-SHORT: pre-open SHORT day, high in first 90m + rejection -> short, EOD exit
+      DT-GAP-FADE-* (opt): |gap| > 0.5 ATR -> fade first-30m close, midday exit
+    """
+    out = pd.DataFrame()
+    if bars is None or len(bars) == 0:
+        return out
+    dn1 = df["dn_streak"].shift(1)
+    up1 = df["up_streak"].shift(1)
+    swg = df["days_since_swing_hi"].shift(1)
+    pre_buy = (dn1 >= 2) | ((dn1 >= 1) & swg.between(2, 3).fillna(False))
+    pre_short = up1 >= 2
+    cost = args.dt_cost_bps / 1e4
+    stop_k = args.dt_stop_atr
+    bday = bars.index.normalize()
+    have = set(bday)
+    tr = []
+    for i, t in enumerate(df.index):
+        if t not in have or i == 0:
+            continue
+        g = bars[bday == t].sort_index()
+        if len(g) < 4:
+            continue
+        r, rp = df.loc[t], df.iloc[i - 1]  # rp = everything known pre-open
+        if pd.isna(rp["ATR"]) or rp["ATR"] <= 0 or bool(rp["supertrend"]):
+            continue
+        if pd.notna(rp["atr_pctile"]) and rp["atr_pctile"] > args.max_atr_pctile:
+            continue
+        atr = float(rp["ATR"])
+        first = g.iloc[:3]                      # first 90 min (30m bars)
+        rest = g.iloc[3:]
+        eod = float(g["Close"].iloc[-1])
+        entry_px = float(g["Close"].iloc[2])
+        # --- DT1: Buy-Day dip (long) ---
+        if bool(pre_buy.loc[t]):
+            dip_ok = g["Low"].iloc[:3].min() == g["Low"].min()
+            reclaim = entry_px > first["Low"].min() + 0.10 * atr
+            if dip_ok and reclaim:
+                stop = entry_px - stop_k * atr
+                stopped = rest["Low"].min() <= stop
+                px = stop if stopped else eod
+                ret = (px / entry_px - 1) - cost
+                tr.append(_dt_row(t, "DT-DIP-LONG", entry_px, px, ret, r, rp))
+        # --- DT2: Short-Day fade (short) ---
+        if bool(pre_short.loc[t]):
+            # tradable at bar-3 close: probed above the open, now rejecting
+            rallied = first["High"].max() > float(g["Open"].iloc[0])
+            reject = entry_px < first["High"].max() - 0.10 * atr
+            if rallied and reject:
+                stop = entry_px + stop_k * atr
+                stopped = rest["High"].max() >= stop
+                px = stop if stopped else eod
+                ret = (entry_px / px - 1) - cost
+                tr.append(_dt_row(t, "DT-FADE-SHORT", entry_px, px, ret, r, rp))
+        # --- DT3: gap fade (any cycle day) ---
+        if args.dt_gap_fade:
+            gap_atr = (float(g["Open"].iloc[0]) / float(rp["Close"]) - 1) / (atr / float(rp["Close"]))
+            f30 = float(g["Close"].iloc[0])
+            mid = float(g["Close"].iloc[min(5, len(g) - 1)])
+            if gap_atr > 0.5:
+                tr.append(_dt_row(t, "DT-GAP-FADE-S", f30, mid, f30 / mid - 1 - cost, r, rp))
+            elif gap_atr < -0.5:
+                tr.append(_dt_row(t, "DT-GAP-FADE-L", f30, mid, mid / f30 - 1 - cost, r, rp))
+    if tr:
+        out = pd.DataFrame(tr)
+        out["mult"] = 1.0
+        out["ret_net"] = out["ret"]  # costs pre-applied
+    return out
+
+
 # ------------------------------------------------------------------ sim ---
 def simulate(tr, args):
     tr = tr.copy()
@@ -447,7 +533,8 @@ def breakdown(tr, col):
 
 
 def report(df, tr, stats, args, label):
-    print(f"=== {label} | exit={args.exit} | costs={args.cost_bps}bps"
+    cbps = args.dt_cost_bps if getattr(args, "daytrade", False) else args.cost_bps
+    print(f"=== {label} | exit={args.exit} | costs={cbps}bps"
           f" | risk={args.risk_pct * 100:.2f}% mults={args.mult0}/{args.mult1}/{args.mult2}/{args.mult3} ===")
     print(f"Sample: {df.index[0].date()} -> {df.index[-1].date()} ({len(df)} days)")
     print(f"Avg overnight {df['overnight'].mean() * 1e4:6.2f}bps  "
@@ -558,6 +645,12 @@ def build_parser():
     p.add_argument("--fomc-extended", action="store_true",
                    help="on FOMC exit mornings hold to 13:55 (needs intraday)")
     p.add_argument("--shorts", action="store_true")
+    p.add_argument("--daytrade", action="store_true",
+                   help="intraday-only mode: DT1/DT2 (+DT3), flat every close (see DAYTRADING.md)")
+    p.add_argument("--dt-cost-bps", type=float, default=3.0)
+    p.add_argument("--dt-stop-atr", type=float, default=0.5)
+    p.add_argument("--dt-gap-fade", action="store_true",
+                   help="enable DT3 first-hour gap fades in --daytrade mode")
     p.add_argument("--min-close-pos", type=float, default=0.6)
     p.add_argument("--min-h52", type=float, default=0.90)
     p.add_argument("--min-rec", type=float, default=0.75)
@@ -597,6 +690,20 @@ def main():
     df = add_daily_features(df, fomc, macro, earnings)
     df = add_intraday_features(df, bars)
     df = label_cycle(df, args)
+    if args.daytrade:
+        if bars is None:
+            print("Day-trade mode needs intraday bars: --demo, --intraday 30m/60m, or --intraday-csv.")
+            return
+        tr = build_daytrades(df, bars, args)
+        if len(tr):
+            tr, stats = simulate(tr, args)
+            report(df, tr, stats, args, label + " DAY-TRADE (flat EOD)")
+        else:
+            report(df, tr, {}, args, label + " DAY-TRADE (flat EOD)")
+        if args.save_trades and len(tr):
+            tr.to_csv(args.save_trades, index=False)
+            print(f"\nTrades saved to {args.save_trades}")
+        return
     tr = build_trades(df, args)
     stats = simulate(tr, args) if len(tr) else ({}, {})
     if len(tr):

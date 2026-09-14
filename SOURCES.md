@@ -78,3 +78,13 @@
 - 2026 FOMC schedule cross-checks:
   - https://thriveinmarkets.com/calendar/indicator/fomc/
   - https://www.mnimarkets.com/calendars/fomc-meeting-calendar
+
+## Day-trading (Part 3)
+
+- Gao, Han, Li, Zhou (2018) — *Market Intraday Momentum.* First-30m return (from prev
+  close) predicts last-30m return; SPY 1993–2013, stronger on volatile / high-volume /
+  recession / macro-news days:
+  - https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2440866
+  - https://www.researchgate.net/publication/325364670_Market_Intraday_Momentum
+- Raschke Holy Grail intraday (ADX14 > 30, first pullback to 20-EMA, trigger-bar entry):
+  - https://tradersmastermind.com/linda-raschke-trading-strategy/

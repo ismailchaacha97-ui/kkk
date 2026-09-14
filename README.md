@@ -8,6 +8,7 @@ when turn-of-month / pre-macro / leadership tailwinds align.
 |---|---|
 | `SECRET_STRATEGY.md` | Part 1 — thesis: books + papers, tradeable rules, worked example |
 | `DEEP_DIVE.md` | **Part 2 — quantified manual: every formula, threshold, fill assumption** |
+| `DAYTRADING.md` | Day-trade adaptation: 5 intraday setups, flat every close |
 | `taylor_engine.py` | v2 backtest + screener (`--demo` runs fully offline) |
 | `taylor_overnight_backtest.py` | v1 skeleton (reference; v2 supersedes it) |
 | `data/fomc_dates.csv` | FOMC announcements 2023–2026 (verified vs federalreserve.gov) |
