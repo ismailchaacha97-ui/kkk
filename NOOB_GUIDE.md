@@ -124,3 +124,9 @@ wiping out ten good ones. These rules make that mathematically impossible.
 - **After 30 trades:** review. Rules followed ≥ 90%? Losses small and controlled? Only then consider the *idea* of tiny real money — and re-read section 6 first.
 
 Welcome in. Slow is fast in trading. 🌱
+
+## 11. v3.00 pro features (grades, risk box, visual backtest)
+- Every blue/orange arrow now carries a grade tag: **A** = high confluence, **B** = standard, **C** = thin. Beginners: trade A+B, paper-track C for 30 signals before deciding anything.
+- **NEXT row** counts down to unlock/flat. **RISK row** shows your $ risk and exact lot size — just copy it onto the ticket.
+- **HIST row** (e.g. `30d: 9W-7L +2.1R`) is the visual backtest: past arrows scored with EOD exits and -1R stops, each marked with a small green/red `+1.2R`/`-1R` tag. This is how you verify accuracy yourself — no trust needed.
+- **FOMC days** (next: Sep 16!) show a red NO ENTRIES banner and fire no arrows — the 14:00 ET announcement lands mid-trade, so pros stand aside. CPI/NFP days trade normally.

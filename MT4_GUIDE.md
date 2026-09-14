@@ -103,3 +103,11 @@ check the dashboard title says `v2.02` — otherwise the old .ex4 is running.
 | No push alerts | MetaQuotes ID missing or Notifications unchecked in Options |
 | Indicator slows terminal | Lower `InpHistoryDays` to 15–20 |
 | Compile errors | Must be MT4 build 600+ with `#property strict` support (any modern MT4) |
+
+## v3.00 — "craft" upgrade (2026-09-14)
+- **A/B/C confluence grade** on every DT1/DT2 arrow: ToM wind + H4-trend alignment + trigger-bar volume + gap check + morning-range check. All inputs known at 11:00 ET — no lookahead. Alerts print the grade; `InpAlertMinScore=70` = A-only alerts.
+- **Auto risk row**: `RISK 0.50% = $X | size Y lots` from live equity (`InpRiskPct`, broker min/max/step aware). If broker minimum exceeds budget it says SKIP.
+- **Visual backtest**: past arrows get `+1.2R`/`-1R` outcome tags (SL touch = -1R, else EOD-exit R) + `HIST 30d: 9W-7L +2.1R` tally row. Toggle: `InpShowOutcomes`, `InpShowGrades`.
+- **FOMC blackout**: separate `InpFomcDates` 2026 list, `InpBlockFomcDay=true` blocks all new entries + red `FOMC 14:00 ET - NO ENTRIES` banner. CPI/NFP days trade normally (released 08:30, before entries). Full-year 2026 NFP+CPI list now in `InpMacroDates`.
+- **Countdown row** (open/unlock/flat), **TP2 line** (`InpShowTP2`), **H4 regime + day-range-%ADR row**.
+- Install = full re-copy + F7 (0 errors) + remove/re-drag, then confirm `TAYLOR CYCLE v3.00` title.

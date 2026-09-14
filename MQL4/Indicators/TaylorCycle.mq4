@@ -1,19 +1,19 @@
 //+------------------------------------------------------------------+
 //| TaylorCycle.mq4  —  Taylor 3-Day Overnight/Daytrade Cycle        |
-//| Version 2.02  (MQL4, MT4 build 600+)                              |
+//| Version 3.00  (MQL4, MT4 build 600+)                              |
 //|                                                                    |
 //| Pre-open day labels (BUY / SHORT / SELL), prev-day High/Low,       |
-//| Turn-of-Month + pre-macro flags, DT1/DT2/DT3 setup arrows with     |
-//| entry/stop/target lines, 52-week + seasonal leadership score,      |
-//| live session dashboard, alerts/push/mail.                          |
+//| Turn-of-Month + macro/FOMC flags, DT1/DT2/DT3 arrows with grades,  |
+//| auto risk box + lot sizing, visual backtest, countdown timers,     |
+//| 52-week + seasonal leadership, live dashboard, alerts/push/mail.   |
 //|                                                                    |
 //| Recommended: M30 chart, SP500/NAS100/US30 CFD (works on FX too).   |
 //| See MT4_GUIDE.md for install + input help.                         |
 //| Educational research — NOT financial advice.                       |
 //+------------------------------------------------------------------+
-#property copyright "TaylorCycle v2.0 — educational"
-#property version   "2.02"
-#property description "Taylor 3-day cycle: day labels, prev H/L, ToM/macro, DT1-DT3 arrows, dashboard"
+#property copyright "TaylorCycle v3.0 — educational"
+#property version   "3.00"
+#property description "Taylor 3-day cycle: labels, grades, risk box, visual backtest, FOMC blackout, dashboard"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 4
@@ -47,6 +47,8 @@ input double InpStopAtr      = 0.5;    // Stop distance (ATR)
 input double InpReclaimAtr   = 0.10;   // Reclaim/reject buffer (ATR)
 input double InpGapFadeAtr   = 0.5;    // DT3 gap threshold (ATR)
 input bool   InpUseGapFade   = true;   // Show DT3 gap-fade arrows
+input double InpRiskPct      = 0.5;    // Risk per trade (% of equity)
+input bool   InpShowTP2      = true;   // Show TP2 (+1.0 ATR) line
 //--- inputs: leadership
 input bool   InpUse52W       = true;   // Use 52-week leadership
 input int    InpWeeks52      = 52;     // Weeks for 52W window (~x5 daily bars)
@@ -55,7 +57,9 @@ input double InpMinRec       = 0.75;   // Min 52W recency (1-N/365)
 input bool   InpUseSeasonal  = true;   // Use same-month seasonality
 input int    InpSeasonYears  = 5;      // Seasonal lookback (years)
 //--- inputs: calendar/time
-input string InpMacroDates   = "2026.10.02,2026.10.14,2026.10.28,2026.11.06,2026.11.10,2026.12.04,2026.12.09,2026.12.10";
+input string InpMacroDates   = "2026.01.09,2026.01.13,2026.02.11,2026.02.13,2026.03.06,2026.03.11,2026.04.03,2026.04.10,2026.05.08,2026.05.12,2026.06.05,2026.06.10,2026.07.02,2026.07.14,2026.08.07,2026.08.12,2026.09.04,2026.09.11,2026.10.02,2026.10.14,2026.11.06,2026.11.10,2026.12.04,2026.12.10"; // NFP+CPI 2026 (08:30 ET)
+input string InpFomcDates    = "2026.01.28,2026.03.18,2026.04.29,2026.06.17,2026.07.29,2026.09.16,2026.10.28,2026.12.09"; // FOMC 2026 (14:00 ET)
+input bool   InpBlockFomcDay = true;   // Block new entries on FOMC days
 input double InpETOffset     = -4.0;   // ET offset from GMT (-4 EDT Mar-Nov, -5 EST)
 input int    InpHistoryDays  = 30;     // History days to draw/scan
 //--- inputs: display
@@ -63,6 +67,8 @@ input bool   InpShowDashboard = true;  // Show dashboard
 input bool   InpShowDayBoxes  = true;  // Show day-type boxes
 input bool   InpShowPrevHL    = true;  // Show prev-day High/Low lines
 input bool   InpShow52WLine   = false; // Show 52W-high line
+input bool   InpShowGrades    = true;   // Show A/B/C confluence grades
+input bool   InpShowOutcomes  = true;   // Show historical outcome tags (+R/-R)
 input int    InpFontSize      = 8;      // Dashboard font size
 input int    InpCorner        = 0;      // Corner: 0=LU 1=RU 2=LL 3=RU
 input color  InpBuyColor      = C'20,80,20';    // BUY-day box tint
@@ -73,17 +79,25 @@ input color  InpTomColor      = clrGold;        // ToM marker color
 input bool   InpAlerts = true;   // Popup alerts on trigger
 input bool   InpPush   = false;  // Push notifications (configure MetaQuotes ID)
 input bool   InpMail   = false;  // Email alerts (configure SMTP)
+input int    InpAlertMinScore = 0;      // Min confluence score to alert (0=all, 70=A-only)
 input bool   InpDebug  = true;   // Debug: Experts-log trail + DBG dashboard row
 
 //--- buffers
 double g_dt1[], g_dt2[], g_dt3l[], g_dt3s[];
 //--- macro calendar (ET day-keys)
 int    g_macroKeys[];
+int    g_fomcKeys[];
 //--- alert memory
 int    g_lastAlertKey = -1;
 string g_lastAlertTag = "";
 int    g_boxCount = 0;
 int    g_lastErr = 0;
+//--- v3 craft state
+int    g_w = 0, g_l = 0;
+double g_rsum = 0.0, g_adr = 0.0;
+double g_liveEntry = 0.0, g_liveStop = 0.0;
+int    g_liveDir = 0, g_liveScore = 0;
+string g_liveGrade = "";
 
 //+------------------------------------------------------------------+
 //| Date math (Howard Hinnant civil algorithms, ET-day keys)          |
@@ -143,10 +157,10 @@ int ETMinutes(datetime t, int sh) // minutes since ET midnight
 //+------------------------------------------------------------------+
 //| Macro calendar parse                                             |
 //+------------------------------------------------------------------+
-void ParseMacroDates()
+void ParseDateList(string src, int &arr[])
 {
-   ArrayResize(g_macroKeys, 0);
-   string s = InpMacroDates;
+   ArrayResize(arr, 0);
+   string s = src;
    StringReplace(s, ";", ",");
    string items[];
    int n = StringSplit(s, ',', items);
@@ -161,10 +175,15 @@ void ParseMacroDates()
       int m = (int)StringToInteger(p[1]);
       int d = (int)StringToInteger(p[2]);
       if(y < 2000 || m < 1 || m > 12 || d < 1 || d > 31) continue;
-      int sz = ArraySize(g_macroKeys);
-      ArrayResize(g_macroKeys, sz + 1);
-      g_macroKeys[sz] = DateToKey(y, m, d);
+      int sz = ArraySize(arr);
+      ArrayResize(arr, sz + 1);
+      arr[sz] = DateToKey(y, m, d);
    }
+}
+void ParseMacroDates()
+{
+   ParseDateList(InpMacroDates, g_macroKeys);
+   ParseDateList(InpFomcDates, g_fomcKeys);
 }
 bool IsMacroKey(int key)
 {
@@ -178,6 +197,52 @@ bool IsPreMacroKey(int key)
       if(g_macroKeys[i] == key + 1) return true;
    return false;
 }
+bool IsFomcKey(int key)
+{
+   for(int i = 0; i < ArraySize(g_fomcKeys); i++)
+      if(g_fomcKeys[i] == key) return true;
+   return false;
+}
+bool IsPreFomcKey(int key)
+{
+   for(int i = 0; i < ArraySize(g_fomcKeys); i++)
+      if(g_fomcKeys[i] == key + 1) return true;
+   return false;
+}
+// Confluence 5..98 at trigger bar f1 — ONLY 11:00-known data (no lookahead)
+int Confluence(bool isLong, int f1, double fLow, double fHigh, double sessOpen,
+               double atrRef, double pc, bool dayTom,
+               const datetime &time[], const long &tickvol[],
+               int dFirst, int dLast, int etSh, double adr)
+{
+   int sc = 55;
+   if(dayTom) sc += (isLong ? 10 : -10);             // ToM = bullish seasonal wind
+   int h4sh = iBarShift(_Symbol, PERIOD_H4, time[f1], false); // trigger-time H4 bar only
+   if(Bars(_Symbol, PERIOD_H4) > 25 && h4sh >= 1)
+   {
+      double ema = iMA(_Symbol, PERIOD_H4, 20, 0, MODE_EMA, PRICE_CLOSE, h4sh);
+      double c4 = iClose(_Symbol, PERIOD_H4, h4sh);
+      if(ema > 0 && ((isLong && c4 > ema) || (!isLong && c4 < ema))) sc += 10;
+   }
+   double vsum = 0; int vn = 0;                       // trailing volume only (9:30..11:00)
+   for(int b = dFirst; b >= dLast; b--)
+   {
+      int mm = ETMinutes(time[b], etSh);
+      if(mm < 570 || mm >= 660) continue;
+      vsum += (double)tickvol[b]; vn++;
+   }
+   if(vn > 0 && vsum > 0 && (double)tickvol[f1] > 1.25 * vsum / vn) sc += 8;
+   if(pc > 0 && atrRef > 0)                           // unextended open preferred
+   {
+      double g = MathAbs((sessOpen / pc - 1.0) / (atrRef / pc));
+      if(g < 0.75) sc += 5;
+   }
+   if(adr > 0 && (fHigh - fLow) / adr > 0.7) sc -= 8;  // morning already exploded
+   if(sc < 5) sc = 5; if(sc > 98) sc = 98;
+   return sc;
+}
+string GradeOf(int sc) { return (sc >= 70 ? "A" : (sc >= 50 ? "B" : "C")); }
+color GradeColor(string g) { return (g == "A" ? clrLimeGreen : (g == "B" ? clrGold : clrGray)); }
 
 //+------------------------------------------------------------------+
 //| Daily helpers (broker D1; approximation documented in guide)      |
@@ -351,7 +416,8 @@ void PruneDayObjects(int minKey)
    for(int i = ObjectsTotal(0, 0, -1) - 1; i >= 0; i--)
    {
       string n = ObjectName(0, i);
-      if(StringFind(n, PREF + "BOX_") != 0 && StringFind(n, PREF + "TAG_") != 0) continue;
+      if(StringFind(n, PREF + "BOX_") != 0 && StringFind(n, PREF + "TAG_") != 0 &&
+         StringFind(n, PREF + "GRD_") != 0 && StringFind(n, PREF + "OUT_") != 0) continue;
       string tail = StringSubstr(n, StringLen(PREF) + 4);
       int k = (int)StringToInteger(tail);
       if(k < minKey) ObjectDelete(0, n);
@@ -370,6 +436,32 @@ void UpsertDayTag(int key, datetime t, double p, string text, color clr)
    ObjectSetInteger(0, n, OBJPROP_BACK, false);
    ObjectSetInteger(0, n, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
 }
+void UpsertGradeTag(int key, datetime t, double p, string text, color clr)
+{
+   string n = StringFormat("%sGRD_%d", PREF, key);
+   if(ObjectFind(0, n) < 0) ObjectCreate(0, n, OBJ_TEXT, 0, t, p);
+   else ObjectMove(0, n, 0, t, p);
+   ObjectSetString(0, n, OBJPROP_TEXT, text);
+   ObjectSetInteger(0, n, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, n, OBJPROP_FONTSIZE, 8);
+   ObjectSetString(0, n, OBJPROP_FONT, "Consolas");
+   ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, n, OBJPROP_BACK, false);
+   ObjectSetInteger(0, n, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+}
+void UpsertOutcomeTag(int key, datetime t, double p, string text, color clr)
+{
+   string n = StringFormat("%sOUT_%d", PREF, key);
+   if(ObjectFind(0, n) < 0) ObjectCreate(0, n, OBJ_TEXT, 0, t, p);
+   else ObjectMove(0, n, 0, t, p);
+   ObjectSetString(0, n, OBJPROP_TEXT, text);
+   ObjectSetInteger(0, n, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, n, OBJPROP_FONTSIZE, 7);
+   ObjectSetString(0, n, OBJPROP_FONT, "Consolas");
+   ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, n, OBJPROP_BACK, false);
+   ObjectSetInteger(0, n, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+}
 void FireAlert(string tag, string msg, int key)
 {
    if(key == g_lastAlertKey && tag == g_lastAlertTag) return;
@@ -378,6 +470,55 @@ void FireAlert(string tag, string msg, int key)
    if(InpPush) SendNotification(msg);
    if(InpMail) SendMail("TaylorCycle " + tag, msg);
 }
+double CalcLots(double slDist)
+{
+   if(slDist <= 0) return 0;
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   double ts = MarketInfo(_Symbol, MODE_TICKSIZE);
+   double tv = MarketInfo(_Symbol, MODE_TICKVALUE);
+   if(eq <= 0 || ts <= 0 || tv <= 0) return 0;
+   double perLot = slDist / ts * tv;
+   if(perLot <= 0) return 0;
+   double lots = eq * InpRiskPct / 100.0 / perLot;
+   double mn = MarketInfo(_Symbol, MODE_MINLOT);
+   double mx = MarketInfo(_Symbol, MODE_MAXLOT);
+   double st = MarketInfo(_Symbol, MODE_LOTSTEP);
+   if(st <= 0) st = 0.01;
+   lots = MathFloor(lots / st) * st;
+   if(lots < mn) return 0;   // broker minimum exceeds risk budget -> skip
+   if(lots > mx) lots = mx;
+   return NormalizeDouble(lots, 2);
+}
+string RiskRowText(color &rc)
+{
+   rc = clrSilver;
+   double budget = AccountInfoDouble(ACCOUNT_EQUITY) * InpRiskPct / 100.0;
+   if(g_liveDir != 0 && g_liveEntry > 0 && g_liveStop > 0)
+   {
+      double lots = CalcLots(MathAbs(g_liveEntry - g_liveStop));
+      if(lots > 0)
+      {
+         rc = clrLimeGreen;
+         return StringFormat("RISK %.2f%% = $%s | size %s lots", InpRiskPct,
+                             DoubleToString(budget, 2), DoubleToString(lots, 2));
+      }
+      rc = clrRed;
+      return "RISK: broker min-lot exceeds budget - SKIP";
+   }
+   return StringFormat("RISK %.2f%% = $%s/trade | size plots on trigger", InpRiskPct,
+                       DoubleToString(budget, 2));
+}
+string ETCountdown(int nowMin)
+{
+   int tgt = 0; string what = "";
+   if(nowMin < 570) { tgt = 570; what = "OPEN 9:30"; }
+   else if(nowMin < 660) { tgt = 660; what = "UNLOCK 11:00"; }
+   else if(nowMin < 958) { tgt = 958; what = "FLAT 15:58"; }
+   else return "SESSION DONE";
+   int left = tgt - nowMin;
+   if(left >= 60) return StringFormat("%s in %dh%02dm", what, left / 60, left % 60);
+   return StringFormat("%s in %dm", what, left);
+}
 
 //+------------------------------------------------------------------+
 //| Forward declarations                                             |
@@ -385,7 +526,8 @@ void FireAlert(string tag, string msg, int key)
 void ProcessDay(int dFirst, int dLast, int key, int nowKey,
                 const datetime &time[], const double &open[], const double &high[],
                 const double &low[], const double &close[], int etSh,
-                double atrD, int b0key, int b0mm, int scoreNow);
+                double atrD, int b0key, int b0mm, int scoreNow,
+                const long &tickvol[], double adr);
 void DrawDashboard(int nowKey, int nowMin,
                    bool isBuy, bool isShort, bool isSell, bool isSuper,
                    bool tom, bool preM, bool macT,
@@ -448,6 +590,7 @@ int OnCalculate(const int rates_total,
    ArraySetAsSeries(time, true); ArraySetAsSeries(open, true);
    ArraySetAsSeries(high, true); ArraySetAsSeries(low, true);
    ArraySetAsSeries(close, true);
+   ArraySetAsSeries(tick_volume, true);
 
    int etSh = ETShiftSeconds();
    int nowKey = (int)(((long)TimeGMT() + (long)(InpETOffset * 3600.0) + 12 * 3600) / 86400);
@@ -463,6 +606,8 @@ int OnCalculate(const int rates_total,
    ArrayInitialize(g_dt3l, 0.0); ArrayInitialize(g_dt3s, 0.0);
    ResetLastError();
    g_boxCount = 0;
+   g_w = 0; g_l = 0; g_rsum = 0;
+   g_liveEntry = 0; g_liveStop = 0; g_liveDir = 0; g_liveScore = 0; g_liveGrade = "";
 
    double atrD = iATR(_Symbol, PERIOD_D1, InpAtrPeriod, 1);
    if(atrD <= 0)
@@ -473,6 +618,13 @@ int OnCalculate(const int rates_total,
    double prevH = iHigh(_Symbol, PERIOD_D1, 1);
    double prevL = iLow(_Symbol, PERIOD_D1, 1);
    double prevC = iClose(_Symbol, PERIOD_D1, 1);
+   g_adr = 0;
+   int adrn = MathMin(20, d1bars - 2);
+   if(adrn > 5)
+   {
+      for(int s = 1; s <= adrn; s++) g_adr += iHigh(_Symbol, PERIOD_D1, s) - iLow(_Symbol, PERIOD_D1, s);
+      g_adr /= adrn;
+   }
 
    //--- today's pre-open label + score
    bool isBuy, isShort, isSell, isSuper;
@@ -503,13 +655,13 @@ int OnCalculate(const int rates_total,
       if(key != dk)
       {
          if(dk != -1) ProcessDay(dFirst, dLast, dk, nowKey, time, open, high, low, close, etSh,
-                                 atrD, b0key, b0mm, score);
+                                 atrD, b0key, b0mm, score, tick_volume, g_adr);
          dk = key; dFirst = b; dLast = b;
       }
       else dLast = b;
       if(b == 1) // finalize newest day
          ProcessDay(dFirst, dLast, dk, nowKey, time, open, high, low, close, etSh,
-                    atrD, b0key, b0mm, score);
+                    atrD, b0key, b0mm, score, tick_volume, g_adr);
    }
    if(InpShowDayBoxes) PruneDayObjects(minKey);
 
@@ -546,7 +698,8 @@ int OnCalculate(const int rates_total,
 void ProcessDay(int dFirst, int dLast, int key, int nowKey,
                 const datetime &time[], const double &open[], const double &high[],
                 const double &low[], const double &close[], int etSh,
-                double atrD, int b0key, int b0mm, int scoreNow)
+                double atrD, int b0key, int b0mm, int scoreNow,
+                const long &tickvol[], double adr)
 {
    // dFirst = oldest bar index of day (highest index), dLast = newest (lowest)
    // collect session bars ET 9:30..16:00
@@ -601,19 +754,32 @@ void ProcessDay(int dFirst, int dLast, int key, int nowKey,
    bool rallied = (fHigh > sessOpen);
    bool reclaim = (entryPx > fLow + InpReclaimAtr * atrRef);
    bool reject = (entryPx < fHigh - InpReclaimAtr * atrRef);
+   bool dayFomc = IsFomcKey(key);
+   bool dayPreFomc = IsPreFomcKey(key);
+   bool blocked = (dayFomc && InpBlockFomcDay);
    bool windowDone = (maxMM >= 660) || (key == b0key && b0mm >= 660);
-   bool trigL = (windowDone && isBuy && dipped && reclaim && !isSuper);
-   bool trigS = (windowDone && isShort && rallied && reject && !isSuper);
+   bool trigL = (windowDone && isBuy && dipped && reclaim && !isSuper && !blocked);
+   bool trigS = (windowDone && isShort && rallied && reject && !isSuper && !blocked);
    if(trigL) g_dt1[f1] = low[f1] - off;
    if(trigS) g_dt2[f1] = high[f1] + off;
-   //--- DT3 gap fade
-   if(InpUseGapFade && (isToday || dsh >= 1))
+   //--- confluence grade (11:00-known data only)
+   int sc = 0; string gr = "";
+   double pc0 = isToday ? iClose(_Symbol, PERIOD_D1, 1) : ((dsh >= 1) ? iClose(_Symbol, PERIOD_D1, dsh + 1) : 0);
+   if((trigL || trigS) && pc0 > 0)
    {
-      double pc = isToday ? iClose(_Symbol, PERIOD_D1, 1) : iClose(_Symbol, PERIOD_D1, dsh + 1);
-      if(pc > 0)
-      {
-         double gap = (sessOpen / pc - 1.0) / (atrRef / pc);
-         int b930 = -1;
+      sc = Confluence(trigL, f1, fLow, fHigh, sessOpen, atrRef, pc0, dayTom,
+                      time, tickvol, dFirst, dLast, etSh, adr);
+      gr = GradeOf(sc);
+      if(InpShowGrades)
+         UpsertGradeTag(key, time[f1], trigL ? low[f1] - off * 2.2 : high[f1] + off * 2.2,
+                        gr + " " + IntegerToString(sc), GradeColor(gr));
+   }
+   if(isToday) { g_liveScore = sc; g_liveGrade = gr; }
+   //--- DT3 gap fade
+   if(!blocked && InpUseGapFade && pc0 > 0)
+   {
+      double gap = (sessOpen / pc0 - 1.0) / (atrRef / pc0);
+      int b930 = -1;
          for(int b = dFirst; b >= dLast; b--)
          {
             int mm = ETMinutes(time[b], etSh);
@@ -624,6 +790,32 @@ void ProcessDay(int dFirst, int dLast, int key, int nowKey,
             if(gap > InpGapFadeAtr) g_dt3s[b930] = high[b930] + off;
             else if(gap < -InpGapFadeAtr) g_dt3l[b930] = low[b930] - off;
          }
+   }
+
+   //--- visual backtest: past triggers only (SL touch = -1R, else EOD-exit R)
+   if(!isToday && (trigL || trigS) && InpShowOutcomes)
+   {
+      double risk = InpStopAtr * atrRef;
+      double sl = trigL ? entryPx - risk : entryPx + risk;
+      double exitPx = 0, exitRef = 0; datetime exitT = 0;
+      bool stopped = false;
+      for(int b = f1; b >= dLast; b--)
+      {
+         int mm = ETMinutes(time[b], etSh);
+         if(mm < 570) break;
+         if(mm > 958) continue;
+         if(trigL && low[b] <= sl) stopped = true;
+         if(trigS && high[b] >= sl) stopped = true;
+         exitPx = close[b]; exitT = time[b]; exitRef = trigL ? low[b] : high[b];
+      }
+      if(exitT > 0 && risk > 0)
+      {
+         double r = stopped ? -1.0 : (trigL ? (exitPx - entryPx) / risk : (entryPx - exitPx) / risk);
+         if(r > 0) g_w++; else g_l++;
+         g_rsum += r;
+         string ot = (r >= 0 ? "+" : "") + DoubleToString(r, 1) + "R";
+         UpsertOutcomeTag(key, exitT, trigL ? exitRef - off : exitRef + off,
+                          ot, r >= 0 ? clrLimeGreen : clrTomato);
       }
    }
 
@@ -634,13 +826,15 @@ void ProcessDay(int dFirst, int dLast, int key, int nowKey,
       UpsertDayBox(key, tFirst, tLast, dHigh, dLow, bc, dayTom);
       string tag = "";
       if(dayTom) tag += "ToM ";
-      if(dayMac) tag += "MACRO ";
+      if(dayFomc) tag += "FOMC ";
+      else if(dayMac) tag += "MACRO ";
       else if(dayPreM) tag += "PRE ";
+      if(dayPreFomc) tag += "PRE-FOMC ";
       if(isBuy) tag += "BUY";
       else if(isShort) tag += "SHORT";
       else if(isSell) tag += "SELL";
       else if(isSuper) tag += "SUPER";
-      if(tag != "") UpsertDayTag(key, tFirst, dHigh, tag, dayTom ? InpTomColor : clrSilver);
+      if(tag != "") UpsertDayTag(key, tFirst, dHigh, tag, dayFomc ? clrRed : (dayTom ? InpTomColor : clrSilver));
    }
 
    //--- today: entry/stop/tp lines + alerts
@@ -650,20 +844,27 @@ void ProcessDay(int dFirst, int dLast, int key, int nowKey,
       bool live = (mmNow >= 570 && mmNow < 960);
       // state needs trigger bar closed: current forming bar must be newer than f1
       bool f1Closed = (f1 > 0);
+      g_liveEntry = 0; g_liveStop = 0; g_liveDir = 0;
       if((trigL || trigS) && f1Closed && live)
       {
          double stop = trigL ? entryPx - InpStopAtr * atrRef : entryPx + InpStopAtr * atrRef;
          double tp1 = trigL ? entryPx + InpStopAtr * atrRef : entryPx - InpStopAtr * atrRef;
+         double tp2 = trigL ? entryPx + 2.0 * InpStopAtr * atrRef : entryPx - 2.0 * InpStopAtr * atrRef;
+         g_liveEntry = entryPx; g_liveStop = stop; g_liveDir = trigL ? 1 : -1;
          UpsertHLine("ENTRY", entryPx, trigL ? clrDodgerBlue : clrOrange, STYLE_SOLID, 2,
                      (trigL ? "DT1 LONG " : "DT2 SHORT ") + DoubleToString(entryPx, _Digits));
          UpsertHLine("STOP", stop, clrRed, STYLE_DASHDOT, 1, "STOP " + DoubleToString(stop, _Digits));
          UpsertHLine("TP1", tp1, clrLimeGreen, STYLE_DASHDOT, 1, "TP +0.5ATR " + DoubleToString(tp1, _Digits));
+         if(InpShowTP2)
+            UpsertHLine("TP2", tp2, clrForestGreen, STYLE_DASHDOT, 1, "TP2 +1.0ATR " + DoubleToString(tp2, _Digits));
+         else DeleteIfExists("TP2");
          string tag = trigL ? "DT1" : "DT2";
-         FireAlert(tag, StringFormat("%s %s %s @ %s (stop %s, score %d)",
-                     _Symbol, TFName(), tag,
-                     DoubleToString(entryPx, _Digits), DoubleToString(stop, _Digits), scoreNow), key);
+         if(sc >= InpAlertMinScore)
+            FireAlert(tag, StringFormat("%s %s %s grade %s(%d) @ %s (stop %s, score %d)",
+                        _Symbol, TFName(), tag, gr, sc,
+                        DoubleToString(entryPx, _Digits), DoubleToString(stop, _Digits), scoreNow), key);
       }
-      else { DeleteIfExists("ENTRY"); DeleteIfExists("STOP"); DeleteIfExists("TP1"); }
+      else { DeleteIfExists("ENTRY"); DeleteIfExists("STOP"); DeleteIfExists("TP1"); DeleteIfExists("TP2"); }
    }
 }
 
@@ -676,8 +877,10 @@ void UpdateLiveRows(int nowKey, int nowMin, const datetime &time[], int etSh)
    int y, m, d; KeyToDate(nowKey, y, m, d);
    int hh = nowMin / 60, mm = nowMin % 60;
    bool macT = IsMacroKey(nowKey);
+   bool fomc = IsFomcKey(nowKey);
    string sess = "WAIT"; color sessC = clrGray;
-   if(macT) { sess = "MACRO DAY-BLACKOUT"; sessC = clrRed; }
+   if(fomc) { sess = "FOMC 14:00 ET - NO ENTRIES"; sessC = clrRed; }
+   else if(macT) { sess = "MACRO 8:30 done - normal rules"; sessC = clrYellow; }
    else if(nowMin >= 570 && nowMin < 600) { sess = "OPEN DRIVE"; sessC = clrYellow; }
    else if(nowMin >= 600 && nowMin < 690) { sess = "AM CONFIRM"; sessC = clrAqua; }
    else if(nowMin >= 690 && nowMin < 840) { sess = "DEAD ZONE-NO ENTRY"; sessC = clrGray; }
@@ -690,13 +893,16 @@ void UpdateLiveRows(int nowKey, int nowMin, const datetime &time[], int etSh)
       if(g_dt1[b] > 0) { tag = "DT1"; break; }
       if(g_dt2[b] > 0) { tag = "DT2"; break; }
    }
-   if(tag == "DT1") st = "TRIGGERED LONG (see ENTRY line)";
-   else if(tag == "DT2") st = "TRIGGERED SHORT (see ENTRY line)";
+   if(tag == "DT1") st = "TRIGGERED LONG" + (g_liveGrade != "" ? " " + g_liveGrade + "(" + IntegerToString(g_liveScore) + ")" : "") + " (see ENTRY line)";
+   else if(tag == "DT2") st = "TRIGGERED SHORT" + (g_liveGrade != "" ? " " + g_liveGrade + "(" + IntegerToString(g_liveScore) + ")" : "") + " (see ENTRY line)";
    else if(nowMin >= 690) st = "NO TRIGGER - window passed";
    else if(nowMin >= 570) st = "ARMED - trigger @11:00 ET bar";
    int lh = InpFontSize + 8, x0 = 8;
    MkLabel("D1", x0 + 1 * lh, StringFormat("ET %04d.%02d.%02d %02d:%02d  |  %s", y, m, d, hh, mm, sess), sessC);
    MkLabel("D8", x0 + 8 * lh, "SETUP: " + st, (tag != "" ? clrYellow : clrSilver));
+   MkLabel("D9", x0 + 9 * lh, "NEXT: " + ETCountdown(nowMin), clrSilver);
+   color riskC; string riskS = RiskRowText(riskC);
+   MkLabel("D10", x0 + 10 * lh, riskS, riskC);
 }
 
 //+------------------------------------------------------------------+
@@ -713,15 +919,17 @@ void DrawDashboard(int nowKey, int nowMin,
 {
    if(!InpShowDashboard)
    {
-      for(int r = 0; r < 14; r++) DeleteIfExists("D" + IntegerToString(r));
+      for(int r = 0; r < 16; r++) DeleteIfExists("D" + IntegerToString(r));
       DeleteIfExists("DBG");
       return;
    }
    int y, m, d; KeyToDate(nowKey, y, m, d);
    int hh = nowMin / 60, mm = nowMin % 60;
+   bool fomc = IsFomcKey(nowKey);
    string sess = "WAIT";
    color sessC = clrGray;
-   if(macT) { sess = "MACRO DAY-BLACKOUT"; sessC = clrRed; }
+   if(fomc) { sess = "FOMC 14:00 ET - NO ENTRIES"; sessC = clrRed; }
+   else if(macT) { sess = "MACRO 8:30 done - normal rules"; sessC = clrYellow; }
    else if(nowMin >= 570 && nowMin < 600) { sess = "OPEN DRIVE"; sessC = clrYellow; }
    else if(nowMin >= 600 && nowMin < 690) { sess = "AM CONFIRM"; sessC = clrAqua; }
    else if(nowMin >= 690 && nowMin < 840) { sess = "DEAD ZONE-NO ENTRY"; sessC = clrGray; }
@@ -743,8 +951,10 @@ void DrawDashboard(int nowKey, int nowMin,
 
    string cal = "";
    if(tom) cal += "ToM ";
-   if(macT) cal += "MACRO-TODAY ";
+   if(fomc) cal += "FOMC-TODAY ";
+   else if(macT) cal += "MACRO-TODAY ";
    else if(preM) cal += "PRE-MACRO ";
+   if(IsPreFomcKey(nowKey)) cal += "PRE-FOMC ";
    if(cal == "") cal = "-";
 
    // setup state today
@@ -756,8 +966,8 @@ void DrawDashboard(int nowKey, int nowMin,
       if(g_dt1[b] > 0) { tag = "DT1"; break; }
       if(g_dt2[b] > 0) { tag = "DT2"; break; }
    }
-   if(tag == "DT1") st = "TRIGGERED LONG (see ENTRY line)";
-   else if(tag == "DT2") st = "TRIGGERED SHORT (see ENTRY line)";
+   if(tag == "DT1") st = "TRIGGERED LONG" + (g_liveGrade != "" ? " " + g_liveGrade + "(" + IntegerToString(g_liveScore) + ")" : "") + " (see ENTRY line)";
+   else if(tag == "DT2") st = "TRIGGERED SHORT" + (g_liveGrade != "" ? " " + g_liveGrade + "(" + IntegerToString(g_liveScore) + ")" : "") + " (see ENTRY line)";
    else if(nowMin >= 690) st = "NO TRIGGER - window passed";
    else if(nowMin >= 570) st = "ARMED - trigger @11:00 ET bar";
 
@@ -767,16 +977,42 @@ void DrawDashboard(int nowKey, int nowMin,
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_CORNER, InpCorner);
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_XDISTANCE, 4);
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_YDISTANCE, 4);
-   ObjectSetInteger(0, PREF + "DBG", OBJPROP_XSIZE, 340);
-   ObjectSetInteger(0, PREF + "DBG", OBJPROP_YSIZE, lh * 14 + 12);
+   ObjectSetInteger(0, PREF + "DBG", OBJPROP_XSIZE, 470);
+   ObjectSetInteger(0, PREF + "DBG", OBJPROP_YSIZE, lh * 16 + 12);
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_BGCOLOR, C'16,16,16');
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_COLOR, clrDimGray);
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_BACK, false);
    ObjectSetInteger(0, PREF + "DBG", OBJPROP_SELECTABLE, false);
 
+   // regime: H4 trend + today's range so far vs ADR20
+   string regimeS = "REGIME: n/a"; color regimeC = clrSilver;
+   if(Bars(_Symbol, PERIOD_H4) > 30)
+   {
+      double e1 = iMA(_Symbol, PERIOD_H4, 20, 0, MODE_EMA, PRICE_CLOSE, 1);
+      double e2 = iMA(_Symbol, PERIOD_H4, 20, 0, MODE_EMA, PRICE_CLOSE, 2);
+      double c1 = iClose(_Symbol, PERIOD_H4, 1);
+      string tr = "FLAT"; regimeC = clrSilver;
+      if(c1 > e1 && e1 >= e2) { tr = "UP"; regimeC = clrLimeGreen; }
+      else if(c1 < e1 && e1 <= e2) { tr = "DN"; regimeC = clrTomato; }
+      regimeS = "REGIME H4: " + tr;
+      if(g_adr > 0)
+      {
+         double rh = -1e12, rl = 1e12;
+         for(int b = 1; b < MathMin(300, Bars(_Symbol, _Period)); b++)
+         {
+            if(BarETKey(time[b], etSh) != nowKey) { if(BarETKey(time[b], etSh) < nowKey) break; else continue; }
+            int mm2 = ETMinutes(time[b], etSh);
+            if(mm2 < 570 || mm2 > nowMin || mm2 > 960) continue;
+            if(high[b] > rh) rh = high[b];
+            if(low[b] < rl) rl = low[b];
+         }
+         if(rh > rl) regimeS += StringFormat(" | day range %d%% ADR", (int)(100.0 * (rh - rl) / g_adr));
+      }
+   }
+   color riskC2; string riskS2 = RiskRowText(riskC2);
    int r = 0;
-   MkLabel("D" + IntegerToString(r++), x0 + 0 * lh, "TAYLOR CYCLE v2.02 " + _Symbol + "  " + TFName(), clrGold);
+   MkLabel("D" + IntegerToString(r++), x0 + 0 * lh, "TAYLOR CYCLE v3.00 " + _Symbol + "  " + TFName(), clrGold);
    MkLabel("D" + IntegerToString(r++), x0 + 1 * lh, StringFormat("ET %04d.%02d.%02d %02d:%02d  |  %s", y, m, d, hh, mm, sess), sessC);
    MkLabel("D" + IntegerToString(r++), x0 + 2 * lh, "DAY: " + dayS, dayC);
    MkLabel("D" + IntegerToString(r++), x0 + 3 * lh, "CAL: " + cal + "   SCORE: " + IntegerToString(score) + "/3", tom || preM ? clrGold : clrSilver);
@@ -792,10 +1028,14 @@ void DrawDashboard(int nowKey, int nowMin,
    MkLabel("D" + IntegerToString(r++), x0 + 7 * lh, StringFormat("Quality(yday base): %.0f/100  (close_pos x55 + no-viol x20 + fail x10)",
             MathMin(q, 100.0)), clrSilver);
    MkLabel("D" + IntegerToString(r++), x0 + 8 * lh, "SETUP: " + st, (tag != "" ? clrYellow : clrSilver));
-   MkLabel("D" + IntegerToString(r++), x0 + 9 * lh, "ENTRY/STOP/TP lines plot on trigger (EOD exit, flat 15:58)", clrGray);
-   MkLabel("D" + IntegerToString(r++), x0 + 10 * lh, "Risk: 0.25-0.5%/trade  Daily stop 1-1.5%  Max 3/day", clrGray);
-   MkLabel("D" + IntegerToString(r++), x0 + 11 * lh, "Edu research - not financial advice. See MT4_GUIDE.md", clrDimGray);
-   MkLabel("D" + IntegerToString(r++), x0 + 12 * lh, StringFormat("DBG bars=%d D1=%d etSh=%dh boxes=%d err=%d",
+   MkLabel("D" + IntegerToString(r++), x0 + 9 * lh, "NEXT: " + ETCountdown(nowMin), clrSilver);
+   MkLabel("D" + IntegerToString(r++), x0 + 10 * lh, riskS2, riskC2);
+   MkLabel("D" + IntegerToString(r++), x0 + 11 * lh, StringFormat("HIST %dd: %dW-%dL %+.1fR (EOD exits, -1R stops)",
+            InpHistoryDays, g_w, g_l, g_rsum), g_rsum > 0 ? clrLimeGreen : (g_rsum < 0 ? clrTomato : clrSilver));
+   MkLabel("D" + IntegerToString(r++), x0 + 12 * lh, regimeS, regimeC);
+   MkLabel("D" + IntegerToString(r++), x0 + 13 * lh, "Risk: 0.25-0.5%/trade  Daily stop 1-1.5%  Max 3/day", clrGray);
+   MkLabel("D" + IntegerToString(r++), x0 + 14 * lh, "Edu research - not financial advice. See MT4_GUIDE.md", clrDimGray);
+   MkLabel("D" + IntegerToString(r++), x0 + 15 * lh, StringFormat("DBG bars=%d D1=%d etSh=%dh boxes=%d err=%d",
             Bars(_Symbol, _Period), Bars(_Symbol, PERIOD_D1), ETShiftSeconds() / 3600,
             g_boxCount, g_lastErr), clrDimGray);
 }
