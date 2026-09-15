@@ -28,6 +28,18 @@ marks the three entry styles on the chart.
 Green up-arrow = buy setup (demand), red down-arrow = sell setup (supply).
 All logic runs on **closed candles only** — the indicator does not repaint.
 
+**v1.1 — "trade it like it's my money" upgrades:**
+- **HTF trend filter** (EMA fast/slow on a higher TF): signals only with the trend.
+- **Zone quality score `Q0..Q4`** tagged on every zone: +1 impulse ≥ 1.5×ATR,
+  +1 structure break, +1 liquidity sweep before the impulse, +1 tight base.
+  Signals only fire at/above `InpMinScore`.
+- **Session filter** (two windows, server time) — off by default.
+- **RR trade planner**: every approved signal gets Entry / SL / TP lines at
+  `InpRR` (default **1.50**); SL = far zone edge + buffer.
+- **Room check**: if the TP would land inside the next opposite zone, the plan
+  is suppressed and the tag reads `NR` (no room).
+- **Alerts** now carry exact `@ entry / SL / TP` prices.
+
 ## Install
 
 1. Copy `SDZ_ThreeEntries.mq4` into `<terminal data folder>/MQL4/Indicators/`.
@@ -45,6 +57,12 @@ All logic runs on **closed candles only** — the indicator does not repaint.
 | `InpHistoryBars` / `InpMaxZones` | 1500 / 30 | scan depth / memory cap |
 | `InpEntryLimit/Confirm/Struct` | true | toggle each of the three entry styles |
 | `InpFractalN` | 2 | fractal side bars for the structure entry |
+| `InpMinScore` | 2 | minimum zone quality (Q0..Q4) for signals |
+| `InpUseHTF` / `InpHTF` | true / H1 | HTF EMA bias filter (fast 50 vs slow 200) |
+| `InpUseSessions` + hours | false | trade only inside two session windows |
+| `InpDrawPlan` / `InpRR` | true / 1.50 | draw Entry/SL/TP lines at this RR |
+| `InpSLBufferPips` | 3 | stop buffer beyond the far zone edge |
+| `InpRoomCheck` | true | suppress plans whose TP hits the next opposite zone |
 | `InpFutureBars` | 20 | how far zone boxes extend to the right |
 | `InpShowBroken` | false | keep broken zones visible (grey) |
 | `InpAlertPopup/Push` | true / false | alerts for brand-new signals |
