@@ -206,6 +206,8 @@ input bool                 InpEnableConfluence     = true;                      
 input double               InpConfluenceThreshold  = 5.0;                        // Max Confluence Distance (in Pips / Ticks)
 input color                InpConfluenceColor      = clrLimeGreen;               // Confluent Level Highlight Color
 input bool                 InpEnableAlerts         = true;                       // Enable Alert on Confluence Test
+input bool                 InpAlertPopup           = true;                       // Confluence Screen Pop-up Alert
+input bool                 InpAlertSound           = true;                       // Confluence Sound Alert
 
 //--- 8. INSTITUTIONAL KILL ZONE FILTER
 input string               InpSection8             = "=== TIME & KILL ZONES ==="; // ---

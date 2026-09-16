@@ -108,6 +108,21 @@ def check_mql4_code(filepath):
     if "iRealVolume" in code:
         errors.append("iRealVolume is not supported in MQL4!")
 
+    # Check for undeclared identifiers
+    clean_code = re.sub(r'//.*', '', code)
+    clean_code = re.sub(r'/\*.*?\*/', '', clean_code, flags=re.DOTALL)
+    inputs_set = set(re.findall(r'input\s+[\w:]+\s+([a-zA-Z0-9_]+)\s*=', clean_code))
+    inp_usages = set(re.findall(r'\b(Inp[a-zA-Z0-9_]+)\b', clean_code))
+    missing_inps = inp_usages - inputs_set
+    if missing_inps:
+        errors.append(f"Undeclared input identifiers used in code: {missing_inps}")
+
+    buffers_set = set(re.findall(r'double\s+(buf_[a-zA-Z0-9_]+)\[', clean_code))
+    buf_usages = set(re.findall(r'\b(buf_[a-zA-Z0-9_]+)\b', clean_code))
+    missing_bufs = buf_usages - buffers_set
+    if missing_bufs:
+        errors.append(f"Undeclared buffer identifiers used in code: {missing_bufs}")
+
     if errors:
         print("SEMANTIC CHECKS FAILED:")
         for err in errors:
