@@ -18,7 +18,6 @@ def check_mql4_code(filepath):
     for line_num, line in enumerate(lines, 1):
         i = 0
         while i < len(line):
-            # Check block comments
             if in_block_comment:
                 if i + 1 < len(line) and line[i:i+2] == '*/':
                     in_block_comment = False
@@ -27,34 +26,29 @@ def check_mql4_code(filepath):
                 i += 1
                 continue
             
-            # Check string literal
             if in_string:
                 if line[i] == '\\':
-                    i += 2 # skip escaped char
+                    i += 2
                     continue
                 if line[i] == string_char:
                     in_string = False
                 i += 1
                 continue
 
-            # Start of line comment
             if i + 1 < len(line) and line[i:i+2] == '//':
-                break # rest of line is comment
+                break
 
-            # Start of block comment
             if i + 1 < len(line) and line[i:i+2] == '/*':
                 in_block_comment = True
                 i += 2
                 continue
 
-            # Start of string or color literal C'...'
             if line[i] in ('"', "'"):
                 in_string = True
                 string_char = line[i]
                 i += 1
                 continue
 
-            # Check brackets
             char = line[i]
             if char in '({[':
                 stack.append((char, line_num, i))
@@ -88,8 +82,8 @@ def check_mql4_code(filepath):
     required_elements = [
         "#property strict",
         "#property indicator_chart_window",
-        "#property indicator_buffers 14",
-        "#property indicator_plots   14",
+        "#property indicator_buffers 18",
+        "#property indicator_plots   18",
         "int OnInit()",
         "void OnDeinit(",
         "int OnCalculate(",
@@ -97,6 +91,10 @@ def check_mql4_code(filepath):
         "SetIndexArrow",
         "IndicatorShortName",
         "ObjectsDeleteAll",
+        "CalculateNakedPOCs",
+        "DrawTradePlan",
+        "RateConfluence",
+        "IsInKillZone",
         "EvaluateEntrySignals"
     ]
 
@@ -104,7 +102,7 @@ def check_mql4_code(filepath):
         if req not in code:
             errors.append(f"Missing required MQL4 construct: {req}")
 
-    # Check for uninitialized prices or names
+    # Check for uninitialized variables or invalid functions
     if "double prices[12];" in code:
         errors.append("Uninitialized double prices[12]; detected!")
     if "iRealVolume" in code:

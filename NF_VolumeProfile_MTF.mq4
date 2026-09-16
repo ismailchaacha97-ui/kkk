@@ -1,19 +1,20 @@
 //+------------------------------------------------------------------+
 //|                                         NF_VolumeProfile_MTF.mq4 |
 //|                                NF Trades Strategy Implementation |
-//|                   Multi-Timeframe Auction Market Theory Profile  |
-//|                       Session | Daily | Weekly | Monthly         |
-//|                          + High-Probability Entry Signals (Signs)|
+//|                 Institutional Auction Market Theory Trading Suite|
+//|               Session | Daily | Weekly | Monthly | Naked POCs    |
+//|               + Dynamic SL/TP Trade Plans + Confluence Star Matrix|
+//|               + LVN/HVN Detection + Session Kill Zone Filter      |
 //+------------------------------------------------------------------+
 #property copyright   "NF Trades Strategy - MTF Volume Profile"
 #property link        "https://www.youtube.com/@NFTradesreal"
-#property version     "1.10"
+#property version     "2.00"
 #property strict
 #property indicator_chart_window
-#property indicator_buffers 14
-#property indicator_plots   14
+#property indicator_buffers 18
+#property indicator_plots   18
 
-//--- Plot definitions for EA integration (iCustom buffers)
+//--- Buffer Plot Definitions for EA Integration & Chart Visualization
 #property indicator_label1  "Daily POC"
 #property indicator_type1   DRAW_NONE
 #property indicator_color1  clrDarkOrange
@@ -96,6 +97,30 @@
 #property indicator_color14 clrRed
 #property indicator_width14 2
 
+#property indicator_label15 "Trade Plan SL"
+#property indicator_type15  DRAW_NONE
+#property indicator_color15 clrRed
+#property indicator_style15 STYLE_DOT
+#property indicator_width15 1
+
+#property indicator_label16 "Trade Plan TP1"
+#property indicator_type16  DRAW_NONE
+#property indicator_color16 clrGold
+#property indicator_style16 STYLE_DOT
+#property indicator_width16 1
+
+#property indicator_label17 "Trade Plan TP2"
+#property indicator_type17  DRAW_NONE
+#property indicator_color17 clrLime
+#property indicator_style17 STYLE_DOT
+#property indicator_width17 1
+
+#property indicator_label18 "Active Naked POC"
+#property indicator_type18  DRAW_NONE
+#property indicator_color18 clrDarkOrange
+#property indicator_style18 STYLE_DOT
+#property indicator_width18 1
+
 //+------------------------------------------------------------------+
 //| Enumerations                                                     |
 //+------------------------------------------------------------------+
@@ -144,8 +169,16 @@ input bool                 InpShowMonthly          = true;                      
 input bool                 InpExtendRay            = false;                      // Extend Lines as Infinite Ray to Right
 input int                  InpExtendBars           = 80;                         // Extension Length in Bars (if Ray is False)
 
-//--- 4. COLORS & STYLES
-input string               InpSection4             = "=== COLORS & STYLES ==="; // ---
+//--- 4. NAKED / VIRGIN POC (vPOC) TRACKING
+input string               InpSection4             = "=== VIRGIN / NAKED POCS ==="; // ---
+input bool                 InpShowVPOC             = true;                       // Track Untested Virgin POCs (vPOC / nPOC)
+input int                  InpNumVPOCDays          = 5;                          // Track Last N Daily Naked POCs
+input int                  InpNumVPOCWeeks         = 3;                          // Track Last N Weekly Naked POCs
+input color                InpColorVPOCDaily       = clrDarkOrange;              // Naked Daily POC Color
+input color                InpColorVPOCWeekly      = clrDodgerBlue;              // Naked Weekly POC Color
+
+//--- 5. COLORS & STYLES
+input string               InpSection5             = "=== COLORS & STYLES ==="; // ---
 input color                InpColorSessionPOC      = clrGold;                    // Session POC Color
 input color                InpColorSessionVA       = clrYellow;                  // Session VAH / VAL Color
 input color                InpColorDailyPOC        = clrDarkOrange;              // Previous Day POC Color
@@ -158,8 +191,8 @@ input int                  InpLineWidthPOC         = 2;                         
 input int                  InpLineWidthVA          = 1;                          // VAH / VAL Line Thickness
 input ENUM_LINE_STYLE      InpLineStyleVA          = STYLE_DASH;                 // VAH / VAL Line Style
 
-//--- 5. VISUAL SESSION HISTOGRAM
-input string               InpSection5             = "=== VISUAL HISTOGRAM ==="; // ---
+//--- 6. VISUAL SESSION HISTOGRAM
+input string               InpSection6             = "=== VISUAL HISTOGRAM ==="; // ---
 input bool                 InpDrawHistogram        = true;                       // Draw Session Volume Profile Histogram
 input ENUM_HIST_ALIGN      InpHistAlignment        = HIST_ALIGN_SESSION_START;   // Histogram Alignment
 input int                  InpMaxHistWidthBars     = 40;                         // Max Histogram Width in Bars
@@ -167,25 +200,22 @@ input color                InpHistColorPOC         = clrGold;                   
 input color                InpHistColorVA          = C'40,90,160';               // Histogram Inside Value Area Color
 input color                InpHistColorOutside     = C'60,70,85';                // Histogram Outside Value Area Color
 
-//--- 6. CONFLUENCE ENGINE & ALERTS
-input string               InpSection6             = "=== CONFLUENCE & ALERTS ==="; // ---
+//--- 7. CONFLUENCE ENGINE & STAR RATINGS
+input string               InpSection7             = "=== CONFLUENCE & RATINGS ==="; // ---
 input bool                 InpEnableConfluence     = true;                       // Enable MTF Confluence Detection
 input double               InpConfluenceThreshold  = 5.0;                        // Max Confluence Distance (in Pips / Ticks)
 input color                InpConfluenceColor      = clrLimeGreen;               // Confluent Level Highlight Color
 input bool                 InpEnableAlerts         = true;                       // Enable Alert on Confluence Test
-input bool                 InpAlertPopup           = true;                       // Screen Pop-up Alert
-input bool                 InpAlertSound           = true;                       // Play Sound on Alert
-input string               InpSoundFile            = "alert.wav";                // Sound File
 
-//--- 7. AMT ON-SCREEN DASHBOARD
-input string               InpSection7             = "=== AMT DASHBOARD ===";    // ---
-input bool                 InpShowDashboard        = true;                       // Display AMT Heads-Up Display (HUD)
-input ENUM_BASE_CORNER     InpDashCorner           = CORNER_RIGHT_UPPER;         // Dashboard Corner
-input int                  InpDashX                = 20;                         // Dashboard X Position (Pixels)
-input int                  InpDashY                = 30;                         // Dashboard Y Position (Pixels)
+//--- 8. INSTITUTIONAL KILL ZONE FILTER
+input string               InpSection8             = "=== TIME & KILL ZONES ==="; // ---
+input bool                 InpUseKillZones         = false;                      // Filter Entry Signs by Institutional Kill Zones
+input bool                 InpTradeLondonOpen      = true;                       // London Open (03:00 - 06:00 NY)
+input bool                 InpTradeNYOpen          = true;                       // NY Cash Open (09:30 - 11:30 NY)
+input bool                 InpTradeNYAfternoon     = true;                       // NY Afternoon Rotation (13:30 - 15:30 NY)
 
-//--- 8. ENTRY SIGNALS & ARROWS
-input string               InpSection8             = "=== ENTRY SIGNALS (SIGNS) ==="; // ---
+//--- 9. ENTRY SIGNALS & ARROWS
+input string               InpSection9             = "=== ENTRY SIGNALS (SIGNS) ==="; // ---
 input bool                 InpShowEntrySignals     = true;                       // Enable Buy/Sell Entry Signs (Arrows)
 input bool                 InpSignalValVahRotate   = true;                       // Setup 1: Value Area Extreme Rotation
 input bool                 InpSignalImbalanceRetest= true;                       // Setup 2: Imbalance Retest (Breakout Flip)
@@ -200,6 +230,24 @@ input int                  InpArrowSize            = 2;                         
 input double               InpArrowOffsetPips      = 5.0;                        // Distance from Candle Wick (Pips)
 input bool                 InpSignalAlert          = true;                       // Sound & Pop-up Alert on Entry Sign
 input bool                 InpSignalPushNotify     = false;                      // Send Mobile Push Notification
+input string               InpSoundFile            = "alert.wav";                // Alert Sound File
+
+//--- 10. DYNAMIC SL / TP & RISK-REWARD TRADE PLAN
+input string               InpSection10            = "=== DYNAMIC SL / TP PLAN ==="; // ---
+input bool                 InpShowTradePlan        = true;                       // Project Dynamic Entry, SL, TP1, TP2 & R:R Box
+input double               InpSLBufferPips         = 2.0;                        // Extra Buffer beyond Rejection Wick/LVN (Pips)
+input int                  InpTradePlanBars        = 50;                         // Trade Plan Projection Length (Bars)
+input color                InpColorPlanEntry       = clrCyan;                    // Trade Plan Entry Line Color
+input color                InpColorPlanSL          = clrRed;                     // Trade Plan Stop Loss Line Color
+input color                InpColorPlanTP1         = clrGold;                    // Trade Plan TP1 (50% Scale-Out) Color
+input color                InpColorPlanTP2         = clrLime;                    // Trade Plan TP2 (Final Runner) Color
+
+//--- 11. AMT ON-SCREEN DASHBOARD
+input string               InpSection11            = "=== AMT DASHBOARD ===";    // ---
+input bool                 InpShowDashboard        = true;                       // Display AMT Heads-Up Display (HUD)
+input ENUM_BASE_CORNER     InpDashCorner           = CORNER_RIGHT_UPPER;         // Dashboard Corner
+input int                  InpDashX                = 20;                         // Dashboard X Position (Pixels)
+input int                  InpDashY                = 30;                         // Dashboard Y Position (Pixels)
 
 //+------------------------------------------------------------------+
 //| Global Constants & Variables                                     |
@@ -222,6 +270,10 @@ double buf_SessionVAH[];
 double buf_SessionVAL[];
 double buf_SignalBuy[];
 double buf_SignalSell[];
+double buf_TradePlanSL[];
+double buf_TradePlanTP1[];
+double buf_TradePlanTP2[];
+double buf_ActiveVPOC[];
 
 //--- Profile Result Structure
 struct SProfileResult
@@ -231,6 +283,8 @@ struct SProfileResult
    double   val;
    double   high;
    double   low;
+   double   lvnUpper;
+   double   lvnLower;
    long     totalVol;
    int      pocBin;
    int      vahBin;
@@ -251,6 +305,38 @@ struct SConfluence
    double   price2;
    double   midPrice;
    double   diffPips;
+   int      stars;
+   string   ratingStr;
+};
+
+//--- Virgin / Naked POC Structure
+struct SVPOC
+{
+   double   price;
+   datetime startTime;
+   datetime endTime;
+   datetime mitigationTime;
+   bool     isMitigated;
+   bool     isWeekly;
+   int      dayIndex;
+};
+
+//--- Trade Plan Structure
+struct STradePlan
+{
+   string   direction;
+   double   entryPrice;
+   double   slPrice;
+   double   tp1Price;
+   double   tp2Price;
+   double   riskPips;
+   double   reward1Pips;
+   double   reward2Pips;
+   double   rr1;
+   double   rr2;
+   datetime signalTime;
+   string   setupName;
+   bool     isActive;
 };
 
 //--- Cached Profile Data
@@ -261,6 +347,12 @@ SProfileResult g_profMonthly;
 
 //--- Confluence List
 SConfluence    g_confluences[];
+
+//--- Virgin POC List
+SVPOC          g_vpocs[];
+
+//--- Latest Active Trade Plan
+STradePlan     g_activePlan;
 
 //--- State tracking
 datetime g_lastBarTime         = 0;
@@ -313,8 +405,12 @@ int OnInit()
    SetIndexBuffer(11, buf_SessionVAL);
    SetIndexBuffer(12, buf_SignalBuy);
    SetIndexBuffer(13, buf_SignalSell);
+   SetIndexBuffer(14, buf_TradePlanSL);
+   SetIndexBuffer(15, buf_TradePlanTP1);
+   SetIndexBuffer(16, buf_TradePlanTP2);
+   SetIndexBuffer(17, buf_ActiveVPOC);
 
-   //--- Configure Profile Level Buffers (Hidden from chart to avoid clutter, accessible to EAs)
+   //--- Configure Profile Level Buffers
    for(int i = 0; i < 12; i++)
    {
       SetIndexStyle(i, DRAW_NONE);
@@ -332,6 +428,17 @@ int OnInit()
    SetIndexEmptyValue(13, 0.0);
    SetIndexLabel(13, "AMT Sell Signal");
 
+   //--- Configure EA Trade Plan & VPOC Buffers
+   for(int i = 14; i < 18; i++)
+   {
+      SetIndexStyle(i, DRAW_NONE);
+      SetIndexEmptyValue(i, 0.0);
+   }
+   SetIndexLabel(14, "Trade Plan SL");
+   SetIndexLabel(15, "Trade Plan TP1");
+   SetIndexLabel(16, "Trade Plan TP2");
+   SetIndexLabel(17, "Active Naked POC");
+
    //--- Set Indicator Short Name
    string shortName = "NF_VolumeProfile_MTF (" + Symbol() + ")";
    IndicatorShortName(shortName);
@@ -339,7 +446,7 @@ int OnInit()
    //--- Clean any old artifacts
    CleanupObjects();
 
-   //--- Reset tracking timestamps
+   //--- Reset tracking variables
    g_lastBarTime         = 0;
    g_lastDayTime         = 0;
    g_lastWeekTime        = 0;
@@ -350,6 +457,7 @@ int OnInit()
    g_lastSignalType      = "NONE";
    g_lastSignalPrice     = 0.0;
    g_lastSignalDesc      = "Waiting for Setup...";
+   g_activePlan.isActive = false;
 
    //--- Force initial calculation
    CalculateAllProfiles(true);
@@ -382,13 +490,17 @@ void CalculateWeeklyProfile();
 void CalculateDailyProfile();
 void CalculateSessionProfile();
 void CalculateAllProfiles(bool force);
+void CalculateNakedPOCs();
 void DetectConfluences();
 void DrawAllLevels();
 void DrawSessionHistogram();
+void DrawVPOCLines();
+void DrawTradePlan();
 void PopulateBuffers(int rates_total);
 void EvaluateEntrySignals(int rates_total, int prev_calculated);
 void UpdateDashboard();
 void CheckConfluenceAlerts();
+bool IsInKillZone(datetime time);
 
 //+------------------------------------------------------------------+
 //| Custom Indicator Iteration                                       |
@@ -431,6 +543,7 @@ int OnCalculate(const int rates_total,
    if(currentDayTime != g_lastDayTime || needFullRecalc)
    {
       CalculateDailyProfile();
+      if(InpShowVPOC) CalculateNakedPOCs();
       g_lastDayTime = currentDayTime;
    }
 
@@ -440,17 +553,24 @@ int OnCalculate(const int rates_total,
       CalculateSessionProfile();
       DetectConfluences();
       DrawAllLevels();
+      if(InpShowVPOC) DrawVPOCLines();
       if(InpDrawHistogram) DrawSessionHistogram();
       g_lastBarTime = currentBarTime;
    }
 
-   //--- Update Buffer Values for EA access across recent bars
+   //--- Update Buffer Values for EA access
    PopulateBuffers(rates_total);
 
    //--- Evaluate Entry Signs (Rejections, Retests, Confluences)
    if(InpShowEntrySignals)
    {
       EvaluateEntrySignals(rates_total, prev_calculated);
+   }
+
+   //--- Update Dynamic Trade Plan Lines
+   if(InpShowTradePlan && g_activePlan.isActive)
+   {
+      DrawTradePlan();
    }
 
    //--- Update Real-time AMT Dashboard
@@ -478,13 +598,9 @@ int GetNYGMTOffset(datetime time)
    MqlDateTime dt;
    TimeToStruct(time, dt);
 
-   // US Daylight Saving Time:
-   // Starts 2nd Sunday in March (02:00 local) -> UTC-4 (EDT)
-   // Ends 1st Sunday in November (02:00 local) -> UTC-5 (EST)
    if(dt.mon < 3 || dt.mon > 11) return(-5); // Winter: EST
    if(dt.mon > 3 && dt.mon < 11) return(-4); // Summer: EDT
 
-   // March calculation:
    if(dt.mon == 3)
    {
       MqlDateTime m1;
@@ -498,7 +614,6 @@ int GetNYGMTOffset(datetime time)
       return(-5);
    }
 
-   // November calculation:
    if(dt.mon == 11)
    {
       MqlDateTime n1;
@@ -536,6 +651,26 @@ datetime BrokerTimeToNYTime(datetime brokerTime)
 }
 
 //+------------------------------------------------------------------+
+//| Institutional Kill Zone Time Filter                              |
+//+------------------------------------------------------------------+
+bool IsInKillZone(datetime time)
+{
+   if(!InpUseKillZones) return(true);
+
+   datetime nyTime = BrokerTimeToNYTime(time);
+   MqlDateTime dt;
+   TimeToStruct(nyTime, dt);
+
+   int minuteOfDay = dt.hour * 60 + dt.min;
+
+   if(InpTradeLondonOpen && minuteOfDay >= 180 && minuteOfDay <= 360) return(true);
+   if(InpTradeNYOpen && minuteOfDay >= 570 && minuteOfDay <= 690) return(true);
+   if(InpTradeNYAfternoon && minuteOfDay >= 810 && minuteOfDay <= 930) return(true);
+
+   return(false);
+}
+
+//+------------------------------------------------------------------+
 //| Calculate Range Boundaries for Current Session                   |
 //+------------------------------------------------------------------+
 void GetSessionTimeRange(datetime currentTime, datetime &sStart, datetime &sEnd)
@@ -558,12 +693,11 @@ void GetSessionTimeRange(datetime currentTime, datetime &sStart, datetime &sEnd)
 
       if(nyNow < nySessionStart)
       {
-         nySessionStart -= 86400; // Previous calendar day
+         nySessionStart -= 86400;
       }
 
-      // If weekend gap, adjust
       TimeToStruct(nySessionStart, dt);
-      if(dt.day_of_week == 6) // Saturday -> move to Friday
+      if(dt.day_of_week == 6)
       {
          nySessionStart -= 86400;
       }
@@ -581,7 +715,6 @@ void GetDailyTimeRange(datetime currentTime, datetime &dStart, datetime &dEnd)
    if(InpSessionMode == SESSION_AUTO_BROKER)
    {
       dStart = iTime(Symbol(), PERIOD_D1, 1);
-      // End at last second before today's candle to prevent bar overlap
       dEnd   = iTime(Symbol(), PERIOD_D1, 0) - 1;
    }
    else
@@ -589,20 +722,18 @@ void GetDailyTimeRange(datetime currentTime, datetime &dStart, datetime &dEnd)
       datetime sStart, sEnd;
       GetSessionTimeRange(currentTime, sStart, sEnd);
 
-      // Previous 24h cycle prior to current session start
       dEnd = sStart - 1;
       datetime nyEnd = BrokerTimeToNYTime(dEnd);
       datetime nyStart = nyEnd - 86400 + 1;
 
-      // Handle weekend rollover if current session started Sunday/Monday
       MqlDateTime dt;
       TimeToStruct(nyStart, dt);
-      if(dt.day_of_week == 0) // Sunday -> roll back to Friday
+      if(dt.day_of_week == 0)
       {
          nyStart -= 2 * 86400;
          nyEnd   -= 2 * 86400;
       }
-      else if(dt.day_of_week == 6) // Saturday
+      else if(dt.day_of_week == 6)
       {
          nyStart -= 86400;
          nyEnd   -= 86400;
@@ -636,7 +767,6 @@ void GetMonthlyTimeRange(datetime &mStart, datetime &mEnd)
 //+------------------------------------------------------------------+
 ENUM_TIMEFRAMES GetOptimalTimeframe(datetime startTime, datetime endTime, int targetProfileType)
 {
-   // Target Profile: 0=Session, 1=Daily, 2=Weekly, 3=Monthly
    int chartTF = Period();
 
    if(targetProfileType == 0 || targetProfileType == 1)
@@ -660,7 +790,7 @@ ENUM_TIMEFRAMES GetOptimalTimeframe(datetime startTime, datetime endTime, int ta
 }
 
 //+------------------------------------------------------------------+
-//| Core Volume Profile Engine (Dalton 70% Value Area Algorithm)     |
+//| Core Volume Profile Engine (Dalton 70% Value Area + LVN/HVN)     |
 //+------------------------------------------------------------------+
 bool CalculateProfile(datetime startTime, datetime endTime, int profileType, SProfileResult &result)
 {
@@ -674,7 +804,6 @@ bool CalculateProfile(datetime startTime, datetime endTime, int profileType, SPr
 
    if(startBar < 0 || endBar < 0 || startBar <= endBar) return(false);
 
-   //--- Find Extreme High and Low in range
    double highestPrice = -1.0;
    double lowestPrice  = 1e12;
 
@@ -688,7 +817,6 @@ bool CalculateProfile(datetime startTime, datetime endTime, int profileType, SPr
 
    if(highestPrice <= lowestPrice || lowestPrice <= 0) return(false);
 
-   //--- Determine Bin Step & Count
    double step = 0.0;
    int numBins = 0;
 
@@ -711,14 +839,12 @@ bool CalculateProfile(datetime startTime, datetime endTime, int profileType, SPr
 
    if(step <= 0 || numBins <= 1) return(false);
 
-   //--- Allocate & Clear Volume Bins
    long binsVolume[];
    ArrayResize(binsVolume, numBins);
    ArrayInitialize(binsVolume, 0);
 
    long totalVolume = 0;
 
-   //--- Accumulate Volume at Price
    for(int i = startBar; i >= endBar; i--)
    {
       double bHigh = iHigh(Symbol(), calcTF, i);
@@ -750,7 +876,6 @@ bool CalculateProfile(datetime startTime, datetime endTime, int profileType, SPr
 
    if(totalVolume <= 0) return(false);
 
-   //--- Step 1: Find Point of Control (POC)
    int  pocBin    = 0;
    long maxVolBin = binsVolume[0];
 
@@ -763,7 +888,6 @@ bool CalculateProfile(datetime startTime, datetime endTime, int profileType, SPr
       }
    }
 
-   //--- Step 2: Auction Market Theory (Dalton 70% Value Area Expansion)
    double targetVol  = totalVolume * (InpValueAreaPercent / 100.0);
    long   currentVol = binsVolume[pocBin];
 
@@ -810,7 +934,6 @@ bool CalculateProfile(datetime startTime, datetime endTime, int profileType, SPr
       }
       else
       {
-         // Equal volume or boundary case
          if(up < numBins && down >= 0)
          {
             currentVol += (binsVolume[up] + binsVolume[down]);
@@ -837,10 +960,33 @@ bool CalculateProfile(datetime startTime, datetime endTime, int profileType, SPr
    int vahBin = MathMin(numBins - 1, MathMax(pocBin, up - 1));
    int valBin = MathMax(0, MathMin(pocBin, down + 1));
 
-   //--- Populate Result Structure
+   int lvnAboveBin = -1;
+   long minVAbove = 0x7FFFFFFFFFFFFFFF;
+   for(int b = vahBin + 1; b < numBins; b++)
+   {
+      if(binsVolume[b] < minVAbove)
+      {
+         minVAbove = binsVolume[b];
+         lvnAboveBin = b;
+      }
+   }
+
+   int lvnBelowBin = -1;
+   long minVBelow = 0x7FFFFFFFFFFFFFFF;
+   for(int b = valBin - 1; b >= 0; b--)
+   {
+      if(binsVolume[b] < minVBelow)
+      {
+         minVBelow = binsVolume[b];
+         lvnBelowBin = b;
+      }
+   }
+
    result.poc         = NormalizeDouble(lowestPrice + (pocBin + 0.5) * step, Digits);
    result.vah         = NormalizeDouble(lowestPrice + (vahBin + 1.0) * step, Digits);
    result.val         = NormalizeDouble(lowestPrice + (valBin * step), Digits);
+   result.lvnUpper    = (lvnAboveBin >= 0) ? NormalizeDouble(lowestPrice + (lvnAboveBin + 0.5) * step, Digits) : result.vah;
+   result.lvnLower    = (lvnBelowBin >= 0) ? NormalizeDouble(lowestPrice + (lvnBelowBin + 0.5) * step, Digits) : result.val;
    result.high        = NormalizeDouble(highestPrice, Digits);
    result.low         = NormalizeDouble(lowestPrice, Digits);
    result.totalVol    = totalVolume;
@@ -891,15 +1037,149 @@ void CalculateMonthlyProfile()
    CalculateProfile(mStart, mEnd, 3, g_profMonthly);
 }
 
+//+------------------------------------------------------------------+
+//| Virgin / Naked POC (vPOC) Engine                                 |
+//+------------------------------------------------------------------+
+void CalculateNakedPOCs()
+{
+   ArrayResize(g_vpocs, 0);
+   if(!InpShowVPOC) return;
+
+   for(int d = 1; d <= InpNumVPOCDays; d++)
+   {
+      datetime dStart = iTime(Symbol(), PERIOD_D1, d);
+      datetime dEnd   = iTime(Symbol(), PERIOD_D1, d - 1) - 1;
+      if(dStart <= 0 || dEnd <= 0) continue;
+
+      SProfileResult pRes;
+      if(!CalculateProfile(dStart, dEnd, 1, pRes)) continue;
+
+      double pocPrice = pRes.poc;
+      bool isMitigated = false;
+      datetime mitTime = 0;
+
+      int startShift = iBarShift(Symbol(), PERIOD_M15, dEnd, false);
+      for(int b = startShift; b >= 0; b--)
+      {
+         double bh = iHigh(Symbol(), PERIOD_M15, b);
+         double bl = iLow(Symbol(), PERIOD_M15, b);
+         if(bl <= pocPrice && bh >= pocPrice)
+         {
+            isMitigated = true;
+            mitTime = iTime(Symbol(), PERIOD_M15, b);
+            break;
+         }
+      }
+
+      int sz = ArraySize(g_vpocs);
+      ArrayResize(g_vpocs, sz + 1);
+      g_vpocs[sz].price          = pocPrice;
+      g_vpocs[sz].startTime      = dStart;
+      g_vpocs[sz].endTime        = dEnd;
+      g_vpocs[sz].mitigationTime = mitTime;
+      g_vpocs[sz].isMitigated    = isMitigated;
+      g_vpocs[sz].isWeekly       = false;
+      g_vpocs[sz].dayIndex       = d;
+   }
+
+   for(int w = 1; w <= InpNumVPOCWeeks; w++)
+   {
+      datetime wStart = iTime(Symbol(), PERIOD_W1, w);
+      datetime wEnd   = iTime(Symbol(), PERIOD_W1, w - 1) - 1;
+      if(wStart <= 0 || wEnd <= 0) continue;
+
+      SProfileResult pRes;
+      if(!CalculateProfile(wStart, wEnd, 2, pRes)) continue;
+
+      double pocPrice = pRes.poc;
+      bool isMitigated = false;
+      datetime mitTime = 0;
+
+      int startShift = iBarShift(Symbol(), PERIOD_H1, wEnd, false);
+      for(int b = startShift; b >= 0; b--)
+      {
+         double bh = iHigh(Symbol(), PERIOD_H1, b);
+         double bl = iLow(Symbol(), PERIOD_H1, b);
+         if(bl <= pocPrice && bh >= pocPrice)
+         {
+            isMitigated = true;
+            mitTime = iTime(Symbol(), PERIOD_H1, b);
+            break;
+         }
+      }
+
+      int sz = ArraySize(g_vpocs);
+      ArrayResize(g_vpocs, sz + 1);
+      g_vpocs[sz].price          = pocPrice;
+      g_vpocs[sz].startTime      = wStart;
+      g_vpocs[sz].endTime        = wEnd;
+      g_vpocs[sz].mitigationTime = mitTime;
+      g_vpocs[sz].isMitigated    = isMitigated;
+      g_vpocs[sz].isWeekly       = true;
+      g_vpocs[sz].dayIndex       = w;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Calculate All Profiles                                           |
+//+------------------------------------------------------------------+
 void CalculateAllProfiles(bool force)
 {
    CalculateMonthlyProfile();
    CalculateWeeklyProfile();
    CalculateDailyProfile();
    CalculateSessionProfile();
+   if(InpShowVPOC) CalculateNakedPOCs();
    DetectConfluences();
    DrawAllLevels();
+   if(InpShowVPOC) DrawVPOCLines();
    if(InpDrawHistogram) DrawSessionHistogram();
+}
+
+//+------------------------------------------------------------------+
+//| Confluence Star Rating Matrix                                    |
+//+------------------------------------------------------------------+
+int RateConfluence(string name1, string name2, string &ratingDesc)
+{
+   string p1 = StringSubstr(name1, 0, 1);
+   string p2 = StringSubstr(name2, 0, 1);
+   bool isM = (p1 == "M" || p2 == "M");
+   bool isW = (p1 == "W" || p2 == "W");
+   bool isD = (p1 == "D" || p2 == "D");
+   bool isS = (p1 == "S" || p2 == "S");
+
+   bool poc1 = (StringFind(name1, "POC") >= 0);
+   bool poc2 = (StringFind(name2, "POC") >= 0);
+   bool bothPOC = (poc1 && poc2);
+
+   if(isM && isW && bothPOC)
+   {
+      ratingDesc = "[5 STARS] Macro Institutional Wall";
+      return(5);
+   }
+   if(isM && (isW || isD))
+   {
+      ratingDesc = "[4 STARS] High-Probability Macro Reversal";
+      return(4);
+   }
+   if(isW && isD && (poc1 || poc2))
+   {
+      ratingDesc = "[4 STARS] A+ Institutional Setup";
+      return(4);
+   }
+   if(isW && isD)
+   {
+      ratingDesc = "[3 STARS] Solid Day-Trade Confluence";
+      return(3);
+   }
+   if(isD && isS)
+   {
+      ratingDesc = "[2 STARS] Intraday Scalp Confluence";
+      return(2);
+   }
+
+   ratingDesc = "[1 STAR] Minor Level";
+   return(1);
 }
 
 //+------------------------------------------------------------------+
@@ -910,7 +1190,6 @@ void DetectConfluences()
    ArrayResize(g_confluences, 0);
    if(!InpEnableConfluence) return;
 
-   // Collect all active levels into a test array
    string names[12]  = {"","","","","","","","","","","",""};
    double prices[12] = {0,0,0,0,0,0,0,0,0,0,0,0};
    int count = 0;
@@ -947,7 +1226,6 @@ void DetectConfluences()
    {
       for(int j = i + 1; j < count; j++)
       {
-         // Skip levels belonging to the exact same timeframe (e.g. D-POC vs D-VAL)
          if(StringSubstr(names[i], 0, 1) == StringSubstr(names[j], 0, 1)) continue;
 
          double diff = MathAbs(prices[i] - prices[j]);
@@ -961,6 +1239,10 @@ void DetectConfluences()
             g_confluences[cSize].price2   = prices[j];
             g_confluences[cSize].midPrice = NormalizeDouble((prices[i] + prices[j]) / 2.0, Digits);
             g_confluences[cSize].diffPips = NormalizeDouble(diff / pipSize, 1);
+
+            string rDesc = "";
+            g_confluences[cSize].stars     = RateConfluence(names[i], names[j], rDesc);
+            g_confluences[cSize].ratingStr = rDesc;
          }
       }
    }
@@ -969,7 +1251,7 @@ void DetectConfluences()
 //+------------------------------------------------------------------+
 //| Check if a level is part of an active confluence                 |
 //+------------------------------------------------------------------+
-bool IsLevelConfluent(string levelName, string &confluentWith, double &partnerPrice)
+bool IsLevelConfluent(string levelName, string &confluentWith, double &partnerPrice, int &stars)
 {
    for(int i = 0; i < ArraySize(g_confluences); i++)
    {
@@ -977,12 +1259,14 @@ bool IsLevelConfluent(string levelName, string &confluentWith, double &partnerPr
       {
          confluentWith = g_confluences[i].name2;
          partnerPrice  = g_confluences[i].price2;
+         stars         = g_confluences[i].stars;
          return(true);
       }
       if(g_confluences[i].name2 == levelName)
       {
          confluentWith = g_confluences[i].name1;
          partnerPrice  = g_confluences[i].price1;
+         stars         = g_confluences[i].stars;
          return(true);
       }
    }
@@ -990,15 +1274,55 @@ bool IsLevelConfluent(string levelName, string &confluentWith, double &partnerPr
 }
 
 //+------------------------------------------------------------------+
-//| Draw or Update a Level Line with Attached Text Label             |
+//| Object Pool: Draw or Update a Trend Line                         |
 //+------------------------------------------------------------------+
-void DrawLevelLine(string id,
-                   string labelText,
-                   double price,
-                   datetime startTime,
-                   color baseColor,
-                   int baseWidth,
-                   ENUM_LINE_STYLE baseStyle)
+void DrawOrUpdateTrendLine(string name, datetime t1, double p1, datetime t2, double p2, color clr, int width, ENUM_LINE_STYLE style, bool ray)
+{
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_TREND, 0, t1, p1, t2, p2);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_BACK, true);
+   }
+   else
+   {
+      ObjectSetDouble(0, name, OBJPROP_PRICE1, p1);
+      ObjectSetDouble(0, name, OBJPROP_PRICE2, p2);
+      ObjectSetInteger(0, name, OBJPROP_TIME1, t1);
+      ObjectSetInteger(0, name, OBJPROP_TIME2, t2);
+   }
+   ObjectSetInteger(0, name, OBJPROP_RAY_RIGHT, ray);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
+   ObjectSetInteger(0, name, OBJPROP_STYLE, style);
+}
+
+//+------------------------------------------------------------------+
+//| Object Pool: Draw or Update a Text Label                         |
+//+------------------------------------------------------------------+
+void DrawOrUpdateTextLabel(string name, datetime t, double p, string text, color clr, int fontSize, ENUM_ANCHOR_POINT anchor)
+{
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_TEXT, 0, t, p);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetString(0, name, OBJPROP_FONT, "Segoe UI");
+   }
+   else
+   {
+      ObjectSetDouble(0, name, OBJPROP_PRICE1, p);
+      ObjectSetInteger(0, name, OBJPROP_TIME1, t);
+   }
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, anchor);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+}
+
+//+------------------------------------------------------------------+
+//| Draw a Profile Level Line with Label                             |
+//+------------------------------------------------------------------+
+void DrawLevelLine(string id, string labelText, double price, datetime startTime, color baseColor, int baseWidth, ENUM_LINE_STYLE baseStyle)
 {
    if(price <= 0) return;
 
@@ -1008,58 +1332,24 @@ void DrawLevelLine(string id,
    int secPerBar = PeriodSeconds();
    datetime endTime = TimeCurrent() + InpExtendBars * secPerBar;
 
-   // Check confluence status
    string partner = "";
    double partnerPrice = 0;
-   bool isConf = IsLevelConfluent(id, partner, partnerPrice);
+   int stars = 0;
+   bool isConf = IsLevelConfluent(id, partner, partnerPrice, stars);
 
    color drawColor = (isConf && InpEnableConfluence) ? InpConfluenceColor : baseColor;
    int   drawWidth = (isConf && InpEnableConfluence) ? (baseWidth + 2) : baseWidth;
 
-   //--- 1. Create or Update Trend Line
-   if(ObjectFind(0, lineName) < 0)
-   {
-      ObjectCreate(0, lineName, OBJ_TREND, 0, startTime, price, endTime, price);
-      ObjectSetInteger(0, lineName, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, lineName, OBJPROP_BACK, true);
-   }
-   else
-   {
-      ObjectSetDouble(0, lineName, OBJPROP_PRICE1, price);
-      ObjectSetDouble(0, lineName, OBJPROP_PRICE2, price);
-      ObjectSetInteger(0, lineName, OBJPROP_TIME1, startTime);
-      ObjectSetInteger(0, lineName, OBJPROP_TIME2, endTime);
-   }
+   DrawOrUpdateTrendLine(lineName, startTime, price, endTime, price, drawColor, drawWidth, baseStyle, InpExtendRay);
 
-   ObjectSetInteger(0, lineName, OBJPROP_RAY_RIGHT, InpExtendRay);
-   ObjectSetInteger(0, lineName, OBJPROP_COLOR, drawColor);
-   ObjectSetInteger(0, lineName, OBJPROP_WIDTH, drawWidth);
-   ObjectSetInteger(0, lineName, OBJPROP_STYLE, baseStyle);
-
-   //--- 2. Create or Update Text Label
    datetime labelTime = InpExtendRay ? (TimeCurrent() + 20 * secPerBar) : endTime;
    string textStr = StringFormat("[%s] %s", labelText, DoubleToString(price, Digits));
    if(isConf && InpEnableConfluence)
    {
-      textStr += " [CONF w/ " + partner + "]";
+      textStr += StringFormat(" [★%d CONF w/ %s]", stars, partner);
    }
 
-   if(ObjectFind(0, labelName) < 0)
-   {
-      ObjectCreate(0, labelName, OBJ_TEXT, 0, labelTime, price);
-      ObjectSetInteger(0, labelName, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, labelName, OBJPROP_FONTSIZE, 8);
-      ObjectSetInteger(0, labelName, OBJPROP_ANCHOR, ANCHOR_LEFT);
-      ObjectSetString(0, labelName, OBJPROP_FONT, "Segoe UI");
-   }
-   else
-   {
-      ObjectSetDouble(0, labelName, OBJPROP_PRICE1, price);
-      ObjectSetInteger(0, labelName, OBJPROP_TIME1, labelTime);
-   }
-
-   ObjectSetString(0, labelName, OBJPROP_TEXT, textStr);
-   ObjectSetInteger(0, labelName, OBJPROP_COLOR, drawColor);
+   DrawOrUpdateTextLabel(labelName, labelTime, price, textStr, drawColor, 8, ANCHOR_LEFT);
 }
 
 //+------------------------------------------------------------------+
@@ -1067,31 +1357,24 @@ void DrawLevelLine(string id,
 //+------------------------------------------------------------------+
 void DrawAllLevels()
 {
-   // 1. Session Profile Levels
    if(InpShowSession && g_profSession.isValid)
    {
       DrawLevelLine("S-POC", "S-POC", g_profSession.poc, g_profSession.startTime, InpColorSessionPOC, InpLineWidthPOC, STYLE_SOLID);
       DrawLevelLine("S-VAH", "S-VAH", g_profSession.vah, g_profSession.startTime, InpColorSessionVA,  InpLineWidthVA,  InpLineStyleVA);
       DrawLevelLine("S-VAL", "S-VAL", g_profSession.val, g_profSession.startTime, InpColorSessionVA,  InpLineWidthVA,  InpLineStyleVA);
    }
-
-   // 2. Daily Profile Levels
    if(InpShowDaily && g_profDaily.isValid)
    {
       DrawLevelLine("D-POC", "D-POC", g_profDaily.poc, g_profDaily.startTime, InpColorDailyPOC, InpLineWidthPOC, STYLE_SOLID);
       DrawLevelLine("D-VAH", "D-VAH", g_profDaily.vah, g_profDaily.startTime, InpColorDailyVA,  InpLineWidthVA,  InpLineStyleVA);
       DrawLevelLine("D-VAL", "D-VAL", g_profDaily.val, g_profDaily.startTime, InpColorDailyVA,  InpLineWidthVA,  InpLineStyleVA);
    }
-
-   // 3. Weekly Profile Levels
    if(InpShowWeekly && g_profWeekly.isValid)
    {
       DrawLevelLine("W-POC", "W-POC", g_profWeekly.poc, g_profWeekly.startTime, InpColorWeeklyPOC, InpLineWidthPOC, STYLE_SOLID);
       DrawLevelLine("W-VAH", "W-VAH", g_profWeekly.vah, g_profWeekly.startTime, InpColorWeeklyVA,  InpLineWidthVA,  InpLineStyleVA);
       DrawLevelLine("W-VAL", "W-VAL", g_profWeekly.val, g_profWeekly.startTime, InpColorWeeklyVA,  InpLineWidthVA,  InpLineStyleVA);
    }
-
-   // 4. Monthly Profile Levels
    if(InpShowMonthly && g_profMonthly.isValid)
    {
       DrawLevelLine("M-POC", "M-POC", g_profMonthly.poc, g_profMonthly.startTime, InpColorMonthlyPOC, InpLineWidthPOC, STYLE_SOLID);
@@ -1101,7 +1384,38 @@ void DrawAllLevels()
 }
 
 //+------------------------------------------------------------------+
-//| Draw Visual Session Histogram Bars on MT4 Chart                  |
+//| Draw Virgin / Naked POC Lines                                    |
+//+------------------------------------------------------------------+
+void DrawVPOCLines()
+{
+   if(!InpShowVPOC) return;
+
+   int count = ArraySize(g_vpocs);
+   for(int i = 0; i < count; i++)
+   {
+      string id = (g_vpocs[i].isWeekly ? "W_" : "D_") + IntegerToString(g_vpocs[i].dayIndex);
+      string lineName  = PREFIX + "vPOC_Line_"  + id;
+      string labelName = PREFIX + "vPOC_Label_" + id;
+
+      if(g_vpocs[i].isMitigated)
+      {
+         ObjectDelete(0, lineName);
+         ObjectDelete(0, labelName);
+         continue;
+      }
+
+      datetime tEnd = TimeCurrent() + 60 * PeriodSeconds();
+      color vpocColor = g_vpocs[i].isWeekly ? InpColorVPOCWeekly : InpColorVPOCDaily;
+
+      DrawOrUpdateTrendLine(lineName, g_vpocs[i].endTime, g_vpocs[i].price, tEnd, g_vpocs[i].price, vpocColor, 1, STYLE_DOT, InpExtendRay);
+
+      string lbl = StringFormat("[vPOC %s] %s", (g_vpocs[i].isWeekly ? "Wk" : "Day") + IntegerToString(g_vpocs[i].dayIndex), DoubleToString(g_vpocs[i].price, Digits));
+      DrawOrUpdateTextLabel(labelName, tEnd, g_vpocs[i].price, lbl, vpocColor, 8, ANCHOR_LEFT);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Draw Session Volume Profile Histogram                            |
 //+------------------------------------------------------------------+
 void DrawSessionHistogram()
 {
@@ -1143,11 +1457,9 @@ void DrawSessionHistogram()
 
    if(maxV <= 0) return;
 
-   // Anchor time
    datetime anchorTime = (InpHistAlignment == HIST_ALIGN_SESSION_START) ? g_profSession.startTime : Time[0];
    int secPerBar = PeriodSeconds();
 
-   // Clean up excess bars from previous runs
    if(g_lastHistBarCount > numBins)
    {
       for(int b = numBins; b < g_lastHistBarCount; b++)
@@ -1197,8 +1509,18 @@ void DrawSessionHistogram()
 //+------------------------------------------------------------------+
 void PopulateBuffers(int rates_total)
 {
-   // Fill recent 500 bars so EA and backtester can query history
    int limit = MathMin(rates_total, 500);
+
+   double nearestVPOC = 0.0;
+   for(int v = 0; v < ArraySize(g_vpocs); v++)
+   {
+      if(!g_vpocs[v].isMitigated)
+      {
+         nearestVPOC = g_vpocs[v].price;
+         break;
+      }
+   }
+
    for(int i = 0; i < limit; i++)
    {
       buf_DailyPOC[i]   = g_profDaily.isValid   ? g_profDaily.poc   : 0.0;
@@ -1216,6 +1538,11 @@ void PopulateBuffers(int rates_total)
       buf_SessionPOC[i] = g_profSession.isValid ? g_profSession.poc : 0.0;
       buf_SessionVAH[i] = g_profSession.isValid ? g_profSession.vah : 0.0;
       buf_SessionVAL[i] = g_profSession.isValid ? g_profSession.val : 0.0;
+
+      buf_TradePlanSL[i]  = g_activePlan.isActive ? g_activePlan.slPrice  : 0.0;
+      buf_TradePlanTP1[i] = g_activePlan.isActive ? g_activePlan.tp1Price : 0.0;
+      buf_TradePlanTP2[i] = g_activePlan.isActive ? g_activePlan.tp2Price : 0.0;
+      buf_ActiveVPOC[i]   = nearestVPOC;
    }
 }
 
@@ -1238,15 +1565,15 @@ void EvaluateEntrySignals(int rates_total, int prev_calculated)
       ArrayInitialize(buf_SignalSell, 0.0);
    }
 
-   // Always ensure bar 0 has 0.0 until candle completes
    buf_SignalBuy[0]  = 0.0;
    buf_SignalSell[0] = 0.0;
 
-   // Scan completed bars (non-repainting)
    for(int i = limit; i >= 1; i--)
    {
       buf_SignalBuy[i]  = 0.0;
       buf_SignalSell[i] = 0.0;
+
+      if(InpUseKillZones && !IsInKillZone(Time[i])) continue;
 
       double o = Open[i];
       double h = High[i];
@@ -1261,6 +1588,7 @@ void EvaluateEntrySignals(int rates_total, int prev_calculated)
       double upperWick       = h - MathMax(o, c);
 
       string signalDesc = "";
+      string setupType  = "";
       bool   buyFound   = false;
       bool   sellFound  = false;
 
@@ -1273,30 +1601,32 @@ void EvaluateEntrySignals(int rates_total, int prev_calculated)
          {
             double confPrice = g_confluences[k].midPrice;
 
-            // Bullish bounce from confluence support
             if(l <= confPrice + tolerance && h >= confPrice - tolerance && isBullishCandle && c >= confPrice)
             {
                if(lowerWick >= 0.20 * totalRange || c > confPrice)
                {
-                  buyFound = true;
-                  signalDesc = StringFormat("BUY: Confluence Bounce [%s + %s] @ %s",
+                  buyFound  = true;
+                  setupType = "Confluence Bounce";
+                  signalDesc = StringFormat("BUY: Confluence Bounce [%s + %s] @ %s (★%d)",
                                             g_confluences[k].name1,
                                             g_confluences[k].name2,
-                                            DoubleToString(confPrice, Digits));
+                                            DoubleToString(confPrice, Digits),
+                                            g_confluences[k].stars);
                   break;
                }
             }
 
-            // Bearish rejection from confluence resistance
             if(h >= confPrice - tolerance && l <= confPrice + tolerance && isBearishCandle && c <= confPrice)
             {
                if(upperWick >= 0.20 * totalRange || c < confPrice)
                {
                   sellFound = true;
-                  signalDesc = StringFormat("SELL: Confluence Rejection [%s + %s] @ %s",
+                  setupType = "Confluence Rejection";
+                  signalDesc = StringFormat("SELL: Confluence Rejection [%s + %s] @ %s (★%d)",
                                             g_confluences[k].name1,
                                             g_confluences[k].name2,
-                                            DoubleToString(confPrice, Digits));
+                                            DoubleToString(confPrice, Digits),
+                                            g_confluences[k].stars);
                   break;
                }
             }
@@ -1311,24 +1641,24 @@ void EvaluateEntrySignals(int rates_total, int prev_calculated)
          double dVal = g_profDaily.val;
          double dVah = g_profDaily.vah;
 
-         // Buy: D-VAL Rejection -> Target D-POC
          if(l <= dVal + tolerance && h >= dVal - tolerance && isBullishCandle && c >= dVal)
          {
             if(lowerWick >= 0.20 * totalRange || c > dVal)
             {
-               buyFound = true;
+               buyFound  = true;
+               setupType = "VAL Rejection";
                signalDesc = StringFormat("BUY: D-VAL Rejection @ %s (Target D-POC %s)",
                                          DoubleToString(dVal, Digits),
                                          DoubleToString(g_profDaily.poc, Digits));
             }
          }
 
-         // Sell: D-VAH Rejection -> Target D-POC
          if(h >= dVah - tolerance && l <= dVah + tolerance && isBearishCandle && c <= dVah)
          {
             if(upperWick >= 0.20 * totalRange || c < dVah)
             {
                sellFound = true;
+               setupType = "VAH Rejection";
                signalDesc = StringFormat("SELL: D-VAH Rejection @ %s (Target D-POC %s)",
                                          DoubleToString(dVah, Digits),
                                          DoubleToString(g_profDaily.poc, Digits));
@@ -1344,29 +1674,29 @@ void EvaluateEntrySignals(int rates_total, int prev_calculated)
          double dVal = g_profDaily.val;
          double dVah = g_profDaily.vah;
 
-         // Buy: Price broke above D-VAH, pulled back to test D-VAH from above, and bounced
          if(i + 1 < rates_total && Open[i + 1] >= dVah - tolerance)
          {
             if(l <= dVah + tolerance && l >= dVah - 2 * tolerance && isBullishCandle && c > dVah)
             {
-               buyFound = true;
+               buyFound  = true;
+               setupType = "VAH Retest";
                signalDesc = StringFormat("BUY: Imbalance Retest [D-VAH Support] @ %s", DoubleToString(dVah, Digits));
             }
          }
 
-         // Sell: Price broke below D-VAL, pulled back to test D-VAL from below, and rejected
          if(i + 1 < rates_total && Open[i + 1] <= dVal + tolerance)
          {
             if(h >= dVal - tolerance && h <= dVal + 2 * tolerance && isBearishCandle && c < dVal)
             {
                sellFound = true;
+               setupType = "VAL Retest";
                signalDesc = StringFormat("SELL: Imbalance Retest [D-VAL Resistance] @ %s", DoubleToString(dVal, Digits));
             }
          }
       }
 
       // ------------------------------------------------------------------
-      // Record Arrows & Trigger Alerts
+      // Record Arrows, Build Dynamic Trade Plan & Trigger Alerts
       // ------------------------------------------------------------------
       if(buyFound)
       {
@@ -1378,9 +1708,37 @@ void EvaluateEntrySignals(int rates_total, int prev_calculated)
             g_lastSignalPrice = c;
             g_lastSignalDesc  = signalDesc;
 
+            g_activePlan.direction   = "BUY";
+            g_activePlan.entryPrice  = c;
+            double baseSL = l - InpSLBufferPips * pipSize;
+            if(g_profDaily.isValid && g_profDaily.lvnLower < baseSL && g_profDaily.lvnLower > 0)
+               baseSL = g_profDaily.lvnLower - InpSLBufferPips * pipSize;
+            g_activePlan.slPrice     = NormalizeDouble(baseSL, Digits);
+
+            double tp1 = g_profDaily.isValid ? g_profDaily.poc : (c + 20 * pipSize);
+            double tp2 = g_profDaily.isValid ? g_profDaily.vah : (c + 40 * pipSize);
+            if(tp1 <= c) tp1 = c + (c - g_activePlan.slPrice) * 1.5;
+            if(tp2 <= tp1) tp2 = tp1 + (tp1 - c);
+
+            g_activePlan.tp1Price    = NormalizeDouble(tp1, Digits);
+            g_activePlan.tp2Price    = NormalizeDouble(tp2, Digits);
+            g_activePlan.riskPips    = NormalizeDouble((g_activePlan.entryPrice - g_activePlan.slPrice) / pipSize, 1);
+            g_activePlan.reward1Pips = NormalizeDouble((g_activePlan.tp1Price - g_activePlan.entryPrice) / pipSize, 1);
+            g_activePlan.reward2Pips = NormalizeDouble((g_activePlan.tp2Price - g_activePlan.entryPrice) / pipSize, 1);
+            g_activePlan.rr1         = (g_activePlan.riskPips > 0) ? NormalizeDouble(g_activePlan.reward1Pips / g_activePlan.riskPips, 2) : 0.0;
+            g_activePlan.rr2         = (g_activePlan.riskPips > 0) ? NormalizeDouble(g_activePlan.reward2Pips / g_activePlan.riskPips, 2) : 0.0;
+            g_activePlan.signalTime  = Time[1];
+            g_activePlan.setupName   = setupType;
+            g_activePlan.isActive    = true;
+
             if(InpSignalAlert && Time[1] != g_lastSignalAlertTime)
             {
-               string alertMsg = StringFormat("[NF Trades MTF VP] %s: %s", Symbol(), signalDesc);
+               string alertMsg = StringFormat("[NF Trades MTF VP] %s: %s | SL: %s | TP1: %s (R:R 1:%.1f)",
+                                              Symbol(),
+                                              signalDesc,
+                                              DoubleToString(g_activePlan.slPrice, Digits),
+                                              DoubleToString(g_activePlan.tp1Price, Digits),
+                                              g_activePlan.rr1);
                Alert(alertMsg);
                PlaySound(InpSoundFile);
                if(InpSignalPushNotify) SendNotification(alertMsg);
@@ -1398,9 +1756,37 @@ void EvaluateEntrySignals(int rates_total, int prev_calculated)
             g_lastSignalPrice = c;
             g_lastSignalDesc  = signalDesc;
 
+            g_activePlan.direction   = "SELL";
+            g_activePlan.entryPrice  = c;
+            double baseSL = h + InpSLBufferPips * pipSize;
+            if(g_profDaily.isValid && g_profDaily.lvnUpper > baseSL)
+               baseSL = g_profDaily.lvnUpper + InpSLBufferPips * pipSize;
+            g_activePlan.slPrice     = NormalizeDouble(baseSL, Digits);
+
+            double tp1 = g_profDaily.isValid ? g_profDaily.poc : (c - 20 * pipSize);
+            double tp2 = g_profDaily.isValid ? g_profDaily.val : (c - 40 * pipSize);
+            if(tp1 >= c) tp1 = c - (g_activePlan.slPrice - c) * 1.5;
+            if(tp2 >= tp1) tp2 = tp1 - (c - tp1);
+
+            g_activePlan.tp1Price    = NormalizeDouble(tp1, Digits);
+            g_activePlan.tp2Price    = NormalizeDouble(tp2, Digits);
+            g_activePlan.riskPips    = NormalizeDouble((g_activePlan.slPrice - g_activePlan.entryPrice) / pipSize, 1);
+            g_activePlan.reward1Pips = NormalizeDouble((g_activePlan.entryPrice - g_activePlan.tp1Price) / pipSize, 1);
+            g_activePlan.reward2Pips = NormalizeDouble((g_activePlan.entryPrice - g_activePlan.tp2Price) / pipSize, 1);
+            g_activePlan.rr1         = (g_activePlan.riskPips > 0) ? NormalizeDouble(g_activePlan.reward1Pips / g_activePlan.riskPips, 2) : 0.0;
+            g_activePlan.rr2         = (g_activePlan.riskPips > 0) ? NormalizeDouble(g_activePlan.reward2Pips / g_activePlan.riskPips, 2) : 0.0;
+            g_activePlan.signalTime  = Time[1];
+            g_activePlan.setupName   = setupType;
+            g_activePlan.isActive    = true;
+
             if(InpSignalAlert && Time[1] != g_lastSignalAlertTime)
             {
-               string alertMsg = StringFormat("[NF Trades MTF VP] %s: %s", Symbol(), signalDesc);
+               string alertMsg = StringFormat("[NF Trades MTF VP] %s: %s | SL: %s | TP1: %s (R:R 1:%.1f)",
+                                              Symbol(),
+                                              signalDesc,
+                                              DoubleToString(g_activePlan.slPrice, Digits),
+                                              DoubleToString(g_activePlan.tp1Price, Digits),
+                                              g_activePlan.rr1);
                Alert(alertMsg);
                PlaySound(InpSoundFile);
                if(InpSignalPushNotify) SendNotification(alertMsg);
@@ -1409,6 +1795,37 @@ void EvaluateEntrySignals(int rates_total, int prev_calculated)
          }
       }
    }
+}
+
+//+------------------------------------------------------------------+
+//| Draw Dynamic Trade Plan (Entry, SL, TP1, TP2, R:R Box)           |
+//+------------------------------------------------------------------+
+void DrawTradePlan()
+{
+   if(!InpShowTradePlan || !g_activePlan.isActive) return;
+
+   datetime t1 = g_activePlan.signalTime;
+   datetime t2 = t1 + InpTradePlanBars * PeriodSeconds();
+
+   // 1. Entry Line
+   DrawOrUpdateTrendLine(PREFIX + "Plan_Entry", t1, g_activePlan.entryPrice, t2, g_activePlan.entryPrice, InpColorPlanEntry, 1, STYLE_SOLID, false);
+   string eLbl = StringFormat("[ENTRY %s] %s", g_activePlan.direction, DoubleToString(g_activePlan.entryPrice, Digits));
+   DrawOrUpdateTextLabel(PREFIX + "Plan_EntryLbl", t2, g_activePlan.entryPrice, eLbl, InpColorPlanEntry, 8, ANCHOR_LEFT);
+
+   // 2. Stop Loss Line
+   DrawOrUpdateTrendLine(PREFIX + "Plan_SL", t1, g_activePlan.slPrice, t2, g_activePlan.slPrice, InpColorPlanSL, 2, STYLE_DASH, false);
+   string slLbl = StringFormat("[SL] %s (-%.1f pips)", DoubleToString(g_activePlan.slPrice, Digits), g_activePlan.riskPips);
+   DrawOrUpdateTextLabel(PREFIX + "Plan_SLLbl", t2, g_activePlan.slPrice, slLbl, InpColorPlanSL, 8, ANCHOR_LEFT);
+
+   // 3. Take Profit 1 Line (50% scale-out)
+   DrawOrUpdateTrendLine(PREFIX + "Plan_TP1", t1, g_activePlan.tp1Price, t2, g_activePlan.tp1Price, InpColorPlanTP1, 1, STYLE_SOLID, false);
+   string tp1Lbl = StringFormat("[TP1 - 50%%] %s (+%.1f pips | 1:%.1f R:R)", DoubleToString(g_activePlan.tp1Price, Digits), g_activePlan.reward1Pips, g_activePlan.rr1);
+   DrawOrUpdateTextLabel(PREFIX + "Plan_TP1Lbl", t2, g_activePlan.tp1Price, tp1Lbl, InpColorPlanTP1, 8, ANCHOR_LEFT);
+
+   // 4. Take Profit 2 Line (Runner)
+   DrawOrUpdateTrendLine(PREFIX + "Plan_TP2", t1, g_activePlan.tp2Price, t2, g_activePlan.tp2Price, InpColorPlanTP2, 1, STYLE_SOLID, false);
+   string tp2Lbl = StringFormat("[TP2 - Runner] %s (+%.1f pips | 1:%.1f R:R)", DoubleToString(g_activePlan.tp2Price, Digits), g_activePlan.reward2Pips, g_activePlan.rr2);
+   DrawOrUpdateTextLabel(PREFIX + "Plan_TP2Lbl", t2, g_activePlan.tp2Price, tp2Lbl, InpColorPlanTP2, 8, ANCHOR_LEFT);
 }
 
 //+------------------------------------------------------------------+
@@ -1449,15 +1866,15 @@ void UpdateDashboard()
       ObjectSetInteger(0, bgName, OBJPROP_CORNER, InpDashCorner);
       ObjectSetInteger(0, bgName, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, bgName, OBJPROP_BACK, false);
-      ObjectSetInteger(0, bgName, OBJPROP_COLOR, C'45,55,75'); // Border
-      ObjectSetInteger(0, bgName, OBJPROP_BGCOLOR, C'16,22,32'); // Dark Navy BG
+      ObjectSetInteger(0, bgName, OBJPROP_COLOR, C'45,55,75');
+      ObjectSetInteger(0, bgName, OBJPROP_BGCOLOR, C'16,22,32');
       ObjectSetInteger(0, bgName, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bgName, OBJPROP_WIDTH, 1);
    }
    ObjectSetInteger(0, bgName, OBJPROP_XDISTANCE, x - 8);
    ObjectSetInteger(0, bgName, OBJPROP_YDISTANCE, y - 6);
-   ObjectSetInteger(0, bgName, OBJPROP_XSIZE, 275);
-   ObjectSetInteger(0, bgName, OBJPROP_YSIZE, 175);
+   ObjectSetInteger(0, bgName, OBJPROP_XSIZE, 290);
+   ObjectSetInteger(0, bgName, OBJPROP_YSIZE, 205);
 
    // 1. Header
    UpdateDashLabel("Title", "=== NF TRADES | AMT PROFILE ===", x, y, clrGold, 9, true);
@@ -1520,7 +1937,7 @@ void UpdateDashboard()
       y += rowHeight;
    }
 
-   // 7. Active Confluences
+   // 7. Active Confluences with Star Ratings
    int confCount = ArraySize(g_confluences);
    if(InpEnableConfluence && confCount > 0)
    {
@@ -1530,11 +1947,11 @@ void UpdateDashboard()
 
       for(int i = 0; i < MathMin(confCount, 2); i++)
       {
-         string cDesc = StringFormat("* %s & %s @ %s (Spr: %.1f)",
+         string cDesc = StringFormat("* %s & %s @ %s [★%d]",
                                      g_confluences[i].name1,
                                      g_confluences[i].name2,
                                      DoubleToString(g_confluences[i].midPrice, Digits),
-                                     g_confluences[i].diffPips);
+                                     g_confluences[i].stars);
          UpdateDashLabel("Conf_" + IntegerToString(i), cDesc, x, y, InpConfluenceColor, 8, false);
          y += rowHeight;
       }
@@ -1546,20 +1963,24 @@ void UpdateDashboard()
       {
          ObjectDelete(0, PREFIX + "HUD_Conf_" + IntegerToString(i));
       }
+      y += rowHeight;
    }
 
-   // 8. Latest Entry Sign Status
+   // 8. Latest Entry Sign Status & R:R Summary
    string sigStr = "ENTRY SIGN: WAITING...";
    color  sigClr = clrDarkGray;
-   if(g_lastSignalType == "BUY")
+   if(g_activePlan.isActive)
    {
-      sigStr = StringFormat("ENTRY SIGN: BUY @ %s", DoubleToString(g_lastSignalPrice, Digits));
-      sigClr = clrLime;
+      sigStr = StringFormat("PLAN: %s | R:R 1:%.1f | TP1: %s",
+                            g_activePlan.direction,
+                            g_activePlan.rr1,
+                            DoubleToString(g_activePlan.tp1Price, Digits));
+      sigClr = (g_activePlan.direction == "BUY") ? clrLime : clrRed;
    }
-   else if(g_lastSignalType == "SELL")
+   else if(g_lastSignalType != "NONE")
    {
-      sigStr = StringFormat("ENTRY SIGN: SELL @ %s", DoubleToString(g_lastSignalPrice, Digits));
-      sigClr = clrRed;
+      sigStr = StringFormat("ENTRY SIGN: %s @ %s", g_lastSignalType, DoubleToString(g_lastSignalPrice, Digits));
+      sigClr = (g_lastSignalType == "BUY") ? clrLime : clrRed;
    }
    UpdateDashLabel("EntrySign", sigStr, x, y, sigClr, 8, true);
 }
@@ -1571,7 +1992,6 @@ void CheckConfluenceAlerts()
 {
    if(ArraySize(g_confluences) == 0) return;
 
-   // Throttle alerts: maximum 1 alert per bar
    if(Time[0] == g_lastAlertTime) return;
 
    double pipSize = GetPipSize();
@@ -1582,7 +2002,8 @@ void CheckConfluenceAlerts()
       double dist = MathAbs(Bid - g_confluences[i].midPrice);
       if(dist <= threshold)
       {
-         string msg = StringFormat("[NF Trades MTF VP] CONFLUENCE TEST on %s: %s + %s at %s!",
+         string msg = StringFormat("[NF Trades MTF VP] %s TEST on %s: %s + %s at %s!",
+                                   g_confluences[i].ratingStr,
                                    Symbol(),
                                    g_confluences[i].name1,
                                    g_confluences[i].name2,

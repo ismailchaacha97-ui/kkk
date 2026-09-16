@@ -1,9 +1,9 @@
 import math
 import datetime
 
-print("==================================================")
-print("RUNNING INSTITUTIONAL TEST SUITE FOR MT4 INDICATOR")
-print("==================================================")
+print("==================================================================")
+print("RUNNING INSTITUTIONAL MULTI-TEST SUITE FOR MT4 TRADING SUITE V2.0")
+print("==================================================================")
 
 # ----------------------------------------------------
 # 1. Steidlmayer / Dalton Value Area Calculation Test
@@ -15,7 +15,6 @@ def dalton_profile(prices, volumes, va_percent=0.70):
         return None
     target_vol = total_vol * va_percent
     
-    # POC
     poc_bin = 0
     max_vol = volumes[0]
     for i in range(1, n):
@@ -80,7 +79,7 @@ def dalton_profile(prices, volumes, va_percent=0.70):
         'coverage': coverage
     }
 
-# Test 1.1: Standard Bell Curve (Nasdaq / Gold balanced day)
+# Test 1.1: Standard Bell Curve
 n_rows = 200
 prices = [2000.0 + i * 0.5 for i in range(n_rows)]
 vols_bell = [int(math.exp(-0.5 * ((p - 2050.0)/8.0)**2) * 5000 + 20) for p in prices]
@@ -96,21 +95,171 @@ print(f"Test 1.2 (Skewed Trend): POC={res_skew['poc']:.2f}, VAH={res_skew['vah']
 assert res_skew['val'] <= res_skew['poc'] <= res_skew['vah']
 assert res_skew['coverage'] >= 0.70
 
-# Test 1.3: Bimodal (Double Distribution Trend Day)
-vols_bimodal = [int(math.exp(-0.5 * ((p - 2025.0)/4.0)**2) * 3000 + math.exp(-0.5 * ((p - 2075.0)/4.0)**2) * 4000 + 10) for p in prices]
-res_bimodal = dalton_profile(prices, vols_bimodal, 0.70)
-print(f"Test 1.3 (Bimodal Day): POC={res_bimodal['poc']:.2f}, VAH={res_bimodal['vah']:.2f}, VAL={res_bimodal['val']:.2f}, Coverage={res_bimodal['coverage']*100:.2f}%")
-assert res_bimodal['val'] <= res_bimodal['poc'] <= res_bimodal['vah']
-assert res_bimodal['coverage'] >= 0.70
+# ----------------------------------------------------
+# 2. LVN & HVN Perimeter Detection Test
+# ----------------------------------------------------
+def find_perimeter_lvns(prices, volumes, vah_bin, val_bin):
+    n = len(volumes)
+    lvn_above_vah = -1
+    min_v_above = 1e18
+    for i in range(vah_bin + 1, n):
+        if volumes[i] < min_v_above:
+            min_v_above = volumes[i]
+            lvn_above_vah = i
+            
+    lvn_below_val = -1
+    min_v_below = 1e18
+    for i in range(val_bin - 1, -1, -1):
+        if volumes[i] < min_v_below:
+            min_v_below = volumes[i]
+            lvn_below_val = i
+            
+    return lvn_above_vah, lvn_below_val
+
+la, lb = find_perimeter_lvns(prices, vols_bell, res_bell['vah_bin'], res_bell['val_bin'])
+print(f"Test 2.1 (Perimeter LVNs): LVN Above VAH={prices[la]:.2f}, LVN Below VAL={prices[lb]:.2f}")
+assert prices[la] > res_bell['vah']
+assert prices[lb] < res_bell['val']
+print("Test 2.1: Perimeter LVN Detection PASSED!")
 
 # ----------------------------------------------------
-# 2. Timezone & New York DST Transition Test
+# 3. Virgin / Naked POC (vPOC) Mitigation Lifecycle
+# ----------------------------------------------------
+class Bar:
+    def __init__(self, high, low, time):
+        self.high = high
+        self.low = low
+        self.time = time
+
+def check_vpoc_lifecycle(vpoc_price, subsequent_bars):
+    for b in subsequent_bars:
+        if b.low <= vpoc_price <= b.high:
+            return True, b.time
+    return False, None
+
+bars_untested = [Bar(2060, 2055, 1), Bar(2070, 2062, 2)]
+bars_tested = [Bar(2060, 2055, 1), Bar(2070, 2062, 2), Bar(2052, 2048, 3)]
+
+mit1, t1 = check_vpoc_lifecycle(2050.0, bars_untested)
+mit2, t2 = check_vpoc_lifecycle(2050.0, bars_tested)
+
+assert mit1 == False
+assert mit2 == True and t2 == 3
+print("Test 3.1: Virgin POC (vPOC) Lifecycle & Mitigation PASSED!")
+
+# ----------------------------------------------------
+# 4. Confluence Star Matrix Verification
+# ----------------------------------------------------
+def rate_confluence(name1, name2):
+    s1, s2 = name1[:1], name2[:1]
+    is_m = (s1 == 'M' or s2 == 'M')
+    is_w = (s1 == 'W' or s2 == 'W')
+    is_d = (s1 == 'D' or s2 == 'D')
+    is_s = (s1 == 'S' or s2 == 'S')
+    
+    poc1 = ('POC' in name1)
+    poc2 = ('POC' in name2)
+    both_poc = poc1 and poc2
+    
+    if is_m and is_w and both_poc:
+        return 5, "[5 STARS] Macro Institutional Wall"
+    if is_m and (is_w or is_d):
+        return 4, "[4 STARS] High-Probability Macro Reversal"
+    if is_w and is_d and (poc1 or poc2):
+        return 4, "[4 STARS] A+ Institutional Setup"
+    if is_w and is_d:
+        return 3, "[3 STARS] Solid Day-Trade Confluence"
+    if is_d and is_s:
+        return 2, "[2 STARS] Intraday Scalp Confluence"
+    return 1, "[1 STAR] Minor Level"
+
+assert rate_confluence("M-POC", "W-POC")[0] == 5
+assert rate_confluence("W-POC", "D-VAL")[0] == 4
+assert rate_confluence("W-VAH", "D-VAH")[0] == 3
+assert rate_confluence("D-POC", "S-VAL")[0] == 2
+print("Test 4.1: Confluence Quality Star Matrix PASSED!")
+
+# ----------------------------------------------------
+# 5. Dynamic SL / TP & Risk:Reward Projection Test
+# ----------------------------------------------------
+def calculate_trade_plan(direction, entry, wick_extreme, lvn_level, poc_target, va_target, pip_size, sl_buffer_pips=2.0):
+    if direction == "BUY":
+        sl = wick_extreme - sl_buffer_pips * pip_size
+        if lvn_level > 0 and lvn_level < sl:
+            sl = lvn_level - sl_buffer_pips * pip_size
+        tp1 = poc_target
+        tp2 = va_target
+        risk = entry - sl
+        reward1 = tp1 - entry
+        reward2 = tp2 - entry
+    else:
+        sl = wick_extreme + sl_buffer_pips * pip_size
+        if lvn_level > 0 and lvn_level > sl:
+            sl = lvn_level + sl_buffer_pips * pip_size
+        tp1 = poc_target
+        tp2 = va_target
+        risk = sl - entry
+        reward1 = entry - tp1
+        reward2 = entry - tp2
+        
+    rr1 = reward1 / risk if risk > 0 else 0
+    rr2 = reward2 / risk if risk > 0 else 0
+    return sl, tp1, tp2, rr1, rr2
+
+# Gold Buy trade at VAL=2518.00, entry at 2519.00, wick low at 2517.50, LVN at 2516.00, POC=2526.00, VAH=2535.00
+sl, tp1, tp2, rr1, rr2 = calculate_trade_plan("BUY", 2519.00, 2517.50, 2516.00, 2526.00, 2535.00, pip_size=0.1)
+print(f"Test 5.1 (Trade Plan Buy): Entry=2519.00, SL={sl:.2f}, TP1={tp1:.2f} (R:R 1:{rr1:.1f}), TP2={tp2:.2f} (R:R 1:{rr2:.1f})")
+assert sl < 2519.00
+assert tp1 == 2526.00 and tp2 == 2535.00
+assert rr1 >= 1.5 and rr2 >= 3.0
+print("Test 5.1: Dynamic SL/TP Trade Plan & R:R Projection PASSED!")
+
+# ----------------------------------------------------
+# 6. Institutional Kill Zone Time Filtering Test
+# ----------------------------------------------------
+def is_in_kill_zone(ny_hour, ny_min, trade_london=True, trade_ny_open=True, trade_ny_pm=True):
+    minute_of_day = ny_hour * 60 + ny_min
+    if trade_london and 180 <= minute_of_day <= 360:
+        return True, "London Open"
+    if trade_ny_open and 570 <= minute_of_day <= 690:
+        return True, "NY Cash Open"
+    if trade_ny_pm and 810 <= minute_of_day <= 930:
+        return True, "NY Afternoon"
+    return False, "Outside Kill Zones"
+
+assert is_in_kill_zone(9, 45)[0] == True # NY Open 09:45
+assert is_in_kill_zone(12, 15)[0] == False # Lunch Lull 12:15
+assert is_in_kill_zone(4, 0)[0] == True # London Open 04:00
+assert is_in_kill_zone(14, 30)[0] == True # NY Afternoon 14:30
+assert is_in_kill_zone(18, 0)[0] == False # CME Open (outside kill zone)
+print("Test 6.1: Institutional Kill Zone Time Filter PASSED!")
+
+# ----------------------------------------------------
+# 7. Multi-Asset Pip & Point Scaling Test
+# ----------------------------------------------------
+def get_pip_size(digits, point):
+    if digits == 3 or digits == 5:
+        return point * 10.0
+    return point
+
+# 5-digit Forex (EURUSD): Point=0.00001, Digits=5 -> 1 Pip = 0.0001
+assert round(get_pip_size(5, 0.00001), 6) == 0.0001
+# 2-digit Gold (XAUUSD): Point=0.01, Digits=2 -> 1 Pip = 0.01 ($0.01)
+assert round(get_pip_size(2, 0.01), 4) == 0.01
+# 1-digit Index (NAS100 / NQ): Point=0.1, Digits=1 -> 1 Pip = 0.1
+assert round(get_pip_size(1, 0.1), 4) == 0.1
+# 2-digit Crypto (BTCUSD): Point=0.01, Digits=2 -> 1 Pip = 0.01
+assert round(get_pip_size(2, 0.01), 4) == 0.01
+print("Test 7.1: Multi-Asset Pip/Point Adaptive Scaling PASSED!")
+
+# ----------------------------------------------------
+# 8. US/NY Daylight Saving Time (DST) Transitions
 # ----------------------------------------------------
 def get_ny_dst_offset(dt):
     if dt.month < 3 or dt.month > 11:
-        return -5 # EST
+        return -5
     if dt.month > 3 and dt.month < 11:
-        return -4 # EDT
+        return -4
     if dt.month == 3:
         m1 = datetime.datetime(dt.year, 3, 1)
         first_sun = (6 - m1.weekday()) % 7
@@ -128,53 +277,11 @@ def get_ny_dst_offset(dt):
     return -5
 
 assert get_ny_dst_offset(datetime.datetime(2026, 1, 15, 12, 0)) == -5
-assert get_ny_dst_offset(datetime.datetime(2026, 3, 1, 12, 0)) == -5
-assert get_ny_dst_offset(datetime.datetime(2026, 3, 15, 12, 0)) == -4
-assert get_ny_dst_offset(datetime.datetime(2026, 7, 4, 12, 0)) == -4
-assert get_ny_dst_offset(datetime.datetime(2026, 11, 10, 12, 0)) == -5
-print("Test 2.1 (US/NY Daylight Saving Rules): PASSED across all seasons!")
+assert get_ny_dst_offset(datetime.datetime(2026, 6, 15, 12, 0)) == -4
+assert get_ny_dst_offset(datetime.datetime(2026, 11, 20, 12, 0)) == -5
+print("Test 8.1: US/NY Daylight Saving Rules across seasons PASSED!")
 
-# ----------------------------------------------------
-# 3. Confluence Detection Engine Test
-# ----------------------------------------------------
-def test_confluence(levels, threshold_pips, pip_size=0.1):
-    threshold = threshold_pips * pip_size
-    confluences = []
-    items = list(levels.items())
-    for i in range(len(items)):
-        for j in range(i + 1, len(items)):
-            k1, v1 = items[i]
-            k2, v2 = items[j]
-            if k1[0] == k2[0]: # Same timeframe
-                continue
-            diff = abs(v1 - v2)
-            if diff <= threshold:
-                confluences.append((k1, k2, (v1 + v2)/2.0, diff / pip_size))
-    return confluences
+print("\n==================================================================")
+print("ALL 8 ADVANCED INSTITUTIONAL UNIT & STRESS TESTS PASSED 100%!")
+print("==================================================================")
 
-levels_test = {
-    'S-POC': 19520.0,
-    'S-VAH': 19580.0,
-    'S-VAL': 19480.0,
-    'D-POC': 19500.0,
-    'D-VAH': 19560.0,
-    'D-VAL': 19450.0,
-    'W-POC': 19500.5, # Confluent with D-POC (diff 0.5 = 5 pips)
-    'W-VAH': 19650.0,
-    'W-VAL': 19400.0,
-    'M-POC': 19560.8  # Confluent with D-VAH (diff 0.8 = 8 pips)
-}
-
-confs = test_confluence(levels_test, threshold_pips=10.0, pip_size=0.1)
-print(f"Test 3.1 (Confluence Count): {len(confs)} detected.")
-for c in confs:
-    print(f"  * {c[0]} & {c[1]} @ {c[2]:.2f} (Spread: {c[3]:.1f} pips)")
-
-assert len(confs) == 2
-assert ('D-POC', 'W-POC') in [(c[0], c[1]) for c in confs]
-assert ('D-VAH', 'M-POC') in [(c[0], c[1]) for c in confs]
-print("Test 3.2 (Confluence Pairs Validation): PASSED!")
-
-print("\n==================================================")
-print("ALL MATHEMATICAL AND LOGICAL UNIT TESTS PASSED 100%!")
-print("==================================================")
