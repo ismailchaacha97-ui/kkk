@@ -412,6 +412,7 @@ int GetNYGMTOffset(datetime time)
    if(dt.mon == 3)
    {
       MqlDateTime m1;
+      ZeroMemory(m1);
       m1.year = dt.year; m1.mon = 3; m1.day = 1; m1.hour = 0; m1.min = 0; m1.sec = 0;
       datetime tm1 = StructToTime(m1);
       TimeToStruct(tm1, m1);
@@ -425,6 +426,7 @@ int GetNYGMTOffset(datetime time)
    if(dt.mon == 11)
    {
       MqlDateTime n1;
+      ZeroMemory(n1);
       n1.year = dt.year; n1.mon = 11; n1.day = 1; n1.hour = 0; n1.min = 0; n1.sec = 0;
       datetime tn1 = StructToTime(n1);
       TimeToStruct(tn1, n1);
@@ -585,6 +587,16 @@ ENUM_TIMEFRAMES GetOptimalTimeframe(datetime startTime, datetime endTime, int ta
 }
 
 //+------------------------------------------------------------------+
+//| Helper: Get Bar Volume across timeframes in MT4                  |
+//+------------------------------------------------------------------+
+long GetBarVolume(string sym, ENUM_TIMEFRAMES tf, int shift)
+{
+   long bVol = iVolume(sym, tf, shift);
+   if(bVol <= 0) bVol = 1;
+   return(bVol);
+}
+
+//+------------------------------------------------------------------+
 //| Core Volume Profile Engine (Dalton 70% Value Area Algorithm)     |
 //+------------------------------------------------------------------+
 bool CalculateProfile(datetime startTime, datetime endTime, int profileType, SProfileResult &result)
@@ -648,7 +660,7 @@ bool CalculateProfile(datetime startTime, datetime endTime, int profileType, SPr
    {
       double bHigh = iHigh(Symbol(), calcTF, i);
       double bLow  = iLow(Symbol(), calcTF, i);
-      long   bVol  = (InpVolumeType == VOL_TYPE_REAL) ? iRealVolume(Symbol(), calcTF, i) : iVolume(Symbol(), calcTF, i);
+      long   bVol  = GetBarVolume(Symbol(), calcTF, i);
       if(bVol <= 0) bVol = iVolume(Symbol(), calcTF, i);
       if(bVol <= 0) bVol = 1;
 
@@ -838,8 +850,8 @@ void DetectConfluences()
    if(!InpEnableConfluence) return;
 
    // Collect all active levels into a test array
-   string names[12];
-   double prices[12];
+   string names[12]  = {"","","","","","","","","","","",""};
+   double prices[12] = {0,0,0,0,0,0,0,0,0,0,0,0};
    int count = 0;
 
    if(g_profMonthly.isValid && InpShowMonthly)
@@ -1052,7 +1064,7 @@ void DrawSessionHistogram()
    {
       double bHigh = iHigh(Symbol(), calcTF, i);
       double bLow  = iLow(Symbol(), calcTF, i);
-      long   bVol  = (InpVolumeType == VOL_TYPE_REAL) ? iRealVolume(Symbol(), calcTF, i) : iVolume(Symbol(), calcTF, i);
+      long   bVol  = GetBarVolume(Symbol(), calcTF, i);
       if(bVol <= 0) bVol = iVolume(Symbol(), calcTF, i);
       if(bVol <= 0) bVol = 1;
 
