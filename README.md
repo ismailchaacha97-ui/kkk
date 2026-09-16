@@ -1,84 +1,124 @@
-# Holy Grail VWAP SSL Flip v6 - ENTER vs SKIP
+# Holy Grail VWAP SSL Flip v7 - Big Move Edition
 
-> A well-crafted, well-tested MT4 indicator that tells you **exactly** if you should enter when the VWAP flips or not.
+> **Weekly/Monthly VWAP on small TF to catch big moves 1:3, 1:5, 1:10+** - tells you exactly ENTER vs SKIP
 
-Original idea: Anchored High/Low VWAP SSL flip with bands, arrows, HUD.  
-Problem: Every flip looks like a signal, but many are whipsaw.  
-Solution v6: **Entry Quality Engine** scores each flip 0-100 and gives clear **ENTER / CAUTION / SKIP** decision.
+v6 gave you scored ENTER/SKIP. **v7 adds Big Move Mode** specifically for your use case: weekly/monthly VWAP on M15/H1 to hold for 1:3, 1:5+.
 
 ---
 
-## What’s New in v6
+## v7 New - Big Move Mode
 
-- **Entry Quality Engine (core)**:
-  - Breakout distance / ATR (25 pts)
-  - Volume confirmation (20 pts)
-  - ADX trend strength (15 pts)
-  - EMA bias alignment (15 pts)
-  - Chop filter - channel width (10 pts)
-  - Bars since last flip - anti-whipsaw (10 pts)
-  - Band position bonus (5 pts)
-  - Spread filter (5 pts)
-  - Total 0-100, thresholds: ENTER ≥70, CAUTION ≥50, else SKIP
+When you trade **Weekly/Monthly VWAP on M15/H1**, you need to know:
+- Is there still time left in week/month for a big move?
+- Is there enough room to 2SD/3SD bands for 1:3, 1:5?
+- Is price already exhausted beyond 2.5SD?
+- Where to scale out for 1:3, 1:5, 1:8?
 
-- **Visuals**:
-  - Small arrows = all flips (context)
-  - Big lime/red arrows = ENTER-grade only
-  - HUD shows decision panel with score, reason, checklist
+v7 answers:
 
-- **Alerts**: Option `AlertOnlyHighQuality` = only alert ENTER signals
+### Anchor Progress
+- Tracks how far through week/month: Monday 0%, Friday 80%
+- Early bonus: entering before 35% of week = +5 pts
+- Late penalty: entering after 80% = 0 pts + forced SKIP if RR low
+- HUD: `Prog 22%` and `Anchor progress 22%`
 
-- **Well Tested**:
-  - Python engine mirrors MQL4 logic 1:1
-  - 5 test suites: anchor, VWAP, SSL state, filters, integration
-  - Backtest demo shows filtering cuts ~50% low quality flips
+### RR to Bands
+```
+RR_2SD = distance(entry, Typical+2SD) / SL
+RR_3SD = distance(entry, Typical+3SD) / SL
+```
+- HUD: `RR 2.4->2SD 3.9->3SD` = 2.4R to 2SD, 3.9R to 3SD = big move potential
+- Score 15 pts if RR>=4.5, 10 pts if RR>=3.0
+
+### Exhaustion Filter
+- If price already beyond 2.5SD, skip (move done)
+- `CheckBandExhaustion=true`
+
+### Multi-TP
+- Old: one TP
+- New: **TP1 1.5R, TP2 3R, TP3 5R, TP4 8R** with lines drawn on chart
+- Scale: 30% at 1.5R, 30% at 3R, 20% at 5R, 20% runner to 8R+
+
+### SL Modes for Big Moves
+- `SL_ATR` (1.5 ATR) - tight
+- `SL_OPPOSITE_VWAP` - SL beyond opposite VWAP = wider, more room for 1:5+
+- `SL_BAND1` - SL beyond 1SD band = even wider for monthly
 
 ---
 
 ## Files
 
 ```
-indicators/HolyGrail_VWAP_SSL_Flip_v6.mq4   # MT4 indicator - install this
-src/vwap_ssl_engine.py                     # Python mirror for testing/backtest
-src/backtest_demo.py                       # Demo: shows ENTER vs SKIP distribution
-tests/test_anchor.py                       # Anchor key logic tests
-tests/test_vwap.py                         # VWAP calculation, no future leak
-tests/test_ssl.py                          # Hysteretic SSL state tests
-tests/test_filters.py                      # Entry quality scoring tests
-tests/test_integration.py                  # Full engine integration tests
-docs/ENTRY_LOGIC.md                        # Deep dive into scoring
-docs/USER_GUIDE.md                         # How to install and use
+indicators/HolyGrail_VWAP_SSL_Flip_v7.mq4   # USE THIS for big moves - Weekly/Monthly on small TF
+indicators/HolyGrail_VWAP_SSL_Flip_v6.mq4   # v6 without big move (lighter)
+src/vwap_ssl_engine_v7.py                  # Python v7 mirror
+src/vwap_ssl_engine.py                     # v6 mirror
+src/backtest_big_move.py                   # Demo weekly/monthly on M15 for 1:3+
+src/backtest_demo.py                       # v6 demo
+tests/test_big_move.py                     # Tests anchor progress, early vs late, monthly on M15
+tests/test_anchor.py, test_vwap.py, etc.  # v6 tests
+docs/BIG_MOVE_GUIDE.md                     # Deep guide for 1:3 1:5+
+docs/ENTRY_LOGIC.md                        # v6 scoring
+docs/USER_GUIDE.md
 ```
 
 ---
 
-## Quick Install
+## Quick Start for Big Moves
 
-1. Copy `indicators/HolyGrail_VWAP_SSL_Flip_v6.mq4` to `MQL4/Indicators/`
-2. Restart MT4, drag onto chart
-3. Keep defaults: `UseEntryFilter=true`, `AlertOnlyHighQuality=true`
-4. Trade only **big** arrows (ENTER) - HUD will say `ENTER BUY (87)` etc.
+### Weekly VWAP on M15/H1 for 1:3-1:5
+
+```
+AnchorPeriod = Weekly
+Timeframe = M15 or H1
+UseBigMoveMode = true
+BigMoveMinRR = 3.0
+AvoidLateAnchor = true, MaxAnchorProgress = 0.80
+EarlyAnchorBonusThreshold = 0.35 (bonus Mon-Tue)
+SLMode = OPPOSITE_VWAP, StopLossATR = 1.5
+RewardRiskRatio = 3.0
+TP1 1.5R, TP2 3R, TP3 5R, TP4 8R
+MinScoreToEnter = 68
+```
+
+**Trade**: ENTER early week (Prog <35%) with RR>=3.0 to 2SD band. Hold to TP2 3R, trail to TP3 5R.
+
+### Monthly VWAP on H1/H4 for 1:5-1:10+
+
+```
+AnchorPeriod = Monthly
+Timeframe = H1 or H4
+MinBarsBetweenFlips = 15
+SLMode = BAND1, StopLossATR = 2.0
+RewardRiskRatio = 5.0
+TP1 2R, TP2 5R, TP3 8R, TP4 12R
+BigMoveMinRR = 5.0
+MaxAnchorProgress = 0.75
+EarlyAnchorBonusThreshold = 0.30 (first 9 days)
+MinDistanceToBandATR = 3.0
+```
+
+**Trade**: Monthly flip in first 10 days = institutional shift that can run entire month.
+
+See `docs/BIG_MOVE_GUIDE.md` for full.
 
 ---
 
-## How It Decides ENTER vs SKIP
+## How v7 Decides
 
 Example HUD:
+
 ```
-ENTER BUY (87) | B:25 V:20 ADX:15 EMA:15 CH:10 GAP:10 BD:2 SP:5 | Volx1.5 Brk0.3ATR ADX25 Ch1.2ATR 12bars
+ENTER BUY (77) RR2.4->2SD 3.9->3SD | B:20 V:8 ADX:10 EMA:5 BM:7 AP:5 | Volx1.8 Brk0.3ATR ADX22 Prog22% 12bars
 ```
 
-- `B:25` = breakout strong (close 0.3 ATR beyond High VWAP)
-- `V:20` = volume 1.5x average
-- `ADX:15` = trending (ADX 25)
-- `EMA:15` = aligned with EMA50>EMA200
-- `CH:10` = wide channel (1.2 ATR)
-- `GAP:10` = 12 bars since last flip (no whipsaw)
-- Score 87 ≥70 → **ENTER**
+- `RR2.4->2SD 3.9->3SD` = 2.4R to 2SD, 3.9R to 3SD = big move potential
+- `Prog22%` = 22% through week = early = bonus
+- `BM:7` = big move score 7/15
+- `AP:5` = anchor progress score 5/5
+- Total 77 >=68 = **ENTER**
 
-If score 45 → **SKIP**, even though flip happened.
-
-See `docs/ENTRY_LOGIC.md` for full breakdown.
+If same flip on Friday Prog88% with RR0.8 = SKIP.
 
 ---
 
@@ -90,49 +130,41 @@ python3 tests/test_vwap.py
 python3 tests/test_ssl.py
 python3 tests/test_filters.py
 python3 tests/test_integration.py
+python3 tests/test_big_move.py
 python3 src/backtest_demo.py
+python3 src/backtest_big_move.py
 ```
 
-All tests pass. Python engine ensures MT4 logic is correct (no future leak, correct anchor resets, hysteretic SSL, scoring bounds).
+All 6 suites pass.
+
+Backtest Big Move Demo:
+
+```
+WEEKLY VWAP on M15:
+Flips: 2
+01-02 02:15 BUY ENTER 77 RR2.4 Prog22% - early week, 2.4R to 2SD
+ENTER: 1/2 - has >=3R potential, early, not exhausted
+```
 
 ---
 
-## Parameters (Key Ones)
+## Why This Works for 1:3 1:5+
 
-```
-AnchorPeriod = Daily (or London/New York session for intraday)
-UseEntryFilter = true
-MinScoreToEnter = 70
-MinBreakoutATR = 0.12
-MinVolumeFactor = 1.15
-UseADXFilter = true, MinADX = 18
-UseEMAFilter = true, EMAFast=50, EMASlow=200
-MinBarsBetweenFlips = 5
-AvoidChopZone = true, ChopThresholdATR=0.45
-AlertOnlyHighQuality = true
-```
+- **Monthly VWAP** on M15: VWAP accumulates entire month. Flip early = shift that can run weeks.
+- **Weekly VWAP** on M15: Flip Tue = run to Fri = 3-5R.
+- **Bands as targets**: +2SD = 3R target, +3SD = 5R+ target.
+- **v7 filters**: early, high RR, not exhausted, volume = only best big move setups.
 
-Tune conservative/aggressive via `docs/USER_GUIDE.md`.
+Trade ENTER, scale at 1.5R/3R/5R/8R.
 
 ---
 
 ## Risk
 
-Risk planner is display only - shows SL = ATR*1.5, TP = SL*2.0, lots from risk %. Never auto-trades.
-
----
-
-## Philosophy
-
-> Setup vs Decision: VWAP flip is the setup. Quality score is the decision.
-
-Original indicator tells you *a flip happened*. v6 tells you *if you should trade it*.
-
-Trade ENTER, skip SKIP.
+Risk planner display only. Never auto-trades. Shows SL/TP1-4 and lots from risk %.
 
 ---
 
 ## License
 
-Use freely, no warranty. Test on demo first.
-
+Use freely, test on demo first.

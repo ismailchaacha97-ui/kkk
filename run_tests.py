@@ -6,7 +6,8 @@ tests = [
     "tests/test_vwap.py",
     "tests/test_ssl.py",
     "tests/test_filters.py",
-    "tests/test_integration.py"
+    "tests/test_integration.py",
+    "tests/test_big_move.py"
 ]
 
 all_ok = True
