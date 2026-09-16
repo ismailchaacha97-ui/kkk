@@ -88,18 +88,27 @@ def check_mql4_code(filepath):
     required_elements = [
         "#property strict",
         "#property indicator_chart_window",
-        "#property indicator_buffers 12",
+        "#property indicator_buffers 14",
+        "#property indicator_plots   14",
         "int OnInit()",
         "void OnDeinit(",
         "int OnCalculate(",
         "SetIndexBuffer",
+        "SetIndexArrow",
         "IndicatorShortName",
-        "ObjectsDeleteAll"
+        "ObjectsDeleteAll",
+        "EvaluateEntrySignals"
     ]
 
     for req in required_elements:
         if req not in code:
             errors.append(f"Missing required MQL4 construct: {req}")
+
+    # Check for uninitialized prices or names
+    if "double prices[12];" in code:
+        errors.append("Uninitialized double prices[12]; detected!")
+    if "iRealVolume" in code:
+        errors.append("iRealVolume is not supported in MQL4!")
 
     if errors:
         print("SEMANTIC CHECKS FAILED:")
@@ -107,7 +116,7 @@ def check_mql4_code(filepath):
             print("  -", err)
         return False
     else:
-        print("MQL4 CONSTRUCTS VALIDATION PASSED!")
+        print("MQL4 CONSTRUCTS & SAFETY CHECKS VALIDATION PASSED!")
     return True
 
 if __name__ == '__main__':

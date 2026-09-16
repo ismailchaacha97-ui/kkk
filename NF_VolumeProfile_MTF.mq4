@@ -3,14 +3,15 @@
 //|                                NF Trades Strategy Implementation |
 //|                   Multi-Timeframe Auction Market Theory Profile  |
 //|                       Session | Daily | Weekly | Monthly         |
+//|                          + High-Probability Entry Signals (Signs)|
 //+------------------------------------------------------------------+
 #property copyright   "NF Trades Strategy - MTF Volume Profile"
 #property link        "https://www.youtube.com/@NFTradesreal"
-#property version     "1.00"
+#property version     "1.10"
 #property strict
 #property indicator_chart_window
-#property indicator_buffers 12
-#property indicator_plots   12
+#property indicator_buffers 14
+#property indicator_plots   14
 
 //--- Plot definitions for EA integration (iCustom buffers)
 #property indicator_label1  "Daily POC"
@@ -85,6 +86,16 @@
 #property indicator_style12 STYLE_DASH
 #property indicator_width12 1
 
+#property indicator_label13 "AMT Buy Signal"
+#property indicator_type13  DRAW_ARROW
+#property indicator_color13 clrLime
+#property indicator_width13 2
+
+#property indicator_label14 "AMT Sell Signal"
+#property indicator_type14  DRAW_ARROW
+#property indicator_color14 clrRed
+#property indicator_width14 2
+
 //+------------------------------------------------------------------+
 //| Enumerations                                                     |
 //+------------------------------------------------------------------+
@@ -92,12 +103,6 @@ enum ENUM_STEP_MODE
 {
    STEP_DYNAMIC_ROWS, // Dynamic Rows (e.g. 200 Rows as in Video)
    STEP_FIXED_POINTS  // Fixed Step in Points
-};
-
-enum ENUM_VOLUME_TYPE
-{
-   VOL_TYPE_TICK,     // Tick Volume (Forex, CFDs, Gold)
-   VOL_TYPE_REAL      // Real Volume (Futures contracts, if supported)
 };
 
 enum ENUM_SESSION_MODE
@@ -121,7 +126,6 @@ input ENUM_STEP_MODE       InpStepMode             = STEP_DYNAMIC_ROWS;         
 input int                  InpNumberOfRows         = 200;                        // Number of Rows (TradingView Default: 200)
 input int                  InpFixedPoints          = 20;                         // Fixed Step in Points (if Fixed Points selected)
 input double               InpValueAreaPercent     = 70.0;                       // Value Area Percentage (Dalton AMT: 70%)
-input ENUM_VOLUME_TYPE     InpVolumeType           = VOL_TYPE_TICK;              // Volume Data Source
 
 //--- 2. SESSION & TIMEZONE ALIGNMENT
 input string               InpSection2             = "=== TIMEZONE & SESSION ==="; // ---
@@ -180,6 +184,23 @@ input ENUM_BASE_CORNER     InpDashCorner           = CORNER_RIGHT_UPPER;        
 input int                  InpDashX                = 20;                         // Dashboard X Position (Pixels)
 input int                  InpDashY                = 30;                         // Dashboard Y Position (Pixels)
 
+//--- 8. ENTRY SIGNALS & ARROWS
+input string               InpSection8             = "=== ENTRY SIGNALS (SIGNS) ==="; // ---
+input bool                 InpShowEntrySignals     = true;                       // Enable Buy/Sell Entry Signs (Arrows)
+input bool                 InpSignalValVahRotate   = true;                       // Setup 1: Value Area Extreme Rotation
+input bool                 InpSignalImbalanceRetest= true;                       // Setup 2: Imbalance Retest (Breakout Flip)
+input bool                 InpSignalConfluence     = true;                       // Setup 3: MTF Confluence Bounce
+input double               InpSignalTolerancePips  = 3.0;                        // Price Proximity Tolerance (Pips/Ticks)
+input int                  InpSignalScanBars       = 300;                        // Historical Bars to Scan on Startup
+input color                InpColorBuySignal       = clrLime;                    // Buy Arrow Color
+input color                InpColorSellSignal      = clrRed;                     // Sell Arrow Color
+input int                  InpArrowCodeBuy         = 233;                        // Wingdings Arrow Code (233 = Up Arrow)
+input int                  InpArrowCodeSell        = 234;                        // Wingdings Arrow Code (234 = Down Arrow)
+input int                  InpArrowSize            = 2;                          // Arrow Size
+input double               InpArrowOffsetPips      = 5.0;                        // Distance from Candle Wick (Pips)
+input bool                 InpSignalAlert          = true;                       // Sound & Pop-up Alert on Entry Sign
+input bool                 InpSignalPushNotify     = false;                      // Send Mobile Push Notification
+
 //+------------------------------------------------------------------+
 //| Global Constants & Variables                                     |
 //+------------------------------------------------------------------+
@@ -199,6 +220,8 @@ double buf_MonthlyVAL[];
 double buf_SessionPOC[];
 double buf_SessionVAH[];
 double buf_SessionVAL[];
+double buf_SignalBuy[];
+double buf_SignalSell[];
 
 //--- Profile Result Structure
 struct SProfileResult
@@ -240,12 +263,16 @@ SProfileResult g_profMonthly;
 SConfluence    g_confluences[];
 
 //--- State tracking
-datetime g_lastBarTime     = 0;
-datetime g_lastDayTime     = 0;
-datetime g_lastWeekTime    = 0;
-datetime g_lastMonthTime   = 0;
-datetime g_lastAlertTime   = 0;
-int      g_lastHistBarCount= 0;
+datetime g_lastBarTime         = 0;
+datetime g_lastDayTime         = 0;
+datetime g_lastWeekTime        = 0;
+datetime g_lastMonthTime       = 0;
+datetime g_lastAlertTime       = 0;
+datetime g_lastSignalAlertTime = 0;
+int      g_lastHistBarCount    = 0;
+string   g_lastSignalType      = "NONE";
+double   g_lastSignalPrice     = 0.0;
+string   g_lastSignalDesc      = "Waiting for Setup...";
 
 //+------------------------------------------------------------------+
 //| Helper: Get Standard Pip Size                                    |
@@ -254,6 +281,16 @@ double GetPipSize()
 {
    if(Digits == 3 || Digits == 5) return(Point * 10.0);
    return(Point);
+}
+
+//+------------------------------------------------------------------+
+//| Helper: Get Bar Volume across timeframes in MT4                  |
+//+------------------------------------------------------------------+
+long GetBarVolume(string sym, ENUM_TIMEFRAMES tf, int shift)
+{
+   long bVol = iVolume(sym, tf, shift);
+   if(bVol <= 0) bVol = 1;
+   return(bVol);
 }
 
 //+------------------------------------------------------------------+
@@ -274,13 +311,26 @@ int OnInit()
    SetIndexBuffer(9,  buf_SessionPOC);
    SetIndexBuffer(10, buf_SessionVAH);
    SetIndexBuffer(11, buf_SessionVAL);
+   SetIndexBuffer(12, buf_SignalBuy);
+   SetIndexBuffer(13, buf_SignalSell);
 
-   //--- Configure Buffer Plots (Hidden from chart to avoid clutter, accessible to EAs)
+   //--- Configure Profile Level Buffers (Hidden from chart to avoid clutter, accessible to EAs)
    for(int i = 0; i < 12; i++)
    {
       SetIndexStyle(i, DRAW_NONE);
       SetIndexEmptyValue(i, 0.0);
    }
+
+   //--- Configure Entry Sign Buffers (Visible Arrows on Chart)
+   SetIndexStyle(12, DRAW_ARROW, EMPTY, InpArrowSize, InpColorBuySignal);
+   SetIndexArrow(12, InpArrowCodeBuy);
+   SetIndexEmptyValue(12, 0.0);
+   SetIndexLabel(12, "AMT Buy Signal");
+
+   SetIndexStyle(13, DRAW_ARROW, EMPTY, InpArrowSize, InpColorSellSignal);
+   SetIndexArrow(13, InpArrowCodeSell);
+   SetIndexEmptyValue(13, 0.0);
+   SetIndexLabel(13, "AMT Sell Signal");
 
    //--- Set Indicator Short Name
    string shortName = "NF_VolumeProfile_MTF (" + Symbol() + ")";
@@ -290,12 +340,16 @@ int OnInit()
    CleanupObjects();
 
    //--- Reset tracking timestamps
-   g_lastBarTime      = 0;
-   g_lastDayTime      = 0;
-   g_lastWeekTime     = 0;
-   g_lastMonthTime    = 0;
-   g_lastAlertTime    = 0;
-   g_lastHistBarCount = 0;
+   g_lastBarTime         = 0;
+   g_lastDayTime         = 0;
+   g_lastWeekTime        = 0;
+   g_lastMonthTime       = 0;
+   g_lastAlertTime       = 0;
+   g_lastSignalAlertTime = 0;
+   g_lastHistBarCount    = 0;
+   g_lastSignalType      = "NONE";
+   g_lastSignalPrice     = 0.0;
+   g_lastSignalDesc      = "Waiting for Setup...";
 
    //--- Force initial calculation
    CalculateAllProfiles(true);
@@ -319,6 +373,22 @@ void CleanupObjects()
 {
    ObjectsDeleteAll(0, PREFIX);
 }
+
+//+------------------------------------------------------------------+
+//| Forward Declarations                                             |
+//+------------------------------------------------------------------+
+void CalculateMonthlyProfile();
+void CalculateWeeklyProfile();
+void CalculateDailyProfile();
+void CalculateSessionProfile();
+void CalculateAllProfiles(bool force);
+void DetectConfluences();
+void DrawAllLevels();
+void DrawSessionHistogram();
+void PopulateBuffers(int rates_total);
+void EvaluateEntrySignals(int rates_total, int prev_calculated);
+void UpdateDashboard();
+void CheckConfluenceAlerts();
 
 //+------------------------------------------------------------------+
 //| Custom Indicator Iteration                                       |
@@ -376,6 +446,12 @@ int OnCalculate(const int rates_total,
 
    //--- Update Buffer Values for EA access across recent bars
    PopulateBuffers(rates_total);
+
+   //--- Evaluate Entry Signs (Rejections, Retests, Confluences)
+   if(InpShowEntrySignals)
+   {
+      EvaluateEntrySignals(rates_total, prev_calculated);
+   }
 
    //--- Update Real-time AMT Dashboard
    if(InpShowDashboard)
@@ -565,35 +641,22 @@ ENUM_TIMEFRAMES GetOptimalTimeframe(datetime startTime, datetime endTime, int ta
 
    if(targetProfileType == 0 || targetProfileType == 1)
    {
-      // Session or Daily: M1 if available, otherwise M5 or chart TF
       if(iBars(Symbol(), PERIOD_M1) > 1000) return(PERIOD_M1);
       if(iBars(Symbol(), PERIOD_M5) > 500)  return(PERIOD_M5);
       return((ENUM_TIMEFRAMES)MathMax(chartTF, PERIOD_M1));
    }
    else if(targetProfileType == 2)
    {
-      // Weekly: M5 or M15
       if(iBars(Symbol(), PERIOD_M5) > 2000) return(PERIOD_M5);
       if(iBars(Symbol(), PERIOD_M15) > 1000) return(PERIOD_M15);
       return((ENUM_TIMEFRAMES)MathMax(chartTF, PERIOD_M15));
    }
    else
    {
-      // Monthly: M15 or H1 (prevents freezing MT4 on 35,000 M1 bars)
       if(iBars(Symbol(), PERIOD_M15) > 3000) return(PERIOD_M15);
       if(iBars(Symbol(), PERIOD_H1) > 1000)  return(PERIOD_H1);
       return((ENUM_TIMEFRAMES)MathMax(chartTF, PERIOD_H1));
    }
-}
-
-//+------------------------------------------------------------------+
-//| Helper: Get Bar Volume across timeframes in MT4                  |
-//+------------------------------------------------------------------+
-long GetBarVolume(string sym, ENUM_TIMEFRAMES tf, int shift)
-{
-   long bVol = iVolume(sym, tf, shift);
-   if(bVol <= 0) bVol = 1;
-   return(bVol);
 }
 
 //+------------------------------------------------------------------+
@@ -661,8 +724,6 @@ bool CalculateProfile(datetime startTime, datetime endTime, int profileType, SPr
       double bHigh = iHigh(Symbol(), calcTF, i);
       double bLow  = iLow(Symbol(), calcTF, i);
       long   bVol  = GetBarVolume(Symbol(), calcTF, i);
-      if(bVol <= 0) bVol = iVolume(Symbol(), calcTF, i);
-      if(bVol <= 0) bVol = 1;
 
       int binLow  = (int)MathFloor((bLow - lowestPrice) / step);
       int binHigh = (int)MathFloor((bHigh - lowestPrice) / step);
@@ -1065,8 +1126,6 @@ void DrawSessionHistogram()
       double bHigh = iHigh(Symbol(), calcTF, i);
       double bLow  = iLow(Symbol(), calcTF, i);
       long   bVol  = GetBarVolume(Symbol(), calcTF, i);
-      if(bVol <= 0) bVol = iVolume(Symbol(), calcTF, i);
-      if(bVol <= 0) bVol = 1;
 
       int binLow  = (int)MathFloor((bLow - lowestPrice) / step);
       int binHigh = (int)MathFloor((bHigh - lowestPrice) / step);
@@ -1161,6 +1220,198 @@ void PopulateBuffers(int rates_total)
 }
 
 //+------------------------------------------------------------------+
+//| Evaluate High-Probability AMT Entry Signals (Signs)              |
+//+------------------------------------------------------------------+
+void EvaluateEntrySignals(int rates_total, int prev_calculated)
+{
+   if(!InpShowEntrySignals) return;
+
+   double pipSize   = GetPipSize();
+   double tolerance = InpSignalTolerancePips * pipSize;
+   double offset    = InpArrowOffsetPips * pipSize;
+
+   int limit = rates_total - prev_calculated - 1;
+   if(prev_calculated == 0)
+   {
+      limit = MathMin(rates_total - 2, InpSignalScanBars);
+      ArrayInitialize(buf_SignalBuy, 0.0);
+      ArrayInitialize(buf_SignalSell, 0.0);
+   }
+
+   // Always ensure bar 0 has 0.0 until candle completes
+   buf_SignalBuy[0]  = 0.0;
+   buf_SignalSell[0] = 0.0;
+
+   // Scan completed bars (non-repainting)
+   for(int i = limit; i >= 1; i--)
+   {
+      buf_SignalBuy[i]  = 0.0;
+      buf_SignalSell[i] = 0.0;
+
+      double o = Open[i];
+      double h = High[i];
+      double l = Low[i];
+      double c = Close[i];
+      double totalRange = h - l;
+      if(totalRange <= 0) continue;
+
+      bool   isBullishCandle = (c > o);
+      bool   isBearishCandle = (c < o);
+      double lowerWick       = MathMin(o, c) - l;
+      double upperWick       = h - MathMax(o, c);
+
+      string signalDesc = "";
+      bool   buyFound   = false;
+      bool   sellFound  = false;
+
+      // ------------------------------------------------------------------
+      // SETUP 3: Multi-Timeframe Confluence Bounce (Highest Probability)
+      // ------------------------------------------------------------------
+      if(InpSignalConfluence && ArraySize(g_confluences) > 0)
+      {
+         for(int k = 0; k < ArraySize(g_confluences); k++)
+         {
+            double confPrice = g_confluences[k].midPrice;
+
+            // Bullish bounce from confluence support
+            if(l <= confPrice + tolerance && h >= confPrice - tolerance && isBullishCandle && c >= confPrice)
+            {
+               if(lowerWick >= 0.20 * totalRange || c > confPrice)
+               {
+                  buyFound = true;
+                  signalDesc = StringFormat("BUY: Confluence Bounce [%s + %s] @ %s",
+                                            g_confluences[k].name1,
+                                            g_confluences[k].name2,
+                                            DoubleToString(confPrice, Digits));
+                  break;
+               }
+            }
+
+            // Bearish rejection from confluence resistance
+            if(h >= confPrice - tolerance && l <= confPrice + tolerance && isBearishCandle && c <= confPrice)
+            {
+               if(upperWick >= 0.20 * totalRange || c < confPrice)
+               {
+                  sellFound = true;
+                  signalDesc = StringFormat("SELL: Confluence Rejection [%s + %s] @ %s",
+                                            g_confluences[k].name1,
+                                            g_confluences[k].name2,
+                                            DoubleToString(confPrice, Digits));
+                  break;
+               }
+            }
+         }
+      }
+
+      // ------------------------------------------------------------------
+      // SETUP 1: Value Area Extreme Rotation (Mean Reversion)
+      // ------------------------------------------------------------------
+      if(!buyFound && !sellFound && InpSignalValVahRotate && g_profDaily.isValid)
+      {
+         double dVal = g_profDaily.val;
+         double dVah = g_profDaily.vah;
+
+         // Buy: D-VAL Rejection -> Target D-POC
+         if(l <= dVal + tolerance && h >= dVal - tolerance && isBullishCandle && c >= dVal)
+         {
+            if(lowerWick >= 0.20 * totalRange || c > dVal)
+            {
+               buyFound = true;
+               signalDesc = StringFormat("BUY: D-VAL Rejection @ %s (Target D-POC %s)",
+                                         DoubleToString(dVal, Digits),
+                                         DoubleToString(g_profDaily.poc, Digits));
+            }
+         }
+
+         // Sell: D-VAH Rejection -> Target D-POC
+         if(h >= dVah - tolerance && l <= dVah + tolerance && isBearishCandle && c <= dVah)
+         {
+            if(upperWick >= 0.20 * totalRange || c < dVah)
+            {
+               sellFound = true;
+               signalDesc = StringFormat("SELL: D-VAH Rejection @ %s (Target D-POC %s)",
+                                         DoubleToString(dVah, Digits),
+                                         DoubleToString(g_profDaily.poc, Digits));
+            }
+         }
+      }
+
+      // ------------------------------------------------------------------
+      // SETUP 2: Imbalance Retest (Breakout & Flip)
+      // ------------------------------------------------------------------
+      if(!buyFound && !sellFound && InpSignalImbalanceRetest && g_profDaily.isValid)
+      {
+         double dVal = g_profDaily.val;
+         double dVah = g_profDaily.vah;
+
+         // Buy: Price broke above D-VAH, pulled back to test D-VAH from above, and bounced
+         if(i + 1 < rates_total && Open[i + 1] >= dVah - tolerance)
+         {
+            if(l <= dVah + tolerance && l >= dVah - 2 * tolerance && isBullishCandle && c > dVah)
+            {
+               buyFound = true;
+               signalDesc = StringFormat("BUY: Imbalance Retest [D-VAH Support] @ %s", DoubleToString(dVah, Digits));
+            }
+         }
+
+         // Sell: Price broke below D-VAL, pulled back to test D-VAL from below, and rejected
+         if(i + 1 < rates_total && Open[i + 1] <= dVal + tolerance)
+         {
+            if(h >= dVal - tolerance && h <= dVal + 2 * tolerance && isBearishCandle && c < dVal)
+            {
+               sellFound = true;
+               signalDesc = StringFormat("SELL: Imbalance Retest [D-VAL Resistance] @ %s", DoubleToString(dVal, Digits));
+            }
+         }
+      }
+
+      // ------------------------------------------------------------------
+      // Record Arrows & Trigger Alerts
+      // ------------------------------------------------------------------
+      if(buyFound)
+      {
+         buf_SignalBuy[i] = l - offset;
+
+         if(i == 1)
+         {
+            g_lastSignalType  = "BUY";
+            g_lastSignalPrice = c;
+            g_lastSignalDesc  = signalDesc;
+
+            if(InpSignalAlert && Time[1] != g_lastSignalAlertTime)
+            {
+               string alertMsg = StringFormat("[NF Trades MTF VP] %s: %s", Symbol(), signalDesc);
+               Alert(alertMsg);
+               PlaySound(InpSoundFile);
+               if(InpSignalPushNotify) SendNotification(alertMsg);
+               g_lastSignalAlertTime = Time[1];
+            }
+         }
+      }
+      else if(sellFound)
+      {
+         buf_SignalSell[i] = h + offset;
+
+         if(i == 1)
+         {
+            g_lastSignalType  = "SELL";
+            g_lastSignalPrice = c;
+            g_lastSignalDesc  = signalDesc;
+
+            if(InpSignalAlert && Time[1] != g_lastSignalAlertTime)
+            {
+               string alertMsg = StringFormat("[NF Trades MTF VP] %s: %s", Symbol(), signalDesc);
+               Alert(alertMsg);
+               PlaySound(InpSoundFile);
+               if(InpSignalPushNotify) SendNotification(alertMsg);
+               g_lastSignalAlertTime = Time[1];
+            }
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
 //| Create or Update Chart Label (HUD)                               |
 //+------------------------------------------------------------------+
 void UpdateDashLabel(string id, string text, int x, int y, color clr, int fontSize = 8, bool bold = false)
@@ -1205,8 +1456,8 @@ void UpdateDashboard()
    }
    ObjectSetInteger(0, bgName, OBJPROP_XDISTANCE, x - 8);
    ObjectSetInteger(0, bgName, OBJPROP_YDISTANCE, y - 6);
-   ObjectSetInteger(0, bgName, OBJPROP_XSIZE, 270);
-   ObjectSetInteger(0, bgName, OBJPROP_YSIZE, 155);
+   ObjectSetInteger(0, bgName, OBJPROP_XSIZE, 275);
+   ObjectSetInteger(0, bgName, OBJPROP_YSIZE, 175);
 
    // 1. Header
    UpdateDashLabel("Title", "=== NF TRADES | AMT PROFILE ===", x, y, clrGold, 9, true);
@@ -1296,6 +1547,21 @@ void UpdateDashboard()
          ObjectDelete(0, PREFIX + "HUD_Conf_" + IntegerToString(i));
       }
    }
+
+   // 8. Latest Entry Sign Status
+   string sigStr = "ENTRY SIGN: WAITING...";
+   color  sigClr = clrDarkGray;
+   if(g_lastSignalType == "BUY")
+   {
+      sigStr = StringFormat("ENTRY SIGN: BUY @ %s", DoubleToString(g_lastSignalPrice, Digits));
+      sigClr = clrLime;
+   }
+   else if(g_lastSignalType == "SELL")
+   {
+      sigStr = StringFormat("ENTRY SIGN: SELL @ %s", DoubleToString(g_lastSignalPrice, Digits));
+      sigClr = clrRed;
+   }
+   UpdateDashLabel("EntrySign", sigStr, x, y, sigClr, 8, true);
 }
 
 //+------------------------------------------------------------------+
