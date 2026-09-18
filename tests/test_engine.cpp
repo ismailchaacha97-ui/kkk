@@ -752,5 +752,85 @@ int main()
       cfg.volumeMode = VP_VOL_AUTO;
    }
 
+   //-------------------------------------------------------------------
+   // Regression guard: a C++ `VpEngine e;` starts indeterminate (MQL4
+   // zeroes struct members; C++ does not), so *every* field the engine can
+   // report must be assigned by Reset().  A release build once reported a
+   // random `feedWarnings` here, which showed up as a test that failed
+   // roughly one run in five - the worst possible kind of failure.
+   vp_suite("a fresh engine has no undefined state");
+   {
+      VpEngineConfig cfg;
+      cfg.Init();
+      VpEngine e;
+      e.Init(cfg);
+      CHECK_EQ_I(e.feedWarnings, 0);
+      CHECK_EQ_I(e.barsInAnchor, 0);
+      CHECK_EQ_I(e.barIndex, -1);
+      CHECK_EQ_I(e.ready ? 1 : 0, 0);
+      CHECK_EQ_I(e.ringCount, 0);
+      CHECK_FINITE(e.vwap);
+      CHECK_FINITE(e.sigma);
+      CHECK_FINITE(e.sigmaObs);
+      CHECK_FINITE(e.sigmaPrior);
+      CHECK_FINITE(e.sigmaRatio);
+      CHECK_FINITE(e.z);
+      CHECK_FINITE(e.signal);
+      CHECK_FINITE(e.tStat);
+      CHECK_FINITE(e.skew);
+      CHECK_FINITE(e.kurt);
+      CHECK_FINITE(e.up3);
+      CHECK_FINITE(e.dn3);
+
+      // A clone of a fresh engine must be just as defined.
+      VpEngine clone;
+      vp_engine_clone(e, clone);
+      CHECK_EQ_I(clone.feedWarnings, 0);
+      CHECK_FINITE(clone.vwap);
+      CHECK_FINITE(clone.sigma);
+   }
+
+   //-------------------------------------------------------------------
+   // A rejected bar must move *nothing*: not the anchor, not the ATR, not
+   // the regression, not the prior.
+   vp_suite("a rejected bar moves nothing");
+   {
+      VpEngineConfig cfg;
+      cfg.Init();
+      VpEngine e;
+      e.Init(cfg);
+      for (int i = 0; i < 20; i++)
+         push_bar(e, cfg, 0, 1000000LL + i * 60, 1.1000, 1.1010, 1.0990, 1.1005, 100, 0);
+      vp_engine_evaluate(e, cfg);
+
+      double vwapBefore = e.vwap, sigmaBefore = e.sigma;
+      double atrBefore = e.atr.Value(), priorBefore = e.sigmaPrior;
+      int barsBefore = e.barsInAnchor;
+      int warnBefore = e.feedWarnings;
+
+      vp_int64 t = 1000000LL + 20 * 60;
+      push_bar(e, cfg, 0, t, 0.0, 0.0, 0.0, 0.0, 100, 0);      // zero price
+      vp_engine_evaluate(e, cfg);
+      CHECK_EQ_I(e.feedWarnings, warnBefore + 1);
+      CHECK_EQ_I(e.barsInAnchor, barsBefore);
+      CHECK_REL(e.vwap, vwapBefore, 1e-15);
+      CHECK_REL(e.sigma, sigmaBefore, 1e-15);
+      CHECK_REL(e.atr.Value(), atrBefore, 1e-15);
+      CHECK_REL(e.sigmaPrior, priorBefore, 1e-15);
+
+      push_bar(e, cfg, 0, t + 60, 1.1, 1.1, 1.1001, 1.1, 100, 0);  // inverted range
+      vp_engine_evaluate(e, cfg);
+      CHECK_EQ_I(e.feedWarnings, warnBefore + 2);
+      CHECK_EQ_I(e.barsInAnchor, barsBefore);
+      CHECK_REL(e.vwap, vwapBefore, 1e-15);
+
+      push_bar(e, cfg, 0, t + 120, 1.1, 1.1050, 1.0990, 1.1048, 100, 0);  // good, high close
+      vp_engine_evaluate(e, cfg);
+      CHECK_EQ_I(e.feedWarnings, warnBefore + 2);
+      CHECK_EQ_I(e.barsInAnchor, barsBefore + 1);
+      CHECK_MSG(e.vwap > vwapBefore, "a valid bar still moves the anchor");
+      CHECK(e.sigma >= sigmaBefore);
+   }
+
    return vp_report("test_engine");
 }

@@ -3,7 +3,7 @@
 The core of VWAP Pro (`MQL4/Include/VWAPPro/*.mqh`) is written in the
 intersection of MQL4 and C++14-minus-modern-features. That is not a stylistic
 choice: it means the *exact same header files* that MetaTrader compiles are
-compiled by `g++` and driven by 1,746 assertions, with no MetaTrader present.
+compiled by `g++` and driven by 1,779 assertions, with no MetaTrader present.
 
 ```bash
 make test     # build and run all five suites
@@ -28,7 +28,7 @@ against each other on the same 16,200 bars:
 | `test_time` | 46 | The calendar. Every date is verified against Python's proleptic Gregorian arithmetic: leap years, century rules, the 1900 and 1600 boundaries, weekday index, day-of-year, week start, timezone shifting, DST-anchored `HH:MM` anchoring. |
 | `test_math` | 65 | The statistics. Compensated means/variances against long-double references, merge formulas, OLS slopes on exact lines (`σ = 0`, `R² = 1`), ATR/ADX on constructed series, Hurst exponent on a known random walk, and the precision table in `EVIDENCE.md` §2. |
 | `test_volume` | 30 | The feed logic. Probe detection for constant/absent/negative volume, the tick-rule split, monotonicity of `f_buy` in the close's position in the range, the deliberate absence of small-body damping, the inverse-variance weighting family, and degenerate inputs. |
-| `test_engine` | 1590 | The engine itself — the bulk of the suite. Textbook-VWAP reproduction, the definition of σ, origin-shift accuracy at three price levels, translation and scale invariance, anchor rollover and re-anchoring, prior shrinkage, band ordering, slope/skew/kurtosis accumulation, clone equivalence (incremental vs batch), the fuzz battery, and the composite score on synthetic regimes. |
+| `test_engine` | 1623 | The engine itself — the bulk of the suite. Textbook-VWAP reproduction, the definition of σ, origin-shift accuracy at three price levels, translation and scale invariance, anchor rollover and re-anchoring, prior shrinkage, band ordering, slope/skew/kurtosis accumulation, clone equivalence (incremental vs batch), the fuzz battery, and the composite score on synthetic regimes. |
 | `test_data` | 15 | The whole thing on a market-like series: `tests/fixtures/synth_m1_eurusd.csv`, 16,200 M1 bars. Distributional calibration, determinism, degraded-feed behaviour, and agreement between weighting families. Runs over *every* CSV in `tests/fixtures/`, so you can point it at real data. |
 
 ## Design of the tests

@@ -285,6 +285,12 @@ struct VpEngine
       sigmaRatio = 1.0;
       tStat = 0.0;
       ready = false;
+      // Diagnostics.  Every field an engine can report must be defined by
+      // Reset(): in MQL4 struct members start zeroed, but in C++ a bare
+      // `VpEngine e;` leaves them indeterminate, and a diagnostic read
+      // before the first rejection is exactly the kind of bug that shows
+      // up as a flaky test and never as a reproducible one.
+      feedWarnings = 0;
    }
 };
 

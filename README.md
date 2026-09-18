@@ -6,7 +6,7 @@ that turn it into something you can trade: honest dispersion bands, a
 regime-aware composite score, and an alerting layer.
 
 Everything in this repository compiles twice: once inside MetaTrader 4, and
-once as ordinary C++ for **1,746 automated checks** that run with nothing but
+once as ordinary C++ for **1,779 automated checks** that run with nothing but
 a compiler and a `make test` — and a third time as JavaScript, so the same
 engine can be driven in a browser and compared against the compiled one bar by
 bar.
@@ -16,7 +16,7 @@ $ make test
 test_time    :  46 checks, 0 failures
 test_math    :  65 checks, 0 failures
 test_volume  :  30 checks, 0 failures
-test_engine  : 1590 checks, 0 failures
+test_engine  : 1623 checks, 0 failures
 test_data    :  15 checks, 0 failures
 
 ALL SUITES PASSED
@@ -135,7 +135,7 @@ MQL4/Include/VWAPPro/     the engine - shared, byte for byte, with the tests
   VpAnchor.mqh            anchor calendar (session/day/UTC/fixed/week)
 MQL4/Indicators/VWAPPro.mq4      the indicator (plotting, panel, alerts)
 MQL4/Experts/VWAPProSignalEA.mq4 reference consumer
-tests/                   1,746 assertions that run without MetaTrader
+tests/                   1,779 assertions that run without MetaTrader
 tools/                   fixture generator, real-data fetcher, broker export
                          converter, numpy cross-check, JS cross-check, MQL4
                          static checker, benchmark

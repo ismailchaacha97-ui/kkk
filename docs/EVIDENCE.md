@@ -4,7 +4,7 @@ Every number in this document is produced by a command in this repository.
 Nothing here is a claim that cannot be re-run.
 
 ```bash
-make test                                        # 1746 assertions
+make test                                        # 1779 assertions
 make check                                       # static rules + two cross checks
 make bench                                       # per-bar cost at 10k / 100k / 1M bars
 python3 tools/crosscheck.py tests/fixtures/synth_m1_eurusd.csv
