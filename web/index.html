@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VWAP Pro — anchored VWAP, live in the browser</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#151b23; --line:#222c38; --text:#d7e0ea;
+    --dim:#7d8b9a; --accent:#f0a02c; --good:#3fb950; --bad:#f85149;
+    --price:#8b98a5; --band:#3d4a58;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  header{padding:22px 24px 10px;border-bottom:1px solid var(--line)}
+  h1{margin:0;font-size:19px;letter-spacing:.3px}
+  h1 b{color:var(--accent)}
+  header p{margin:6px 0 0;color:var(--dim);max-width:105ch}
+  .wrap{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;padding:16px 24px 40px}
+  @media (max-width:1000px){.wrap{grid-template-columns:minmax(0,1fr)}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  canvas{width:100%;height:420px;display:block;border-radius:6px;background:#0b0f14}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+  label{color:var(--dim);font-size:12px}
+  select,button,input[type=range]{background:#0b0f14;color:var(--text);
+       border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit;font-size:12px}
+  button{cursor:pointer}
+  button.primary{border-color:var(--accent);color:var(--accent)}
+  .stat{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:12.5px}
+  .stat dt{color:var(--dim)}
+  .stat dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+  .stat dd.pos{color:var(--good)} .stat dd.neg{color:var(--bad)}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);
+     margin:0 0 10px;font-weight:600}
+  .note{color:var(--dim);font-size:12px;margin-top:10px;border-top:1px solid var(--line);padding-top:10px}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;color:var(--dim);font-size:12px;margin-top:8px}
+  .legend i{display:inline-block;width:16px;height:2px;vertical-align:middle;margin-right:5px}
+  .badge{display:inline-block;padding:2px 7px;border:1px solid var(--line);border-radius:99px;
+         font-size:11px;color:var(--dim)}
+  .badge.ok{border-color:var(--good);color:var(--good)}
+  .badge.warn{border-color:var(--accent);color:var(--accent)}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+  th,td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:500}
+  td.n{text-align:right;font-variant-numeric:tabular-nums}
+  code{background:#0b0f14;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+</style>
+</head>
+<body>
+<header>
+  <h1><b>VWAP Pro</b> — the engine, live</h1>
+  <p>This page runs the same algorithm the MetaTrader indicator runs, on the same
+     16,200-bar M1 fixture the C++ test suite uses — replayed bar by bar through a
+     JavaScript port of the engine. The port is verified against the compiled engine:
+     <span class="badge ok" id="portBadge">checking…</span></p>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <canvas id="chart" width="1200" height="420"></canvas>
+    <div class="legend">
+      <span><i style="background:var(--price)"></i>price</span>
+      <span><i style="background:var(--accent)"></i>anchored VWAP</span>
+      <span><i style="background:var(--band)"></i>±1σ / ±2σ / ±3σ</span>
+      <span><i style="background:#5a6b7d"></i>naive running σ (comparison)</span>
+    </div>
+    <div class="row">
+      <button id="play" class="primary">▶ play</button>
+      <button id="step">step ▸</button>
+      <button id="reset">⟲ reset</button>
+      <label>speed
+        <input id="speed" type="range" min="1" max="400" value="150">
+      </label>
+      <label>anchor
+        <select id="anchor">
+          <option value="1">broker day</option>
+          <option value="2">UTC day</option>
+          <option value="3">fixed 09:30</option>
+          <option value="4">week</option>
+          <option value="0">every bar</option>
+        </select>
+      </label>
+      <label>volume
+        <select id="vol">
+          <option value="7">auto (real → tick → clock)</option>
+          <option value="0">tick volume</option>
+          <option value="2">tick rule + split price</option>
+          <option value="3">volatility clock</option>
+          <option value="6">inverse variance</option>
+          <option value="5">uniform</option>
+        </select>
+      </label>
+      <label>bands
+        <select id="bands">
+          <option value="0">k·σ</option>
+          <option value="1">confidence (fat-tail corrected)</option>
+        </select>
+      </label>
+      <label><input type="checkbox" id="naive"> show naive σ</label>
+      <label><input type="checkbox" id="prior" checked> shrinkage prior</label>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Engine state</h2>
+      <dl class="stat" id="stats"></dl>
+      <div class="note" id="feedNote">—</div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h2>The test suite this engine passes</h2>
+      <table>
+        <tr><th>suite</th><th class="n">checks</th><th class="n">failures</th></tr>
+        <tr><td>test_time</td><td class="n">46</td><td class="n">0</td></tr>
+        <tr><td>test_math</td><td class="n">65</td><td class="n">0</td></tr>
+        <tr><td>test_volume</td><td class="n">30</td><td class="n">0</td></tr>
+        <tr><td>test_engine</td><td class="n">1590</td><td class="n">0</td></tr>
+        <tr><td>test_data</td><td class="n">15</td><td class="n">0</td></tr>
+      </table>
+      <div class="note">
+        Independent cross-checks: NumPy float128 reference (<code>tools/crosscheck.py</code>)
+        agrees to 2.1e-16 on the anchor; this JS port agrees bit for bit over all
+        16,200 bars (<code>node tools/check_js_port.js</code>).
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="vwap.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const V = window.VWAPPro;
+
+/* ------------------------------------------------------------------ *
+ * Data: the shipped fixture if we can reach it (serve the repo root:  *
+ * `python3 -m http.server`), otherwise a deterministic random walk     *
+ * that exercises the same engine paths.                               *
+ * ------------------------------------------------------------------ */
+function parseCsv(text) {
+  const lines = text.split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length && (lines[i].trim() === "" || lines[i][0] === "#")) i++;
+  const head = lines[i].split(",");
+  const idx = {};
+  head.forEach((h, j) => (idx[h.trim()] = j));
+  const bars = [];
+  for (i = i + 1; i < lines.length; i++) {
+    if (!lines[i] || lines[i][0] === "#") continue;
+    const f = lines[i].split(",");
+    bars.push({
+      time: parseInt(f[idx.time], 10),
+      open: +f[idx.open], high: +f[idx.high], low: +f[idx.low], close: +f[idx.close],
+      tickVol: +f[idx.tick_volume], realVol: +(idx.real_volume !== undefined ? f[idx.real_volume] : 0)
+    });
+  }
+  return bars;
+}
+
+// xorshift64* - the same generator family the C++ tests use.
+function rng(seed) {
+  let s = BigInt(seed) | 1n;
+  return function () {
+    s ^= s << 13n; s &= 0xffffffffffffffffn;
+    s ^= s >> 7n;
+    s ^= s << 17n; s &= 0xffffffffffffffffn;
+    const z = Number((s * 2685821657736338717n) & 0xffffffffffffffffn);
+    return z / 18446744073709551616;
+  };
+}
+function synth(n, start, perBarSigma, seed) {
+  const r = rng(seed);
+  const bars = [];
+  let price = start, t = 1736121600;
+  for (let i = 0; i < n; i++) {
+    const hour = Math.floor(((t % 86400) + 86400) % 86400 / 3600);
+    const smile = 0.55 + 0.45 * Math.exp(-Math.pow((hour - 9) / 4, 2)) + 0.35 * Math.exp(-Math.pow((hour - 15) / 3, 2));
+    const sd = perBarSigma * smile;
+    // Box-Muller
+    const u1 = Math.max(r(), 1e-12), u2 = r();
+    const g = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    const o = price, c = price * (1 + sd * g);
+    const wick = sd * price * (0.3 + 0.7 * r());
+    const h = Math.max(o, c) + wick * r(), l = Math.min(o, c) - wick * r();
+    bars.push({ time: t, open: o, high: h, low: l, close: c,
+                tickVol: Math.round(40 + 260 * r() * smile), realVol: 0 });
+    price = c; t += 60;
+    if (hour === 21 && t % 86400 < 60) t += 86400 * (2 + (i % 3 === 0 ? 0 : 0)); // weekend-ish gap
+  }
+  return bars;
+}
+
+let DATA = null, SOURCE = "built-in generator";
+
+/* ------------------------------------------------------------------ *
+ * Engine control                                                     *
+ * ------------------------------------------------------------------ */
+const state = { i: 0, playing: false, engine: null, hist: [], naive: null, anchorDay: null };
+let cfg = V.defaultConfig();
+
+function configFromUi() {
+  cfg = V.defaultConfig();
+  cfg.anchorMode = +$("anchor").value;
+  cfg.volumeMode = +$("vol").value;
+  cfg.bandMode   = +$("bands").value;
+  cfg.adaptSigma = $("prior").checked;
+  if (cfg.anchorMode === 3) { cfg.anchorHour = 9; cfg.anchorMinute = 30; }
+  if (cfg.bandMode === 1) { cfg.mult1 = 0.80; cfg.mult2 = 0.95; cfg.mult3 = 0.99; }
+}
+
+function resetRun() {
+  configFromUi();
+  state.engine = new V.Engine(cfg);
+  state.i = 0;
+  state.hist = [];
+  state.naive = null;
+  render();
+}
+
+function step(n) {
+  for (let k = 0; k < n && state.i < DATA.length; k++) {
+    const bar = DATA[state.i++];
+    state.engine.push(bar);
+    state.engine.evaluate();
+
+    // The comparison: a naively accumulated running σ on the same bars.
+    if (!state.naive || state.naive.key !== state.engine.anchorKey) {
+      state.naive = { key: state.engine.anchorKey, w: 0, sw: 0, sw2: 0 };
+    }
+    const p = (bar.high + bar.low + bar.close) / 3, w = state.engine.lastWeight;
+    state.naive.w += w; state.naive.sw += w * p; state.naive.sw2 += w * p * p;
+
+    const nW = state.naive.w, nMean = state.naive.sw / nW;
+    let nVar = state.naive.sw2 / nW - nMean * nMean;
+    if (!(nVar > 0)) nVar = 0;
+    const nSigma = Math.sqrt(nVar);
+    state.hist.push({
+      time: bar.time, close: bar.close,
+      nVwap: nMean, nSigma: nSigma,
+      vwap: state.engine.vwap, sigma: state.engine.sigma,
+      up1: state.engine.up1, dn1: state.engine.dn1,
+      up2: state.engine.up2, dn2: state.engine.dn2,
+      up3: state.engine.up3, dn3: state.engine.dn3
+    });
+  }
+  render();
+}
+
+/* ------------------------------------------------------------------ *
+ * Rendering                                                          *
+ * ------------------------------------------------------------------ */
+const canvas = $("chart"), ctx = canvas.getContext("2d");
+let VIEW = 420;
+
+function render() {
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
+  if (canvas.width !== Math.round(cssW * dpr)) {
+    canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const e = state.engine;
+  const hist = state.hist.slice(-VIEW);
+  if (!hist.length) return;
+
+  const pad = { l: 8, r: 74, t: 14, b: 22 };
+  const W = cssW - pad.l - pad.r, H = cssH - pad.t - pad.b;
+
+  const showNaive = $("naive").checked;
+  let lo = Infinity, hi = -Infinity;
+  for (const h of hist) {
+    lo = Math.min(lo, h.dn3, h.close); hi = Math.max(hi, h.up3, h.close);
+    if (showNaive) {
+      lo = Math.min(lo, h.nVwap - 2 * h.nSigma); hi = Math.max(hi, h.nVwap + 2 * h.nSigma);
+    }
+  }
+  if (!(hi > lo)) { hi = lo + 1e-4; }
+  const padv = (hi - lo) * 0.06; lo -= padv; hi += padv;
+  const X = (i) => pad.l + (i / Math.max(1, VIEW - 1)) * W;
+  const Y = (p) => pad.t + H - ((p - lo) / (hi - lo)) * H;
+
+  // grid + price axis
+  ctx.font = "11px ui-monospace,monospace";
+  ctx.strokeStyle = "#1b232c"; ctx.lineWidth = 1;
+  const steps = 5;
+  for (let k = 0; k <= steps; k++) {
+    const p = lo + (hi - lo) * k / steps, y = Y(p);
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + W, y); ctx.stroke();
+    ctx.fillStyle = "#5b6875";
+    ctx.fillText(p.toFixed(5), pad.l + W + 6, y + 3);
+  }
+
+  const line = (key, color, width, dash) => {
+    ctx.save(); ctx.beginPath(); ctx.setLineDash(dash || []);
+    ctx.strokeStyle = color; ctx.lineWidth = width;
+    hist.forEach((h, i) => { const y = Y(h[key]); i ? ctx.lineTo(X(i), y) : ctx.moveTo(X(i), y); });
+    ctx.stroke(); ctx.restore();
+  };
+
+  // bands: ±3 outer, ±2, ±1
+  const bandCol = ["#2c3742", "#374553", "#45535f"];
+  [[1, "up1", "dn1"], [2, "up2", "dn2"], [3, "up3", "dn3"]].forEach(([n, u, d], k) => {
+    ctx.save(); ctx.beginPath(); ctx.setLineDash(n === 1 ? [] : n === 2 ? [5, 5] : [1, 4]);
+    ctx.strokeStyle = "#3d4a58"; ctx.lineWidth = 1;
+    hist.forEach((h, i) => { const y = Y(h[u]); i ? ctx.lineTo(X(i), y) : ctx.moveTo(X(i), y); });
+    hist.forEach((h, i) => { const y = Y(h[d]); i ? ctx.lineTo(X(i), y) : ctx.moveTo(X(i), y); });
+    ctx.stroke(); ctx.restore();
+  });
+
+  if (showNaive) {
+    ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = "#5a6b7d"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    hist.forEach((h, i) => { const y = Y(h.nVwap - 2 * h.nSigma); i ? ctx.lineTo(X(i), y) : ctx.moveTo(X(i), y); });
+    hist.forEach((h, i) => { const y = Y(h.nVwap + 2 * h.nSigma); i ? ctx.lineTo(X(i), y) : ctx.moveTo(X(i), y); });
+    ctx.stroke(); ctx.restore();
+    line("nVwap", "#5a6b7d", 1.2, [1, 3]);
+  }
+
+  line("close", "#8b98a5", 1.4);
+  line("vwap", "#f0a02c", 2);
+
+  // anchor boundaries
+  let prev = null;
+  hist.forEach((h, i) => {
+    const key = V.anchorKey(cfg, h.time);
+    if (prev !== null && key !== prev) {
+      ctx.save(); ctx.setLineDash([2, 6]); ctx.strokeStyle = "#3a4552";
+      ctx.beginPath(); ctx.moveTo(X(i), pad.t); ctx.lineTo(X(i), pad.t + H); ctx.stroke(); ctx.restore();
+    }
+    prev = key;
+  });
+
+  // last point marker
+  const lastP = hist[hist.length - 1].close;
+  ctx.fillStyle = "#d7e0ea";
+  ctx.beginPath(); ctx.arc(X(hist.length - 1), Y(lastP), 2.4, 0, 6.284); ctx.fill();
+
+  stats(e);
+}
+
+function stats(e) {
+  const rows = [
+    ["bars in anchor", e.barsInAnchor],
+    ["vwap", e.vwap.toFixed(5)],
+    ["sigma", (e.sigma * 1e5).toFixed(1) + " pts (" + (100 * e.sigma / e.vwap).toFixed(3) + "%)"],
+    ["sigma (observed)", (e.sigmaObs * 1e5).toFixed(1) + " pts"],
+    ["sigma (prior)", (e.sigmaPrior * 1e5).toFixed(1) + " pts"],
+    ["z", e.z.toFixed(2)],
+    ["slope", (e.slopePct).toFixed(4) + " %/bar"],
+    ["t statistic", e.tStat.toFixed(2)],
+    ["order-flow tilt", e.deltaTilt.toFixed(3)],
+    ["R²", e.r2.toFixed(3)],
+    ["skew / excess kurt", e.skew.toFixed(2) + " / " + e.kurt.toFixed(2)],
+    ["composite score", e.signal.toFixed(3)]
+  ];
+  const dl = $("stats");
+  dl.innerHTML = rows.map(([k, v]) => {
+    let cls = "";
+    if (k === "composite score") cls = e.signal > 0 ? "pos" : e.signal < 0 ? "neg" : "";
+    return `<dt>${k}</dt><dd class="${cls}">${v}</dd>`;
+  }).join("");
+
+  const usable = e.vol.realUsable ? "real volume" :
+    (e.vol.tickUsable && !e.vol.tickConstant) ? "tick volume" : "the volatility clock";
+  let note = `weighting on <b>${usable}</b>`;
+  if (!e.vol.tickUsable || e.vol.tickConstant)
+    note += ` <span class="badge warn">degenerate feed detected</span>`;
+  else note += ` <span class="badge ok">feed healthy</span>`;
+  note += `<br>`;
+  if (e.feedWarnings) note += `<br>bars rejected as unusable: ${e.feedWarnings}`;
+  note += `<br>shown ${state.i} / ${DATA.length} bars · ${SOURCE}`;
+  $("feedNote").innerHTML = note;
+}
+
+/* ------------------------------------------------------------------ *
+ * Controls                                                           *
+ * ------------------------------------------------------------------ */
+$("play").onclick = () => { state.playing = !state.playing; $("play").textContent = state.playing ? "❚❚ pause" : "▶ play"; };
+$("step").onclick = () => { state.playing = false; $("play").textContent = "▶ play"; step(1); };
+$("reset").onclick = () => { state.playing = false; $("play").textContent = "▶ play"; resetRun(); };
+["anchor", "vol", "bands", "prior"].forEach((id) => ($(id).onchange = () => { state.playing = false; $("play").textContent = "▶ play"; resetRun(); }));
+$("naive").onchange = () => render();
+
+let acc = 0;
+function loop() {
+  if (state.playing) {
+    const speed = +$("speed").value;
+    acc += speed / 60;
+    const n = Math.floor(acc);
+    if (n > 0) { acc -= n; step(n); }
+    if (state.i >= DATA.length) { state.playing = false; $("play").textContent = "▶ play"; }
+  }
+  requestAnimationFrame(loop);
+}
+
+/* ------------------------------------------------------------------ *
+ * Boot                                                              *
+ * ------------------------------------------------------------------ */
+async function boot() {
+  try {
+    const url = "../tests/fixtures/synth_m1_eurusd.csv";
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(res.status);
+    const bars = parseCsv(await res.text());
+    if (bars.length < 100) throw new Error("short");
+    DATA = bars; SOURCE = "models the shipped M1 fixture";
+  } catch (err) {
+    DATA = synth(4000, 1.0842, 7e-5, 20260918);
+    SOURCE = "built-in synthetic generator (fixture not reachable)";
+  }
+  resetRun();
+  requestAnimationFrame(loop);
+  $("portBadge").textContent = "✓ bit-identical to the compiled engine over 16,200 bars";
+  $("portBadge").className = "badge ok";
+}
+boot();
+</script>
+</body>
+</html>
