@@ -1,0 +1,9 @@
+# Put your MT5 / TradingView CSV exports here.
+# See docs/data.md for the export procedure.
+#
+# Example:
+#   data/XAUUSD_H1.csv
+#   data/EURUSD_H1.csv
+#
+# CSVs are gitignored on purpose — broker data is licensed to you, and a
+# backtest is only reproducible against the exact file you ran it on.

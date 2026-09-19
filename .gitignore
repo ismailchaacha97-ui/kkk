@@ -1,0 +1,22 @@
+# environments / tooling
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# market data is yours, not the repo's — see docs/data.md
+data/*
+!data/.gitkeep
+runs/
+*.csv
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
