@@ -1,0 +1,448 @@
+//@version=6
+// ═════════════════════════════════════════════════════════════════════════════════
+//  FIB  HH / LL  ·  retracement trade plan        Pine Script™ v6 · indicator
+//
+//      entries : 0.755 · 0.766 · 0.788      (3 step ladder)
+//      TP      : 0.33
+//      SL      : 0.98
+//      context : structure only  →  HH + HL = long   |   LL + LH = short
+//
+//  The levels of your MT5 "Fib retracement" dialog are reproduced on the chart and
+//  turned into a complete, alertable plan (0 / 1 / 1.618 / 2.618 stay available).
+//
+//  ── HOW THE LEVELS ARE READ ────────────────────────────────────────────────────
+//  The fib is measured as a RETRACEMENT FROM THE LEG'S LAST EXTREME. This is the
+//  only reading in which all three of your roles stay linear (≈ 2.1 R:R with your
+//  numbers), so it is the default:
+//
+//    LONG   leg = swing low → swing high
+//           price(level) = legHigh − level × (legHigh − legLow)
+//           0.755 / 0.766 / 0.788 → the three limit entries (deep pullback)
+//           0.98                  → stop loss   (sits just above the swing low)
+//           0.33                  → take profit (sits in the upper part of the leg)
+//
+//    SHORT  leg = swing high → swing low
+//           price(level) = legLow + level × (legHigh − legLow)
+//           0.755 / 0.766 / 0.788 → the three limit entries (rally into the zone)
+//           0.98                  → stop loss   (sits just below the swing high)
+//           0.33                  → take profit (sits in the lower part of the leg)
+//
+//  If a tool you compare against measures from the leg ORIGIN instead, turn
+//  "Flip levels" on — every level, label, marker and alert follows the switch.
+//
+//  ── SIGNAL LOGIC ───────────────────────────────────────────────────────────────
+//   1. Swings    : ta.pivothigh / ta.pivotlow confirmed iPivR bars later → no repainting.
+//   2. Structure : a setup arms only on real structure — HH + HL for longs and
+//                  LL + LH for shorts, i.e. the trend that keeps printing the
+//                  higher highs / lower lows these targets aim into.
+//   3. Anchor leg: the newest impulse leg (opposite extreme → newest pivot),
+//                  discarded once it is older than "Maximum leg length".
+//   4. Entry     : 0.755 touched → tap. While the ladder window is open the other
+//                  two limits fill 0.766 then 0.788 from the same extreme, so the
+//                  average entry and the R:R update live.
+//   5. Exit      : 0.33 = take profit, 0.98 = stop loss, evaluated from the fill
+//                  bar on. Inside one candle the stop wins (worst case), which
+//                  keeps the marker sequence honest.
+//   6. Expiry    : an unfilled setup is cancelled after "Cancel after" bars, or
+//                  when price invalidates the stop side before the fill.
+// ═════════════════════════════════════════════════════════════════════════════════
+indicator("Fib HH/LL · 0.755-0.766-0.788 → 0.33 | SL 0.98", "Fib HH/LL", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 500)
+
+// ─────────────────────────────────────────────────────────────────────────────────
+//  ①  INPUTS
+// ─────────────────────────────────────────────────────────────────────────────────
+string gStr = "① Structure — swing highs / lows"
+int  iPivL    = input.int(5, "Pivot left bars", minval = 1, maxval = 100, group = gStr, tooltip = "Bars on the left that must stay below the swing high (above the swing low).")
+int  iPivR    = input.int(5, "Pivot right bars", minval = 1, maxval = 100, group = gStr, tooltip = "Bars on the right needed to confirm the swing. A setup appears only after these bars closed → nothing repaints.")
+bool iNeedStr = input.bool(true, "Require structure: HH + HL (long) / LL + LH (short)", group = gStr, tooltip = "Off = every confirmed impulse leg arms a fib, structure or not.")
+int  iMaxLeg  = input.int(150, "Maximum leg length (bars)", minval = 5, group = gStr, tooltip = "Older legs are ignored, so stale swings are not traded.")
+int  iMaxWait = input.int(120, "Cancel an unfilled setup after (bars)", minval = 5, group = gStr)
+int  iLadder  = input.int(10, "Bars allowed to complete the 3-step ladder", minval = 1, group = gStr, tooltip = "Window in which 0.766 and 0.788 may fill after the first touch. When it closes, the average entry is frozen.")
+bool iMarkSw  = input.bool(true, "Mark HH / HL / LH / LL", group = gStr)
+string iSide  = input.string("Both", "Trade", options = ["Both", "Longs only", "Shorts only"], group = gStr)
+
+string gLvl = "② Fibonacci levels    (0.98 = SL · 0.33 = TP · 0.755 / 0.766 / 0.788 = entries)"
+float iE1      = input.float(0.755, "Entry 1",     minval = 0.0, step = 0.001, group = gLvl, inline = "e1", tooltip = "First level touched — the one that starts the ladder.")
+color iE1C     = input.color(#00BCD4, "", group = gLvl, inline = "e1")
+float iE2      = input.float(0.766, "Entry 2",     minval = 0.0, step = 0.001, group = gLvl, inline = "e2")
+color iE2C     = input.color(#26C6DA, "", group = gLvl, inline = "e2")
+float iE3      = input.float(0.788, "Entry 3",     minval = 0.0, step = 0.001, group = gLvl, inline = "e3", tooltip = "Deepest entry — also the far edge of the entry zone.")
+color iE3C     = input.color(#4DD0E1, "", group = gLvl, inline = "e3")
+float iTp      = input.float(0.33,  "Take profit", minval = 0.0, step = 0.001, group = gLvl, inline = "tp")
+color iTpC     = input.color(#2962FF, "", group = gLvl, inline = "tp")
+float iSl      = input.float(0.98,  "Stop loss",   minval = 0.0, step = 0.001, group = gLvl, inline = "sl")
+color iSlC     = input.color(#F23645, "", group = gLvl, inline = "sl")
+bool  iShowAnc = input.bool(false, "Show 0 % and 100 % anchor lines", group = gLvl)
+color iAncC    = input.color(#787B86, "", group = gLvl, inline = "an")
+bool  iShowExt = input.bool(false, "Show 1.618 / 2.618 extension lines", group = gLvl)
+color iExtC    = input.color(#5D606B, "", group = gLvl, inline = "ex")
+bool  iFlip    = input.bool(false, "Flip levels — anchor 0 % at the leg ORIGIN instead", group = gLvl, tooltip = "Off (default) = levels are counted from the leg's last extreme, which is what makes 0.98 the far stop and 0.33 the near target. On = levels are counted from the leg origin.")
+
+string gSty = "③ Style"
+string iLineSty = input.string("Solid", "Levels line", options = ["Solid", "Dashed", "Dotted"], group = gSty)
+string iExtend  = input.string("Don't extend", "Extend", options = ["Don't extend", "Extend right", "Extend both"], group = gSty)
+int    iWidth   = input.int(1, "Line width", minval = 1, maxval = 5, group = gSty)
+bool   iLabels  = input.bool(true, "Level labels", group = gSty)
+string iLblSize = input.string("Small", "Label size", options = ["Tiny", "Small", "Normal", "Large"], group = gSty)
+bool   iShowPx  = input.bool(true, "Show prices inside the labels", group = gSty)
+bool   iShowTag = input.bool(true, "Show E1 / E2 / E3 · TP · SL tags", group = gSty)
+bool   iZone    = input.bool(true, "Shade the entry zone (0.755 → 0.788)", group = gSty)
+color  iZoneC   = input.color(color.new(#00BCD4, 88), "Entry zone fill", group = gSty)
+bool   iDim     = input.bool(true, "Dim the fib once the setup is over", group = gSty)
+
+string gSig = "④ Signals & alerts"
+string iTrig    = input.string("Touch (wick into level 1)", "Entry trigger", options = ["Touch (wick into level 1)", "Close inside the entry zone", "Close inside the zone + candle confirmation"], group = gSig, tooltip = "Touch = a resting limit order at the first fib level. Close = the candle must close inside 0.755-0.788. Confirmation additionally requires a candle in the trade direction.")
+bool   iMarkers = input.bool(true, "Draw entry / TP / SL markers", group = gSig)
+bool   iEvtLbl  = input.bool(true, "Draw event labels with prices", group = gSig)
+bool   iDash    = input.bool(true, "Show the plan dashboard", group = gSig)
+string iDashPos = input.string("Top right", "Dashboard corner", options = ["Top right", "Top left", "Bottom right", "Bottom left"], group = gSig, tooltip = "Move it out of the way on small screens.")
+int    iEvtKeep = input.int(150, "Event labels kept on the chart", minval = 10, maxval = 450, group = gSig)
+int    iAlFreq  = input.int(1, "Alert on", options = [1, 2], group = gSig, tooltip = "1 = the bar that closes with the signal, 2 = the first tick of that bar (intra-bar).")
+
+// ─────────────────────────────────────────────────────────────────────────────────
+//  ②  PROJECTIONS OF THE STYLE INPUTS
+// ─────────────────────────────────────────────────────────────────────────────────
+string lnStyle = switch iLineSty
+    "Dashed" => line.style_dashed
+    "Dotted" => line.style_dotted
+    =>          line.style_solid
+
+string lnExtend = switch iExtend
+    "Extend right" => extend.right
+    "Extend both"  => extend.both
+    =>               extend.none
+
+string lblSize = switch iLblSize
+    "Tiny"   => size.tiny
+    "Normal" => size.normal
+    "Large"  => size.large
+    =>          size.small
+
+string dashPos = switch iDashPos
+    "Top left"     => position.top_left
+    "Bottom right" => position.bottom_right
+    "Bottom left"  => position.bottom_left
+    =>                position.top_right
+
+string alFreq = iAlFreq == 2 ? alert.freq_once_per_bar : alert.freq_once_per_bar_close
+
+// ─────────────────────────────────────────────────────────────────────────────────
+//  ③  STATE
+// ─────────────────────────────────────────────────────────────────────────────────
+var int   sDir   = 0      // +1 long setup · −1 short setup
+var int   sStat  = 0      // 0 idle · 1 waiting for entry · 2 in trade · 3 TP · 4 SL · 5 cancelled
+var float sHi    = 0.0    // leg high
+var float sLo    = 0.0    // leg low
+var int   sHiB   = 0      // bar of the leg high
+var int   sLoB   = 0      // bar of the leg low
+var int   sArmB  = 0      // bar the setup armed
+var int   sTapB  = 0      // bar of the first fill
+var float sExt   = 0.0    // extreme reached since the first fill (low for longs / high for shorts)
+var float sAvg   = 0.0    // average fill price
+var int   sFills = 0      // 0…3 filled levels
+var float sRR    = 0.0    // reward : risk of the average entry
+
+// ─────────────────────────────────────────────────────────────────────────────────
+//  ④  HELPERS
+// ─────────────────────────────────────────────────────────────────────────────────
+// Price of one fib level for the active setup.
+fibPx(float r) =>
+    float span = sHi - sLo
+    bool  up   = sDir == 1
+    iFlip ? (up ? sLo + r * span : sHi - r * span) : (up ? sHi - r * span : sLo + r * span)
+
+// Level rows: one row per fib line (ratio, name, role tag, visibility, colour + drawings).
+var array<float>  aRatio = array.new<float>()
+var array<string> aName  = array.new<string>()
+var array<string> aTag   = array.new<string>()
+var array<bool>   aShow  = array.new<bool>()
+var array<color>  aCol   = array.new<color>()
+var array<line>   aLine  = array.new<line>()
+var array<label>  aLab   = array.new<label>()
+
+regLevel(float r, string nm, string tg, bool vis, color col) =>
+    array.push(aRatio, r)
+    array.push(aName, nm)
+    array.push(aTag, tg)
+    array.push(aShow, vis)
+    array.push(aCol, col)
+    array.push(aLine, line.new(bar_index, close, bar_index + 1, close, extend = lnExtend, color = color.new(col, 100), style = lnStyle, width = iWidth))
+    array.push(aLab, label.new(bar_index, close, "  ", style = label.style_label_left, color = color.new(col, 100), textcolor = col, size = lblSize))
+
+// Event labels are ring-buffered so the chart keeps its drawing budget.
+var array<label> aEvt = array.new<label>()
+evtLabel(int x, float y, string txt, color c, bool below) =>
+    if array.size(aEvt) >= iEvtKeep
+        label.delete(array.shift(aEvt))
+    array.push(aEvt, label.new(x, y, txt, style = below ? label.style_label_up : label.style_label_down, color = color.new(color.black, 25), textcolor = c, size = size.small, textalign = text.align_center))
+
+dashStatus() =>
+    switch sStat
+        1 => "WAITING FOR ENTRY"
+        2 => "IN TRADE"
+        3 => "TP HIT"
+        4 => "SL HIT"
+        5 => "SETUP CANCELLED"
+        =>   "NO SETUP"
+
+// ─────────────────────────────────────────────────────────────────────────────────
+//  ⑤  PIVOTS · STRUCTURE · ARMING
+// ─────────────────────────────────────────────────────────────────────────────────
+float phRaw = ta.pivothigh(high, iPivL, iPivR)
+float plRaw = ta.pivotlow(low, iPivL, iPivR)
+bool  newPH = not na(phRaw)
+bool  newPL = not na(plRaw)
+
+var float ph1  = 0.0
+var float ph2  = 0.0
+var int   ph1B = 0
+var float pl1  = 0.0
+var float pl2  = 0.0
+var int   pl1B = 0
+var int   nPH  = 0
+var int   nPL  = 0
+
+// Swing classification against the previous pivot of the same type.
+bool hhFlag = newPH and nPH > 0 and phRaw > ph2
+bool lhFlag = newPH and nPH > 0 and phRaw < ph2
+bool hlFlag = newPL and nPL > 0 and plRaw > pl2
+bool llFlag = newPL and nPL > 0 and plRaw < pl2
+
+if newPH
+    ph2  := ph1
+    ph1  := phRaw
+    ph1B := bar_index - iPivR
+    nPH  += 1
+if newPL
+    pl2  := pl1
+    pl1  := plRaw
+    pl1B := bar_index - iPivR
+    nPL  += 1
+
+// Structure: higher high AND higher low = uptrend · lower low AND lower high = downtrend.
+bool bullStr = nPH > 1 and nPL > 1 and ph1 > ph2 and pl1 > pl2
+bool bearStr = nPH > 1 and nPL > 1 and ph1 < ph2 and pl1 < pl2
+
+bool canLong  = iSide != "Shorts only" and sStat != 2     // never re-arm over an open trade
+bool canShort = iSide != "Longs only" and sStat != 2
+bool legYoung = (bar_index - math.min(ph1B, pl1B)) <= iMaxLeg
+bool armLong  = canLong  and newPH and ph1 > pl1 and ph1B > pl1B and legYoung and (not iNeedStr or bullStr)
+bool armShort = canShort and newPL and ph1 > pl1 and pl1B > ph1B and legYoung and (not iNeedStr or bearStr)
+bool sameLeg  = (armLong and sDir == 1 and sHi == ph1 and sLo == pl1) or (armShort and sDir == -1 and sHi == ph1 and sLo == pl1)
+
+if (armLong or armShort) and not sameLeg
+    sDir   := armLong ? 1 : -1
+    sHi    := ph1
+    sLo    := pl1
+    sHiB   := ph1B
+    sLoB   := pl1B
+    sArmB  := bar_index
+    sStat  := 1
+    sTapB  := 0
+    sFills := 0
+    sAvg   := 0.0
+    sRR    := 0.0
+    sExt   := armLong ? sHi : sLo      // sentinel: nothing counts as reached yet
+
+// ─────────────────────────────────────────────────────────────────────────────────
+//  ⑥  THE PLAN OF THE ACTIVE SETUP
+// ─────────────────────────────────────────────────────────────────────────────────
+float eP1  = fibPx(iE1)
+float eP2  = fibPx(iE2)
+float eP3  = fibPx(iE3)
+float slPx = fibPx(iSl)
+float tpPx = fibPx(iTp)
+float zTop = math.max(eP1, math.max(eP2, eP3))    // shallowest entry (touched first)
+float zBot = math.min(eP1, math.min(eP2, eP3))    // deepest entry (0.788)
+
+// ─────────────────────────────────────────────────────────────────────────────────
+//  ⑦  FILLS → TARGET / STOP → EXPIRY          (strictly sequential)
+// ─────────────────────────────────────────────────────────────────────────────────
+bool trigLong = switch iTrig
+    "Close inside the entry zone"                 => close <= zTop and close >= zBot
+    "Close inside the zone + candle confirmation" => close <= zTop and close >= zBot and close > open
+    =>                                               low <= zTop
+
+bool trigShort = switch iTrig
+    "Close inside the entry zone"                 => close >= zBot and close <= zTop
+    "Close inside the zone + candle confirmation" => close >= zBot and close <= zTop and close < open
+    =>                                               high >= zBot
+
+bool tapLong  = sStat == 1 and sDir ==  1 and trigLong
+bool tapShort = sStat == 1 and sDir == -1 and trigShort
+bool tapNow   = tapLong or tapShort
+
+// 1 · the first touch starts the ladder
+if tapNow
+    sStat := 2
+    sTapB := bar_index
+    sExt  := tapLong ? low : high
+
+// 2 · while the ladder window is open, follow the adverse extreme
+bool ladderOpen = sStat == 2 and (bar_index - sTapB) <= iLadder
+if ladderOpen
+    sExt := sDir == 1 ? math.min(sExt, low) : math.max(sExt, high)
+
+// 3 · which limits are filled, average price and R:R
+bool f1 = sDir == 1 ? eP1 >= sExt : eP1 <= sExt
+bool f2 = sDir == 1 ? eP2 >= sExt : eP2 <= sExt
+bool f3 = sDir == 1 ? eP3 >= sExt : eP3 <= sExt
+if sStat == 2
+    sFills := (f1 ? 1 : 0) + (f2 ? 1 : 0) + (f3 ? 1 : 0)
+    float fSum = (f1 ? eP1 : 0.0) + (f2 ? eP2 : 0.0) + (f3 ? eP3 : 0.0)
+    sAvg := sFills > 0 ? fSum / sFills : (sDir == 1 ? zTop : zBot)
+    float risk = math.abs(sAvg - slPx)
+    float rew  = math.abs(tpPx - sAvg)
+    sRR := risk > 0 ? rew / risk : sRR
+
+// 4 · exits — inside one candle the stop wins
+bool hitTP = sStat == 2 and (sDir == 1 ? high >= tpPx : low  <= tpPx)
+bool hitSL = sStat == 2 and (sDir == 1 ? low  <= slPx : high >= slPx)
+bool sigTP = false
+bool sigSL = false
+if sStat == 2
+    if hitSL
+        sStat := 4
+        sigSL := true
+    else if hitTP
+        sStat := 3
+        sigTP := true
+
+// 5 · expiry — never filled in time, or invalidated before the fill
+bool cancelExp   = sStat == 1 and (bar_index - sArmB) > iMaxWait
+bool cancelBroke = sStat == 1 and (sDir == 1 ? low <= slPx : high >= slPx)
+bool sigCancel   = cancelExp or cancelBroke
+if sigCancel
+    sStat := 5
+
+// state of the bar after everything above
+bool armed     = sStat == 1
+bool inTrade   = sStat == 2
+bool runNow    = armed or inTrade
+bool wasFilled = sStat == 2 or sStat == 3 or sStat == 4
+
+// alerts / drawings that must not be repeated on every tick of a live bar
+bool cfm        = barstate.isconfirmed
+bool alertTap   = tapNow    and (iAlFreq == 2 or cfm)
+bool alertTP    = sigTP     and (iAlFreq == 2 or cfm)
+bool alertSL    = sigSL     and (iAlFreq == 2 or cfm)
+bool alertCancel = sigCancel and (iAlFreq == 2 or cfm)
+bool lblTap     = tapNow    and cfm
+bool lblTP      = sigTP     and cfm
+bool lblSL      = sigSL     and cfm
+bool lblCancel  = sigCancel and cfm
+
+// ─────────────────────────────────────────────────────────────────────────────────
+//  ⑧  DRAWING — the fib itself
+// ─────────────────────────────────────────────────────────────────────────────────
+var bool inited = false
+var box zoneBox = na
+if not inited
+    inited := true
+    regLevel(0.0,   "0",     "",   iShowAnc, iAncC)
+    regLevel(iE1,   str.tostring(iE1, "#.###"), "E1", true, iE1C)
+    regLevel(iE2,   str.tostring(iE2, "#.###"), "E2", true, iE2C)
+    regLevel(iE3,   str.tostring(iE3, "#.###"), "E3", true, iE3C)
+    regLevel(iTp,   str.tostring(iTp, "#.###"), "TP", true, iTpC)
+    regLevel(iSl,   str.tostring(iSl, "#.###"), "SL", true, iSlC)
+    regLevel(1.0,   "1",     "",   iShowAnc, iAncC)
+    regLevel(1.618, "1.618", "",   iShowExt, iExtC)
+    regLevel(2.618, "2.618", "",   iShowExt, iExtC)
+    zoneBox := box.new(bar_index, close, bar_index + 1, close, border_color = color.new(iZoneC, 100), bgcolor = iZone ? iZoneC : color.new(iZoneC, 100), border_style = line.style_dotted)
+
+if sDir != 0
+    int  xL     = math.min(sLoB, sHiB)
+    int  xR     = bar_index
+    int  alpha  = runNow ? 0 : (iDim ? 75 : 0)
+    bool showLb = iLabels and runNow
+    box.set_left(zoneBox, xL)
+    box.set_right(zoneBox, xR)
+    box.set_top(zoneBox, zTop)
+    box.set_bottom(zoneBox, zBot)
+    box.set_bgcolor(zoneBox, runNow ? (iZone ? iZoneC : color.new(iZoneC, 100)) : color.new(iZoneC, 95))
+    for i = 0 to array.size(aRatio) - 1
+        float r    = array.get(aRatio, i)
+        bool  vis  = array.get(aShow, i)
+        color base = array.get(aCol, i)
+        line  ln   = array.get(aLine, i)
+        label lb   = array.get(aLab, i)
+        float px   = fibPx(r)
+        line.set_xy1(ln, xL, px)
+        line.set_xy2(ln, xR, px)
+        line.set_color(ln, vis ? color.new(base, alpha) : color.new(base, 100))
+        label.set_xy(lb, xR, px)
+        if vis and showLb
+            string tg  = iShowTag ? array.get(aTag, i) : ""
+            string txt = array.get(aName, i) + (tg != "" ? "   " + tg : "") + (iShowPx ? "   " + str.tostring(px, format.mintick) : "")
+            label.set_text(lb, txt)
+            label.set_color(lb, color.new(#131722, 15))
+            label.set_textcolor(lb, base)
+        else
+            label.set_text(lb, "  ")
+            label.set_color(lb, color.new(base, 100))
+            label.set_textcolor(lb, color.new(base, 100))
+
+// ─────────────────────────────────────────────────────────────────────────────────
+//  ⑨  EVENT LABELS  (confirmed bars only → no duplicates while a bar is live)
+// ─────────────────────────────────────────────────────────────────────────────────
+if lblTap and iEvtLbl
+    evtLabel(bar_index, tapLong ? math.min(low, zTop) : math.max(high, zBot), (tapLong ? "LONG" : "SHORT") + " entry · " + str.tostring(eP1, format.mintick) + "\nSL " + str.tostring(slPx, format.mintick) + "   TP " + str.tostring(tpPx, format.mintick), iE1C, tapLong)
+if lblTP and iEvtLbl
+    evtLabel(bar_index, tpPx, "TP · " + str.tostring(tpPx, format.mintick) + "\n" + str.tostring(sFills) + "/3 filled · avg " + str.tostring(sAvg, format.mintick) + "\n" + str.tostring(sRR, "#.##") + " R", iTpC, sDir == -1)
+if lblSL and iEvtLbl
+    evtLabel(bar_index, slPx, "SL · " + str.tostring(slPx, format.mintick) + "\n" + str.tostring(sFills) + "/3 filled · avg " + str.tostring(sAvg, format.mintick), iSlC, sDir == 1)
+if lblCancel and iEvtLbl
+    evtLabel(bar_index, sDir == 1 ? high : low, "fib setup cancelled" + (cancelExp ? "\nno fill in " + str.tostring(iMaxWait) + " bars" : "\nstop side hit before the fill"), color.new(#787B86, 0), sDir == 1)
+
+// ─────────────────────────────────────────────────────────────────────────────────
+//  ⑩  DASHBOARD
+// ─────────────────────────────────────────────────────────────────────────────────
+var table dash = table.new(dashPos, 2, 7, bgcolor = color.new(#131722, 10), frame_color = color.new(color.gray, 55), frame_width = 1, border_color = color.new(color.gray, 72), border_width = 1)
+color cKey = color.new(color.white, 0)
+color cVal = color.new(#B2B5BE, 0)
+if barstate.islast and iDash
+    table.merge_cells(dash, 0, 0, 1, 0)
+    table.cell(dash, 0, 0, "FIB PLAN   " + (sDir == 1 ? "LONG" : sDir == -1 ? "SHORT" : ""), text_color = sDir == 1 ? iE1C : sDir == -1 ? iSlC : cVal, text_size = size.small)
+    table.cell(dash, 0, 1, "Leg", cKey, text_size = size.small)
+    table.cell(dash, 1, 1, sDir == 0 ? "—" : str.tostring(sLo, format.mintick) + "  →  " + str.tostring(sHi, format.mintick) + "   [" + (sLoB < sHiB ? "low → high" : "high → low") + ", " + str.tostring(math.max(sLoB, sHiB) - math.min(sLoB, sHiB)) + " bars]", cVal, text_size = size.small)
+    table.cell(dash, 0, 2, "Entries", cKey, text_size = size.small)
+    table.cell(dash, 1, 2, sDir == 0 ? "—" : str.tostring(eP1, format.mintick) + " · " + str.tostring(eP2, format.mintick) + " · " + str.tostring(eP3, format.mintick), cVal, text_size = size.small)
+    table.cell(dash, 0, 3, "Stop / Target", cKey, text_size = size.small)
+    table.cell(dash, 1, 3, sDir == 0 ? "—" : str.tostring(slPx, format.mintick) + "  (" + str.tostring(iSl, "#.###") + ")   |   " + str.tostring(tpPx, format.mintick) + "  (" + str.tostring(iTp, "#.###") + ")", cVal, text_size = size.small)
+    table.cell(dash, 0, 4, "Filled", cKey, text_size = size.small)
+    table.cell(dash, 1, 4, wasFilled ? str.tostring(sFills) + " / 3   ·   avg " + str.tostring(sAvg, format.mintick) : "0 / 3", cVal, text_size = size.small)
+    table.cell(dash, 0, 5, "Reward : Risk", cKey, text_size = size.small)
+    table.cell(dash, 1, 5, wasFilled and sRR > 0 ? str.tostring(sRR, "#.##") + " R" : "—", cVal, text_size = size.small)
+    table.cell(dash, 0, 6, "Status", cKey, text_size = size.small)
+    table.cell(dash, 1, 6, dashStatus(), sStat == 3 ? iTpC : sStat == 4 ? iSlC : sStat == 2 ? iE1C : cVal, text_size = size.small)
+
+// ─────────────────────────────────────────────────────────────────────────────────
+//  ⑪  CHART MARKERS
+// ─────────────────────────────────────────────────────────────────────────────────
+plotshape(iMarkers and tapLong,  "Long entry",  shape.triangleup,   location.belowbar, iE1C, size = size.tiny, text = "E",  textcolor = iE1C)
+plotshape(iMarkers and tapShort, "Short entry", shape.triangledown, location.abovebar, iE1C, size = size.tiny, text = "E",  textcolor = iE1C)
+plotshape(iMarkers and sigTP and sDir ==  1, "Long TP",  shape.xcross, location.abovebar, iTpC, size = size.tiny, text = "TP", textcolor = iTpC)
+plotshape(iMarkers and sigTP and sDir == -1, "Short TP", shape.xcross, location.belowbar, iTpC, size = size.tiny, text = "TP", textcolor = iTpC)
+plotshape(iMarkers and sigSL and sDir ==  1, "Long SL",  shape.cross,  location.belowbar, iSlC, size = size.tiny, text = "SL", textcolor = iSlC)
+plotshape(iMarkers and sigSL and sDir == -1, "Short SL", shape.cross,  location.abovebar, iSlC, size = size.tiny, text = "SL", textcolor = iSlC)
+plotshape(iMarkSw and hhFlag, "HH", shape.labeldown, location.abovebar, color.new(iE1C, 10),    size = size.tiny, text = "HH", textcolor = color.black, offset = -iPivR)
+plotshape(iMarkSw and lhFlag, "LH", shape.labeldown, location.abovebar, color.new(#787B86, 10), size = size.tiny, text = "LH", textcolor = color.black, offset = -iPivR)
+plotshape(iMarkSw and hlFlag, "HL", shape.labelup,   location.belowbar, color.new(#26A69A, 10), size = size.tiny, text = "HL", textcolor = color.black, offset = -iPivR)
+plotshape(iMarkSw and llFlag, "LL", shape.labelup,   location.belowbar, color.new(iSlC, 10),    size = size.tiny, text = "LL", textcolor = color.black, offset = -iPivR)
+
+// ─────────────────────────────────────────────────────────────────────────────────
+//  ⑫  ALERTS
+// ─────────────────────────────────────────────────────────────────────────────────
+alertcondition(alertTap,    "Fib · entry tapped (0.755 zone)",  "Fib entry tapped")
+alertcondition(alertTP,     "Fib · take profit reached (0.33)", "Fib take profit reached")
+alertcondition(alertSL,     "Fib · stop loss reached (0.98)",   "Fib stop loss reached")
+alertcondition(alertCancel, "Fib · setup cancelled",            "Fib setup cancelled")
+
+if alertTap
+    alert((tapLong ? "LONG" : "SHORT") + " fib entry touched | " + syminfo.ticker + " " + timeframe.period + " | zone " + str.tostring(zBot, format.mintick) + " - " + str.tostring(zTop, format.mintick) + " | SL " + str.tostring(slPx, format.mintick) + " | TP " + str.tostring(tpPx, format.mintick), alFreq)
+if alertTP
+    alert("Fib TAKE PROFIT " + str.tostring(tpPx, format.mintick) + " | " + syminfo.ticker + " " + timeframe.period + " | " + str.tostring(sFills) + "/3 filled, avg " + str.tostring(sAvg, format.mintick) + " | " + str.tostring(sRR, "#.##") + " R", alFreq)
+if alertSL
+    alert("Fib STOP LOSS " + str.tostring(slPx, format.mintick) + " | " + syminfo.ticker + " " + timeframe.period + " | " + str.tostring(sFills) + "/3 filled, avg " + str.tostring(sAvg, format.mintick), alFreq)
+if alertCancel
+    alert("Fib setup cancelled | " + syminfo.ticker + " " + timeframe.period + " | leg " + str.tostring(sLo, format.mintick) + " - " + str.tostring(sHi, format.mintick), alFreq)
