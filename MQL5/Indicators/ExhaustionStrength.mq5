@@ -5,7 +5,7 @@
 //|         ExhaustionStrength.mq4 - identical logic and buffers.     |
 //+------------------------------------------------------------------+
 #property copyright   "Rewrite - original concept credited to LexLampard (2016)"
-#property version     "2.00"
+#property version     "2.01"
 #property description "Counter-trend exhaustion indicator."
 #property description "Scans backwards over Len bars accumulating closes at"
 #property description "record highs / record lows. A one-sided ratio means the"
@@ -19,12 +19,12 @@
 #property indicator_label1  "Buy (exhaustion)"
 #property indicator_type1   DRAW_ARROW
 #property indicator_color1  clrDodgerBlue
-#property indicator_width1  2
+#property indicator_width1  3
 //--- Plot 1: Sell arrow
 #property indicator_label2  "Sell (exhaustion)"
 #property indicator_type2   DRAW_ARROW
 #property indicator_color2  clrCrimson
-#property indicator_width2  2
+#property indicator_width2  3
 //--- Plot 2: FallStrength (old UP) - data only, readable via CopyBuffer
 #property indicator_label3  "FallStrength (old UP)"
 #property indicator_type3   DRAW_NONE
@@ -37,7 +37,7 @@
 //+------------------------------------------------------------------+
 input ENUM_TIMEFRAMES InpSignalTimeframe = PERIOD_CURRENT; // Signal timeframe (>= chart timeframe)
 input int             InpLength          = 15;             // Lookback in signal bars (old: Len)
-input double          InpSignalLevel     = 6.0;            // Ratio threshold (old: UrovenSignal)
+input double          InpSignalLevel     = 3.0;            // Ratio threshold (old: UrovenSignal=6, see README)
 input int             InpHistoryBars     = 500;            // Signal bars to evaluate (0 = all; old: HistoryBars)
 input bool            InpUseHighLow      = true;           // true: High/Low, false: body extremes (old: ModeHL)
 input bool            InpAlternating     = true;           // Alternate BUY/SELL signals (old: sUp/sDn behaviour)
@@ -46,8 +46,8 @@ input int             InpATRPeriod       = 14;             // ATR period for arr
 input double          InpArrowOffsetATR  = 0.15;           // Arrow offset = ATR * this (replaces Move_Arrow*Point)
 input int             InpArrowBuyCode    = 233;            // Buy arrow Wingdings code (old: ArrowBuyCode)
 input int             InpArrowSellCode   = 234;            // Sell arrow Wingdings code (old: ArrowSellCode)
-input int             InpArrowBuyWidth   = 2;              // Buy arrow width
-input int             InpArrowSellWidth  = 2;              // Sell arrow width
+input int             InpArrowBuyWidth   = 3;              // Buy arrow width
+input int             InpArrowSellWidth  = 3;              // Sell arrow width
 input color           InpArrowBuyColor   = clrDodgerBlue;  // Buy arrow color
 input color           InpArrowSellColor  = clrCrimson;     // Sell arrow color
 input bool            InpAlertPopup      = false;          // Popup alert on new signal (old: alert)
@@ -55,6 +55,7 @@ input bool            InpAlertSound      = false;          // Sound alert (old: 
 input string          InpSoundFile       = "alert.wav";    // Sound file
 input bool            InpAlertEmail      = false;          // Email alert (old: email)
 input bool            InpAlertPush       = false;          // Push notification
+input bool            InpShowDiagnostics = true;           // Show on-chart diagnostics (turn off once working)
 
 //+------------------------------------------------------------------+
 //| Buffers (identical numbering to the MQL4 version, for iCustom /   |
@@ -347,7 +348,8 @@ int OnCalculate(const int rates_total,
    ArrayInitialize(g_fallBuffer, EMPTY_VALUE);
    ArrayInitialize(g_riseBuffer, EMPTY_VALUE);
 
-   //--- Project signal bars onto chart bars
+   //--- Project signal bars onto chart bars (counting for diagnostics)
+   int buyCount = 0, sellCount = 0;
    for(int shift = oldestShift; shift >= 0; shift--)
    {
       if(sigFall[shift] == EMPTY_VALUE)
@@ -371,9 +373,15 @@ int OnCalculate(const int rates_total,
       double offset = (atr > 0.0) ? atr * InpArrowOffsetATR : 10.0 * _Point;
 
       if(sigSignal[shift] == SIGNAL_BUY)
+      {
          g_buyBuffer[chartIndex]  = low[chartIndex] - offset;
+         buyCount++;
+      }
       else
+      {
          g_sellBuffer[chartIndex] = high[chartIndex] + offset;
+         sellCount++;
+      }
    }
 
    //--- Alerts: once per signal bar, on the newest confirmed signal
@@ -396,6 +404,32 @@ int OnCalculate(const int rates_total,
                    sigFall[shift], sigRise[shift]);
       }
       break; // only the newest signal is alertable
+   }
+
+   //--- Diagnostics: the #1 support question is "no arrows", so make
+   //--- the reason visible on the chart instead of silent.
+   double maxFall = 0.0, maxRise = 0.0;
+   for(int shift = oldestShift; shift >= 0; shift--)
+   {
+      if(sigFall[shift] == EMPTY_VALUE)
+         continue;
+      if(sigFall[shift] > maxFall) maxFall = sigFall[shift];
+      if(sigRise[shift] > maxRise) maxRise = sigRise[shift];
+   }
+   if(prev_calculated == 0)
+      Print(StringFormat("ExhaustionStrength: evaluated %d %s bars, drew %d BUY / %d SELL arrows (max Fall=%.2f, max Rise=%.2f, level=%.2f)",
+                         copied, EnumToString((ENUM_TIMEFRAMES)g_signalTF),
+                         buyCount, sellCount, maxFall, maxRise, InpSignalLevel));
+   if(InpShowDiagnostics)
+   {
+      string hint = (buyCount + sellCount == 0)
+                    ? StringFormat("\n>> No bar crossed the level. Strongest seen: Fall %.2f / Rise %.2f.\n>> Lower InpSignalLevel (try 2.5) or increase InpHistoryBars to see arrows.", maxFall, maxRise)
+                    : "\n>> Arrows are below/above candles - scroll back if none are on screen.";
+      Comment(StringFormat("ExhaustionStrength v2.01\nSignal TF: %s | Bars evaluated: %d\nLast closed: Fall=%.2f Rise=%.2f (level %.2f)\nArrows drawn: %d BUY / %d SELL%s",
+                           EnumToString((ENUM_TIMEFRAMES)g_signalTF), copied,
+                           (copied > 1 && sigFall[1] != EMPTY_VALUE) ? sigFall[1] : 0.0,
+                           (copied > 1 && sigRise[1] != EMPTY_VALUE) ? sigRise[1] : 0.0,
+                           InpSignalLevel, buyCount, sellCount, hint));
    }
 
    return(rates_total);
