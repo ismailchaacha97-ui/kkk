@@ -1,0 +1,9 @@
+# Core runtime dependencies.
+#
+# Python 3.11 is required for this pinned NautilusTrader release: 1.221.0 is the
+# last version that supports 3.11. Newer releases (1.222.0+) require Python 3.12
+# or 3.13. See docs/UPSTREAM.md for the upgrade path.
+nautilus_trader==1.221.0
+numpy>=1.26
+pandas>=2.2
+matplotlib>=3.8

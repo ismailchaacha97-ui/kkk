@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Generated data (regenerate with `python -m daytrader generate-data`)
+data/
+data_real/
+
+# Backtest artefacts
+reports/
+
+# OS / editor noise
+.DS_Store
+.idea/
+.vscode/
