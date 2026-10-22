@@ -7,6 +7,7 @@ OHLC + tick volume only. No moving averages, no oscillators, no smoothing, no re
 MQL4/Indicators/Hidden_Institutional_Entries.mq4      <- the indicator (single file, no dependencies)
 presets/HIEP_H1_Conservative.set                       <- FTMO-style H1 preset
 presets/HIEP_M15_Active.set                           <- more frequent intraday preset
+TRADING_PLAYBOOK.md                                   <- step-by-step entry checklist
 ```
 
 ---
