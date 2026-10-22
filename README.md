@@ -241,8 +241,8 @@ The indicator enforces the *technical* part. This is the *behavioural* part.
 There is no MetaTrader in the build environment, so the indicator was verified two ways.
 
 **1. Static compilation.** The full source was compiled through a faithful MQL4 type/API shim with
-`g++ -std=c++17 -Wall -Wextra`. Result: no errors, no warnings (only the unavoidable unused
-`OnCalculate` parameters). This catches typos, undeclared identifiers, wrong arities, missing
+`g++ -std=c++17 -Wall -Wextra`, with the shim mirroring MetaEditor's real overload sets. Result:
+no errors, no warnings (only the unavoidable unused `OnCalculate` parameters). This catches typos, undeclared identifiers, wrong arities, missing
 forward declarations and type errors — all of which are hard failures in MetaEditor.
 
 **2. Behavioural simulation.** The real indicator code was driven through a simulated MT4 terminal

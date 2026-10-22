@@ -421,17 +421,17 @@ void TrimLevels()
 //+------------------------------------------------------------------+
 string LiqName(const int dir, const datetime t)
 {
-   return PREFIX + "LIQ_" + ((dir > 0) ? "H_" : "L_") + IntegerToString((int)t);
+   return PREFIX + "LIQ_" + ((dir > 0) ? "H_" : "L_") + IntegerToString((long)t);
 }
 
 string ZoneName(const int kind, const int dir, const datetime t)
 {
-   return PREFIX + "Z" + IntegerToString(kind) + ((dir > 0) ? "B_" : "S_") + IntegerToString((int)t);
+   return PREFIX + "Z" + IntegerToString(kind) + ((dir > 0) ? "B_" : "S_") + IntegerToString((long)t);
 }
 
 string SigName(const int dir, const datetime t)
 {
-   return PREFIX + "SIG_" + ((dir > 0) ? "B_" : "S_") + IntegerToString((int)t);
+   return PREFIX + "SIG_" + ((dir > 0) ? "B_" : "S_") + IntegerToString((long)t);
 }
 
 void RegisterObject(const string name, const datetime t)
@@ -465,7 +465,8 @@ void ForgetObject(const string name)
 
 void DeleteAllObjects()
 {
-   for(int i = ObjectsTotal(0) - 1; i >= 0; i--)
+   int total = ObjectsTotal(0, -1, -1);   // explicit: the 0-only form is ambiguous
+   for(int i = total - 1; i >= 0; i--)
    {
       string nm = ObjectName(0, i);
       if(StringFind(nm, PREFIX) == 0) ObjectDelete(0, nm);
@@ -931,7 +932,7 @@ void DetectStructure(const int s, const double atr)
       if(choch) { gLastCHOCHDir = DIR_BULL; gLastCHOCHTime = barTime; }
       brokenDir = DIR_BULL;
       if(InpShowStructure)
-         DrawText(PREFIX + "STR_" + IntegerToString((int)barTime),
+         DrawText(PREFIX + "STR_" + IntegerToString((long)barTime),
                   barTime, iHigh(_Symbol, _Period, s) + atr * 0.9,
                   choch ? "CHoCH" : "BOS", clrDeepSkyBlue, 9, ANCHOR_LOWER);
       if(InpUseOB) CreateOrderBlock(s, DIR_BULL, atr);
@@ -945,7 +946,7 @@ void DetectStructure(const int s, const double atr)
       if(choch) { gLastCHOCHDir = DIR_BEAR; gLastCHOCHTime = barTime; }
       brokenDir = DIR_BEAR;
       if(InpShowStructure)
-         DrawText(PREFIX + "STR_" + IntegerToString((int)barTime),
+         DrawText(PREFIX + "STR_" + IntegerToString((long)barTime),
                   barTime, iLow(_Symbol, _Period, s) - atr * 0.9,
                   choch ? "CHoCH" : "BOS", clrOrangeRed, 9, ANCHOR_UPPER);
       if(InpUseOB) CreateOrderBlock(s, DIR_BEAR, atr);
@@ -1495,7 +1496,7 @@ void AddSwingPoint(const int p, const int dir)
    {
       string lbl = (dir > 0) ? (ext ? "HH" : "LH") : (ext ? "HL" : "LL");
       double off = 0.35 * ATRv(p, InpATRPeriod);
-      DrawText(PREFIX + "SW_" + IntegerToString((int)t) + ((dir > 0) ? "H" : "L"),
+      DrawText(PREFIX + "SW_" + IntegerToString((long)t) + ((dir > 0) ? "H" : "L"),
                t, (dir > 0) ? price + off : price - off, lbl,
                (dir > 0) ? clrSilver : clrGray, 7,
                (dir > 0) ? ANCHOR_LOWER : ANCHOR_UPPER);
@@ -1779,7 +1780,7 @@ void UpdatePanel()
    {
       string nm = PREFIX + "PNL_" + IntegerToString(i);
       EnsureLabel(nm, InpPanelX, InpPanelY + i * lineH, InpPanelFont);
-      ObjectSetString(0, nm, OBJPROP_TEXT, (i < n) ? lines[i] : "");
+      ObjectSetString(0, nm, OBJPROP_TEXT, lines[i]);
       if(i < n) ObjectSetInteger(0, nm, OBJPROP_COLOR, cols[i]);
    }
 
