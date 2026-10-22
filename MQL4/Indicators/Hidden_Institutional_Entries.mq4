@@ -40,7 +40,7 @@
 //+------------------------------------------------------------------+
 #property copyright "H.I.E.P. - Hidden Institutional Entry Protocol"
 #property link      ""
-#property version   "1.10"
+#property version   "1.11"
 #property description "Pure price-action institutional entries: liquidity sweeps + order blocks + FVG + market structure. Non-repainting."
 #property strict
 
@@ -1723,7 +1723,7 @@ void UpdatePanel()
    if(!sessionOn || !spreadOn) { guard = "AMBER - FILTERED"; guardC = clrGold; }
    if(today >= InpMaxPerDay)   { guard = "LOCKED - DAILY CAP"; guardC = clrOrange; }
 
-   lines[n] = "H.I.E.P.  v1.10   " + _Symbol + " " + TFName(Period()); cols[n] = clrAqua; n++;
+   lines[n] = "H.I.E.P.  v1.11   " + _Symbol + " " + TFName(Period()); cols[n] = clrAqua; n++;
    lines[n] = "------------------------------"; cols[n] = C'70,80,95'; n++;
    lines[n] = StringFormat("STRUCTURE   %s", bias); cols[n] = biasC; n++;
    lines[n] = StringFormat("HTF BIAS    %s", htfTxt);
