@@ -8,6 +8,7 @@
 * **Volume-spike areas** — bars where volume expanded far above its average *and* price actually travelled. This is the closest thing to “institutional activity” a retail MT4 chart can show.
 * **Liquidity voids / imbalances** — 3-bar gaps left by an aggressive move; price often returns to rebalance them.
 * **Liquidity sweeps** — a wick through a level that closes back inside: a stop-run / liquidity grab, followed by a reversal.
+* **Entry signals** — the two tradeable outcomes of the above, with **entry, stop-loss and take-profit** levels and a risk:reward ratio: sweep-reversal entries and pool-acceptance (breakout) entries.
 
 The indicator is **object based** (no indicator buffers), so it works on any symbol and timeframe without touching the chart's indicator list, and it **does not repaint confirmed structure**: a pivot is only used after its right-hand confirmation bars have closed.
 
@@ -38,6 +39,8 @@ The indicator is **object based** (no indicator buffers), so it works on any sym
 3. Back in MT4, refresh the Navigator (**right-click → Refresh**), then drag **RealLiquidity** onto a chart.
 4. The inputs dialog opens. Defaults are tuned for FX majors on M5–H1; see §3 for other markets.
 
+**Fastest start:** attach it, leave the defaults, and look for the arrows. Every arrow comes with `entry`, `SL` and `TP` lines and a risk:reward ratio, so you can judge a signal without calculating anything.
+
 > **MT4 only.** The file uses the MQL4 object API and the MQL4 `OnCalculate(rates_total, prev_calculated, ...)` signature. It will not compile as-is in MetaTrader 5 (MT5 uses `ENUM_TIMEFRAMES`-based object calls and a different `OnCalculate`).
 
 Removal: detach the indicator; every chart object it created is prefixed `RLQO_` / `RLQP_` and is deleted automatically.
@@ -58,6 +61,10 @@ Removal: detach the indicator; every chart object it created is prefixed `RLQO_`
 | **Gold dash-dot box, `void up/dn`** | Unfilled liquidity void / 3-bar imbalance. |
 | **Up / down arrow + `sweep`** | Stop-run: price wicked through a pool and closed back inside. |
 | **Dotted horizontal line + `BSL 1.09485 (+5.9p)`** | The **nearest** liquidity level above and below the current price, with distance in pips. |
+| **Aqua ▲ `BUY sweep 2.4R E 1.10450`** | Buy entry signal: model, planned risk:reward, entry price. |
+| **Magenta ▼ `SELL sweep 1.8R E 1.10250`** | Sell entry signal. |
+| **Solid entry line + dotted `SL` / `TP` lines** | Entry, stop-loss and take-profit of the signal, projected right for `InpEntryProjectBars`. |
+| **Faint red/green boxes** | Optional risk (entry→SL) and reward (entry→TP) shading. |
 | **Panel (top-left)** | Live statistics: swing count, active vs swept pools, volume zones, flow bias, market structure, current volume expansion, nearest levels, last event. |
 | **Legend (bottom-left)** | Colour key. |
 
@@ -108,6 +115,30 @@ Nothing is drawn inside the future beyond `InpExtendBars` bars to the right of t
 | `InpMaxVoids` | `8` | Maximum voids drawn. |
 | `InpHideFilledVoids` | `true` | Hide voids that price has already traded back through. |
 
+### Entry signals
+
+| Input | Default | Description |
+|---|---|---|
+| `InpShowEntries` | `true` | Master switch for entry signals. |
+| `InpEntrySweep` | `true` | **Sweep-reversal** model: pool swept + next bar closes beyond the sweeping bar's opposite extreme. |
+| `InpEntryBreakout` | `true` | **Pool-acceptance** model: two consecutive closes beyond a pool level with no close back inside. |
+| `InpEntryConfirmBars` | `1` | Bars after the sweep before the confirmation bar is evaluated. `1` = the very next bar. |
+| `InpEntrySLBufferATR` | `0.25` | Stop distance beyond the sweep wick / pool edge, as a fraction of ATR. A minimum of 2 pips always applies. |
+| `InpEntryTPMode` | `2` | `0` = nearest pool only (skip if RR too small), `1` = fixed RR, `2` = pool if the RR is acceptable, otherwise fixed RR. |
+| `InpEntryRR` | `2.0` | Fixed risk:reward used for the fallback target. |
+| `InpEntryMinRR` | `1.0` | A pool target is only accepted if it yields at least this RR. |
+| `InpEntryMaxSignals` | `6` | Maximum signals drawn (newest first). |
+| `InpEntryLookback` | `300` | Signals older than this many bars are dropped. |
+| `InpEntryProjectBars` | `30` | How far the entry/SL/TP lines are projected to the right. |
+| `InpEntryShowLevels` | `true` | Draw the entry, SL and TP lines with price labels. |
+| `InpEntryShowZones` | `false` | Shade the risk and reward areas. |
+| `InpEntryVolFilter` | `false` | Require volume expansion on the sweep and confirmation bars. |
+| `InpEntryVolMult` | `1.2` | Volume multiple required when the filter is enabled. |
+| `InpColorBuy` | `Aqua` | Buy entry arrow/label. |
+| `InpColorSell` | `Magenta` | Sell entry arrow/label. |
+| `InpColorSL` | `Red` | Stop-loss line. |
+| `InpColorTP` | `MediumSeaGreen` | Take-profit line. |
+
 ### Visuals
 
 | Input | Default | Description |
@@ -131,6 +162,7 @@ Nothing is drawn inside the future beyond `InpExtendBars` bars to the right of t
 | Input | Default | Description |
 |---|---|---|
 | `InpAlertSweep` | `true` | Alert when a pool is swept on the last closed bar. |
+| `InpAlertEntry` | `true` | Alert with entry / SL / TP when a new entry signal confirms. |
 | `InpAlertApproach` | `false` | Alert when price comes within `InpAlertDistPips` of the nearest liquidity. |
 | `InpAlertDistPips` | `5.0` | Approach distance. |
 | `InpAlertPush` | `false` | Also send a push notification (MetaQuotes ID required). |
@@ -150,6 +182,8 @@ Alerts are evaluated **once per new bar**, never on the first calculation after 
 | Indices / CFDs | 4 | 500 | 4.0–6.0 | 1.5 | Prefer `Real volume` if your broker provides it. |
 | Crypto CFDs | 6 | 800 | 3.0 | 2.0 | Tick volume is noisy; raise the multiplier. |
 | Futures (if broker offers) | 5 | 600 | 2.0 | 1.5 | Switch `InpVolumeSource` to `Real volume`. |
+
+For entries specifically: `InpEntryTPMode = 1` with `InpEntryRR = 2.0` gives the cleanest, most frequent signals (no dependency on a pool being reachable); `mode 2` gives higher-quality but rarer ones. Leave `InpEntryVolFilter` off until you have watched the arrows for a week.
 
 If the chart is too busy: raise `InpSensitivity`? **No** — lower it (strict), reduce `InpMaxPools` / `InpMaxSingleLevels`, or enable `InpOnlyActivePools`.
 If the chart is too empty: raise sensitivity, widen `InpEqualTolPips`, or increase `InpLookbackBars`.
@@ -196,7 +230,48 @@ If the chart is too empty: raise sensitivity, widen `InpEqualTolPips`, or increa
 
 ---
 
-## 6. Reading the chart — practical use
+## 6. Entry signals
+
+Two models, both evaluated **on closed bars only** and never re-evaluated on ticks.
+
+### A. Sweep reversal (`reason = sweep`)
+
+1. A pool (≥ `InpMinTouches` equal highs/lows) gets swept: `high > level` **and** `close < level` (mirrored for lows).
+2. On the confirmation bar — `InpEntryConfirmBars` bars after the sweep — the close must break the **sweeping bar's opposite extreme**:
+   * BSL sweep → short when `close < low(sweep bar)`;
+   * SSL sweep → long when `close > high(sweep bar)`.
+3. **Entry** = that confirmation close. **Stop** = beyond the sweep wick + `ATR × InpEntrySLBufferATR`. **Target** = nearest active pool in the trade direction, or the fixed RR.
+
+### B. Pool acceptance (`reason = accept`)
+
+1. A pool that was *not* swept gets two consecutive closes beyond its level — the market accepted the price, it did not just wick through.
+2. **Entry** = the second (newest) of those closes. **Stop** = the opposite edge of the pool band − buffer. **Target** = next pool in the direction of the trade, or the fixed RR.
+
+### Take profit selection
+
+```
+poolTp = nearest active pool of the same kind as the trade direction
+         (RSL above for a long, SSL below for a short)
+
+mode 0 : use poolTp, skip the signal if it yields < InpEntryMinRR
+mode 1 : always use entry ± risk × InpEntryRR
+mode 2 : use poolTp if its RR >= InpEntryMinRR, otherwise the fixed RR
+```
+
+If no pool is available in the trade direction, modes 1 and 2 fall back to the fixed RR target; mode 0 skips the signal.
+
+### Rules the signals obey
+
+* **One signal per bar** — if two pools trigger on the same bar, the stronger one (more touches, then higher RR, then sweep over acceptance) is kept.
+* **Valid geometry only** — a signal is discarded unless `SL < entry < TP` (long) or `TP < entry < SL` (short).
+* **Non-repainting** — a signal appears on a bar that has already closed and stays there.
+* **Capped and aged** — at most `InpEntryMaxSignals`, nothing older than `InpEntryLookback` bars.
+
+The panel row **`Last signal`** always shows the most recent one, e.g. `BUY sweep 2.4R @ 1.10450`.
+
+---
+
+## 7. Reading the chart — practical use
 
 **Liquidity as a magnet.** Price is usually drawn to the nearest pool: stops above equal highs are fuel for a move up, stops below equal lows for a move down. The nearest-level lines show how many pips away that fuel is.
 
@@ -215,7 +290,7 @@ If the chart is too empty: raise sensitivity, widen `InpEqualTolPips`, or increa
 
 ---
 
-## 7. Notes, limitations, troubleshooting
+## 8. Notes, limitations, troubleshooting
 
 * **“Real” liquidity is inferred, not observed.** MT4 is a retail charting terminal: it exposes OHLC and tick volume only, with no DOM, no depth-of-market and no per-order data. True order-flow analysis needs a futures/exchange feed (e.g. CME datamine, Bookmap, Sierra Chart) or broker-side depth. This indicator reconstructs the *most probable* resting-liquidity locations from price structure and volume proxies, which is what the concept is based on in practice. If your broker supplies exchange volume (some do for futures), switch `InpVolumeSource` to `Real volume`.
 * **Tick volume ≠ traded contracts.** On FX it is the number of price updates in a bar and correlates well with activity, but it is not contract volume.
@@ -225,18 +300,19 @@ If the chart is too empty: raise sensitivity, widen `InpEqualTolPips`, or increa
 * **Not enough bars:** below 100 bars loaded the indicator stays silent.
 * **Nothing appears:** check that the chart is not in a weekend/flat period, lower `InpSensitivity` (more strict → fewer, but also check the opposite direction), raise `InpLookbackBars`, and confirm the timeframe has visible swings.
 * **Too many boxes:** set `InpOnlyActivePools = true`, lower `InpMaxPools`/`InpMaxSingleLevels`, or raise `InpMinTouches` to 3.
-* **Alerts fire once per bar**, on the bar that completes, using the last closed bar's sweep.
-* **Testing:** the MQL4 source was verified with a C++/ASan harness (240 randomized parameter/bar-count cases, geometry and object-lifecycle assertions). Always compile in MetaEditor for your own build.
+* **Alerts fire once per bar**, on the bar that completes, using the last closed bar's sweep or entry.
+* **No entry arrows:** they need a confirmed sweep or acceptance plus a valid target. Try `InpEntryTPMode = 1` (fixed RR) to remove the pool-target requirement, raise `InpEntryMaxSignals`, or increase `InpEntryLookback`. With `InpEntryVolFilter = true` on quiet symbols you may get none — turn it off first.
+* **Testing:** the MQL4 source was verified with a C++/ASan harness (240 randomized parameter/bar-count cases plus targeted tests for pool detection, sweeps, volume zones, both entry models, signal geometry, and object lifecycle). Always compile in MetaEditor for your own build.
 
 ---
 
-## 8. File layout
+## 9. File layout
 
 ```
 RealLiquidity.mq4   the indicator (single file, no dependencies)
 README.md           this document
 ```
 
-## 9. Disclaimer
+## 10. Disclaimer
 
 Trading involves substantial risk. This tool is an analysis aid, not a signal service, and it is provided **as is**, without warranty of any kind. Past behaviour of liquidity zones does not guarantee future results. Test on a demo account before using it with real money.

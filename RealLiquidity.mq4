@@ -26,10 +26,10 @@
 //|  Free to use, modify and redistribute. No warranty.              |
 //+------------------------------------------------------------------+
 #property copyright   "Arena.ai agent"
-#property version     "1.00"
+#property version     "1.10"
 #property description "Maps real liquidity: buy-side / sell-side pools, equal highs and"
 #property description "lows, volume-spike institutional areas, liquidity voids and sweeps."
-#property description "Object based, non-repainting after pivot confirmation."
+#property description "Entry signals with entry/SL/TP. Object based, non-repainting."
 #property strict
 #property indicator_chart_window
 
@@ -77,6 +77,27 @@ input double  InpVoidMinATR      = 0.35;                         // Min gap size
 input int     InpMaxVoids        = 8;                            // Max voids drawn
 input bool    InpHideFilledVoids = true;                         // Hide voids that price already filled
 
+input string  InpG3B             = "=== Entry signals ===";        // Entry signals
+input bool    InpShowEntries     = true;                         // Show entry signals
+input bool    InpEntrySweep      = true;                         // Sweep-reversal entries
+input bool    InpEntryBreakout   = true;                         // Pool-acceptance entries
+input int     InpEntryConfirmBars= 1;                            // Bars after sweep to confirm
+input double  InpEntrySLBufferATR= 0.25;                         // Stop buffer beyond wick (x ATR)
+input int     InpEntryTPMode     = 2;                            // Target: 0=pool only 1=fixed RR 2=pool or RR
+input double  InpEntryRR         = 2.0;                          // Fixed risk:reward target
+input double  InpEntryMinRR      = 1.0;                          // Min RR to accept a pool target
+input int     InpEntryMaxSignals = 6;                            // Max entry signals kept
+input int     InpEntryLookback   = 300;                          // Only signals within N bars
+input int     InpEntryProjectBars= 30;                           // Project entry/SL/TP lines (bars)
+input bool    InpEntryShowLevels = true;                         // Draw entry / SL / TP lines
+input bool    InpEntryShowZones  = false;                        // Shade risk / reward areas
+input bool    InpEntryVolFilter  = false;                        // Require volume expansion
+input double  InpEntryVolMult    = 1.20;                         // Volume multiple for entry filter
+input color   InpColorBuy        = clrAqua;                      // Buy entry
+input color   InpColorSell       = clrMagenta;                   // Sell entry
+input color   InpColorSL         = clrRed;                       // Stop-loss line
+input color   InpColorTP         = clrMediumSeaGreen;            // Take-profit line
+
 input string  InpG4              = "=== Visuals ===";            // Visuals
 input bool    InpShowPanel       = true;                         // Show information panel
 input bool    InpShowLegend      = true;                         // Show legend
@@ -94,6 +115,7 @@ input color   InpColorPanelTx    = clrWhite;                      // Panel text
 
 input string  InpG5              = "=== Alerts ===";             // Alerts
 input bool    InpAlertSweep      = true;                          // Alert on liquidity sweep
+input bool    InpAlertEntry      = true;                          // Alert on new entry signal
 input bool    InpAlertApproach   = false;                         // Alert when price nears liquidity
 input double  InpAlertDistPips   = 5.0;                           // Approach distance (pips)
 input bool    InpAlertPush       = false;                         // Send push notification
@@ -104,7 +126,7 @@ input bool    InpAlertSound      = false;                         // Play sound
 //+------------------------------------------------------------------+
 #define PFX_OBJ     "RLQO_"      // prefix for chart geometry
 #define PFX_PNL     "RLQP_"      // prefix for panel objects
-#define PANEL_ROWS  11
+#define PANEL_ROWS  13
 #define PANEL_W     340
 
 #define RLQ_BSL     0            // buy-side liquidity (highs)
@@ -127,6 +149,7 @@ struct LiqPool
    double   bottom;               // lowest pivot of the cluster
    double   level;                // actionable level (top for BSL, bottom for SSL)
    double   sweepPrice;           // extreme of the sweeping bar
+   int      sweepBar;             // series index of the sweeping bar (-1 = none)
    int      kind;                 // RLQ_BSL / RLQ_SSL
    int      touches;              // number of pivots in the cluster
    int      lastBar;              // series index of the newest pivot
@@ -153,6 +176,21 @@ struct VoidArea
    bool     filled;
 };
 
+struct EntrySignal
+{
+   datetime tm;                   // confirmation bar time
+   double   entry;                // entry price (close of the signal bar)
+   double   sl;                   // stop-loss
+   double   tp;                   // take-profit
+   double   rr;                   // planned risk:reward
+   double   barHigh;              // signal bar range, for arrow placement
+   double   barLow;
+   int      dir;                  // +1 buy, -1 sell
+   int      reason;               // 0 = sweep reversal, 1 = pool acceptance
+   int      touches;              // strength of the pool behind the signal
+   int      bar;                  // series index of the signal bar
+};
+
 PivotInfo g_pivots[];
 int       g_pivCount      = 0;
 LiqPool   g_pools[];
@@ -161,6 +199,8 @@ VolArea   g_volAreas[];
 int       g_volCount      = 0;
 VoidArea  g_voids[];
 int       g_voidCount     = 0;
+EntrySignal g_entries[];
+int       g_entryCount    = 0;
 
 double    g_vol[];                // volume per bar (series aligned)
 double    g_volSma[];             // average of the N bars BEFORE the bar
@@ -490,6 +530,7 @@ void BuildPools()
          g_pools[idx].bottom     = price;
          g_pools[idx].level      = price;
          g_pools[idx].sweepPrice = 0.0;
+         g_pools[idx].sweepBar   = -1;
          g_pools[idx].kind       = kind;
          g_pools[idx].touches    = 1;
          g_pools[idx].lastBar    = g_pivots[i].bar;
@@ -565,6 +606,7 @@ void DetectSweeps(const datetime &t[], const double &h[], const double &l[], con
       g_pools[i].swept      = false;
       g_pools[i].tSwept     = 0;
       g_pools[i].sweepPrice = 0.0;
+      g_pools[i].sweepBar   = -1;
 
       int start = g_pools[i].lastBar - g_pivotR;
       if(start < 0) continue;
@@ -584,6 +626,7 @@ void DetectSweeps(const datetime &t[], const double &h[], const double &l[], con
          {
             g_pools[i].swept      = true;
             g_pools[i].tSwept     = t[j];
+            g_pools[i].sweepBar   = j;
             g_pools[i].sweepPrice = (g_pools[i].kind == RLQ_BSL) ? h[j] : l[j];
             break;
          }
@@ -845,6 +888,260 @@ void SetLastEvent()
 }
 
 //+------------------------------------------------------------------+
+//| ENTRY SIGNALS                                                    |
+//|                                                                  |
+//|  Two entry models, both confirmed on closed bars only:            |
+//|                                                                  |
+//|   A) Sweep reversal - a pool is swept (wick through, close back) |
+//|      and the next bar closes beyond the sweeping bar's opposite   |
+//|      extreme. Stops go beyond the wick that created the sweep.    |
+//|                                                                  |
+//|   B) Pool acceptance - price closes beyond a pool level for two   |
+//|      consecutive bars (no close back inside). Stops go beyond the  |
+//|      opposite edge of the pool.                                    |
+//|                                                                  |
+//|  Take profit is either the next liquidity pool in the direction   |
+//|  of the trade, a fixed risk:reward, or whichever is valid first.  |
+//+------------------------------------------------------------------+
+double VolRatioAt(int bar)
+{
+   if(bar < 1 || bar >= ArraySize(g_volSma)) return(0.0);
+   if(g_volSma[bar] <= 0.0) return(0.0);
+   return(g_vol[bar] / g_volSma[bar]);
+}
+
+//+------------------------------------------------------------------+
+//| Nearest active pool of a given kind beyond a reference price     |
+//+------------------------------------------------------------------+
+double TargetLevel(int kind, double price)
+{
+   double best = 0.0;
+
+   for(int i = 0; i < g_poolCount; i++)
+   {
+      if(g_pools[i].kind != kind) continue;
+      if(g_pools[i].swept) continue;
+      if(g_pools[i].touches < InpMinTouches) continue;
+
+      double lvl = g_pools[i].level;
+
+      if(kind == RLQ_BSL)
+      {
+         if(lvl > price + Point * 0.5)
+            if(best == 0.0 || lvl < best) best = lvl;
+      }
+      else
+      {
+         if(lvl < price - Point * 0.5)
+            if(best == 0.0 || lvl > best) best = lvl;
+      }
+   }
+
+   return(best);
+}
+
+//+------------------------------------------------------------------+
+//| Take profit: pool target, fixed RR, or pool-if-RR-ok             |
+//+------------------------------------------------------------------+
+double ResolveTP(int dir, double entry, double risk)
+{
+   if(risk <= 0.0) return(0.0);
+
+   double rr   = MathMax(0.5, InpEntryRR);
+   double rrTp = entry + dir * risk * rr;
+
+   if(InpEntryTPMode == 1) return(rrTp);
+
+   double poolTp = TargetLevel((dir > 0) ? RLQ_BSL : RLQ_SSL, entry);
+
+   if(poolTp > 0.0)
+   {
+      double poolRR = MathAbs(poolTp - entry) / risk;
+      if(poolRR >= InpEntryMinRR) return(poolTp);
+      if(InpEntryTPMode == 2)     return(rrTp);
+      return(0.0);                       // mode 0: pool must be valid
+   }
+
+   if(InpEntryTPMode == 0) return(0.0);
+   return(rrTp);
+}
+
+//+------------------------------------------------------------------+
+//| Store a validated entry signal                                   |
+//+------------------------------------------------------------------+
+void AddEntry(datetime tm, int bar, double entry, double sl, double tp,
+              int dir, int reason, int touches, double barHigh, double barLow)
+{
+   if(g_entryCount >= ArraySize(g_entries)) return;
+
+   // geometry must make sense for the direction
+   if(dir > 0 && !(sl < entry && entry < tp)) return;
+   if(dir < 0 && !(tp < entry && entry < sl)) return;
+
+   double risk   = MathAbs(entry - sl);
+   double reward = MathAbs(tp - entry);
+   if(risk <= 0.0 || reward <= 0.0) return;
+
+   int k = g_entryCount;
+   g_entryCount++;
+
+   g_entries[k].tm       = tm;
+   g_entries[k].entry    = entry;
+   g_entries[k].sl       = sl;
+   g_entries[k].tp       = tp;
+   g_entries[k].rr       = reward / risk;
+   g_entries[k].barHigh  = barHigh;
+   g_entries[k].barLow   = barLow;
+   g_entries[k].dir      = dir;
+   g_entries[k].reason   = reason;
+   g_entries[k].touches  = touches;
+   g_entries[k].bar      = bar;
+}
+
+//+------------------------------------------------------------------+
+//| Keep the strongest signal per bar, newest first, capped           |
+//+------------------------------------------------------------------+
+double EntryScore(EntrySignal &e)
+{
+   double score = (double)e.touches * 10.0 + MathMin(e.rr, 5.0);
+   if(e.reason == 0) score += 5.0;       // sweep reversals are the primary model
+   return(score);
+}
+
+void FilterAndSortEntries()
+{
+   // insertion sort: newest first, stronger signal wins a tie
+   for(int i = 1; i < g_entryCount; i++)
+   {
+      EntrySignal key = g_entries[i];
+      int j = i - 1;
+
+      while(j >= 0)
+      {
+         bool swap = false;
+
+         if(g_entries[j].tm < key.tm)                 swap = true;
+         else if(g_entries[j].tm == key.tm &&
+                 EntryScore(g_entries[j]) < EntryScore(key)) swap = true;
+
+         if(!swap) break;
+
+         g_entries[j + 1] = g_entries[j];
+         j--;
+      }
+      g_entries[j + 1] = key;
+   }
+
+   // keep one signal per bar, drop stale ones, respect the cap
+   EntrySignal kept[];
+   ArrayResize(kept, g_entryCount + 2);
+   int n = 0;
+
+   for(int i = 0; i < g_entryCount; i++)
+   {
+      if(g_entries[i].bar > InpEntryLookback) continue;
+      if(n > 0 && kept[n - 1].tm == g_entries[i].tm) continue;
+
+      if(n >= (int)MathMax(1, InpEntryMaxSignals)) break;
+
+      kept[n] = g_entries[i];
+      n++;
+   }
+
+   for(int i = 0; i < n; i++) g_entries[i] = kept[i];
+   g_entryCount = n;
+}
+
+//+------------------------------------------------------------------+
+//| Detect entry signals                                             |
+//+------------------------------------------------------------------+
+bool EntryFilterPass(int bar)
+{
+   if(!InpEntryVolFilter) return(true);
+   return(VolRatioAt(bar) >= InpEntryVolMult);
+}
+
+void DetectEntries(const datetime &t[], const double &o[], const double &h[],
+                   const double &l[], const double &c[])
+{
+   g_entryCount = 0;
+   if(!InpShowEntries || g_poolCount <= 0) return;
+
+   ArrayResize(g_entries, g_poolCount * 2 + 4);
+
+   double buf = MathMax(InpEntrySLBufferATR * g_atrNow, Point * 20.0);
+
+   for(int i = 0; i < g_poolCount; i++)
+   {
+      if(g_pools[i].touches < InpMinTouches) continue;
+
+      // ---------------- A) sweep reversal ----------------
+      if(InpEntrySweep && g_pools[i].swept && g_pools[i].sweepBar >= 2)
+      {
+         int j = g_pools[i].sweepBar;
+         int k = j - (int)MathMax(1, InpEntryConfirmBars);
+         if(k < 1) continue;
+
+         int dir = 0;
+
+         // swept highs -> short, swept lows -> long
+         if(g_pools[i].kind == RLQ_BSL && c[k] < l[j]) dir = -1;
+         if(g_pools[i].kind == RLQ_SSL && c[k] > h[j]) dir = +1;
+
+         if(dir != 0 && EntryFilterPass(j) && EntryFilterPass(k))
+         {
+            double entry = c[k];
+            double sl    = (dir < 0) ? (h[j] + buf) : (l[j] - buf);
+            double tp    = ResolveTP(dir, entry, MathAbs(entry - sl));
+
+            AddEntry(t[k], k, entry, sl, tp, dir, 0, g_pools[i].touches, h[k], l[k]);
+         }
+      }
+
+      // ---------------- B) pool acceptance ----------------
+      if(InpEntryBreakout && !g_pools[i].swept)
+      {
+         int start = g_pools[i].lastBar - g_pivotR;
+         if(start < 3) continue;
+
+         int brk = -1;
+         for(int j = start; j >= 1; j--)
+         {
+            if(g_pools[i].kind == RLQ_BSL)
+            {
+               if(c[j] > g_pools[i].level) { brk = j; break; }
+            }
+            else
+            {
+               if(c[j] < g_pools[i].level) { brk = j; break; }
+            }
+         }
+
+         if(brk < 2) continue;
+
+         // acceptance needs the newest bar of the run to close beyond too
+         bool accepted = false;
+         if(g_pools[i].kind == RLQ_BSL) accepted = (c[brk - 1] > g_pools[i].level);
+         else                          accepted = (c[brk - 1] < g_pools[i].level);
+         if(!accepted) continue;
+
+         int kb = brk - 1;
+         if(!EntryFilterPass(kb)) continue;
+
+         int    dir   = (g_pools[i].kind == RLQ_BSL) ? +1 : -1;
+         double entry = c[kb];
+         double sl    = (dir > 0) ? (g_pools[i].bottom - buf)
+                                  : (g_pools[i].top + buf);
+         double tp    = ResolveTP(dir, entry, MathAbs(entry - sl));
+
+         AddEntry(t[kb], kb, entry, sl, tp, dir, 1, g_pools[i].touches, h[kb], l[kb]);
+      }
+   }
+
+   FilterAndSortEntries();
+}
+
+//+------------------------------------------------------------------+
 //| ANALYSIS: master routine                                         |
 //+------------------------------------------------------------------+
 void Analyze(const datetime &t[], const double &o[], const double &h[], const double &l[],
@@ -852,10 +1149,11 @@ void Analyze(const datetime &t[], const double &o[], const double &h[], const do
 {
    g_ready = false;
 
-   g_pivCount  = 0;
-   g_poolCount = 0;
-   g_volCount  = 0;
-   g_voidCount = 0;
+   g_pivCount   = 0;
+   g_poolCount  = 0;
+   g_volCount   = 0;
+   g_voidCount  = 0;
+   g_entryCount = 0;
 
    int scan = (int)MathMin(bars - g_pivotL - 2, InpLookbackBars);
    if(scan < 30) scan = (int)MathMin(bars - 2, 30);
@@ -886,6 +1184,7 @@ void Analyze(const datetime &t[], const double &o[], const double &h[], const do
    ComputeStats(bars);
    FindNearest(c[0]);
    SetLastEvent();
+   DetectEntries(t, o, h, l, c);
 }
 
 //+------------------------------------------------------------------+
@@ -1161,6 +1460,89 @@ void RenderNearest()
 }
 
 //+------------------------------------------------------------------+
+//| DRAWING: entry signals with entry / SL / TP                      |
+//+------------------------------------------------------------------+
+void RenderEntries()
+{
+   if(!InpShowEntries || g_entryCount <= 0) return;
+
+   double off = MathMax(g_atrNow * 0.7, Point * 40.0);
+
+   for(int i = 0; i < g_entryCount; i++)
+   {
+      int    dir  = g_entries[i].dir;
+      bool   buy  = (dir > 0);
+      color  col  = buy ? InpColorBuy : InpColorSell;
+      double py   = buy ? (g_entries[i].barLow  - off)
+                        : (g_entries[i].barHigh + off);
+
+      // ---- arrow -------------------------------------------------
+      string arrowName = PFX_OBJ + "ENTA_" + IntegerToString(i);
+      DrawArrow(arrowName, g_entries[i].tm, py, buy, col);
+
+      // ---- signal label ------------------------------------------
+      string why = "breakout";
+      if(g_entries[i].reason == 0) why = "sweep";
+
+      string sideTxt = "SELL ";
+      if(buy) sideTxt = "BUY ";
+
+      string txt = sideTxt + why + " " + DoubleToString(g_entries[i].rr, 1) + "R" +
+                   "  E " + DoubleToString(g_entries[i].entry, (int)Digits);
+
+      string labelName = PFX_OBJ + "ENTT_" + IntegerToString(i);
+      DrawText(labelName, g_entries[i].tm, py, txt, col,
+               (int)MathMax(6, InpFontSize - 1),
+               buy ? ANCHOR_LEFT_UPPER : ANCHOR_LEFT_LOWER);
+
+      // ---- entry / stop / target levels ---------------------------
+      if(!InpEntryShowLevels) continue;
+
+      datetime t2 = g_entries[i].tm +
+                    (datetime)(PeriodSeconds() * (int)MathMax(2, InpEntryProjectBars));
+
+      string eName = PFX_OBJ + "ENTL_" + IntegerToString(i);
+      DrawLine(eName, g_entries[i].tm, g_entries[i].entry, t2, g_entries[i].entry,
+               col, STYLE_SOLID, 1, false);
+
+      string sName = PFX_OBJ + "ENTSL_" + IntegerToString(i);
+      DrawLine(sName, g_entries[i].tm, g_entries[i].sl, t2, g_entries[i].sl,
+               InpColorSL, STYLE_DOT, 1, false);
+
+      string pName = PFX_OBJ + "ENTTP_" + IntegerToString(i);
+      DrawLine(pName, g_entries[i].tm, g_entries[i].tp, t2, g_entries[i].tp,
+               InpColorTP, STYLE_DOT, 1, false);
+
+      string eTxt = PFX_OBJ + "ENTLT_" + IntegerToString(i);
+      DrawText(eTxt, t2, g_entries[i].entry,
+               "entry " + DoubleToString(g_entries[i].entry, (int)Digits),
+               col, (int)MathMax(6, InpFontSize - 1), ANCHOR_RIGHT_LOWER);
+
+      string sTxt = PFX_OBJ + "ENTSLT_" + IntegerToString(i);
+      DrawText(sTxt, t2, g_entries[i].sl,
+               "SL " + DoubleToString(g_entries[i].sl, (int)Digits),
+               InpColorSL, (int)MathMax(6, InpFontSize - 1), ANCHOR_RIGHT_LOWER);
+
+      string pTxt = PFX_OBJ + "ENTTPT_" + IntegerToString(i);
+      DrawText(pTxt, t2, g_entries[i].tp,
+               "TP " + DoubleToString(g_entries[i].tp, (int)Digits),
+               InpColorTP, (int)MathMax(6, InpFontSize - 1), ANCHOR_RIGHT_LOWER);
+
+      // ---- risk / reward shading ---------------------------------
+      if(InpEntryShowZones)
+      {
+         string rName = PFX_OBJ + "ENTRZ_" + IntegerToString(i);
+         DrawRect(rName, g_entries[i].tm, g_entries[i].entry, t2, g_entries[i].sl,
+                  InpColorSL, false, STYLE_DOT, 1, true);
+
+         string wName = PFX_OBJ + "ENTWZ_" + IntegerToString(i);
+         DrawRect(wName, g_entries[i].tm, g_entries[i].entry, t2, g_entries[i].tp,
+                  InpColorTP, false, STYLE_DOT, 1, true);
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
 //| DRAWING: entry point                                             |
 //+------------------------------------------------------------------+
 void RenderAll()
@@ -1169,6 +1551,7 @@ void RenderAll()
    RenderVolumeAreas();
    RenderVoids();
    RenderNearest();
+   RenderEntries();
 }
 
 //+------------------------------------------------------------------+
@@ -1232,6 +1615,28 @@ void BuildPanelRows()
                g_hasSSL ? InpColorSSL : InpColorPanelTx);
 
    AddPanelRow(PadRight("Last event", 13) + ": " + g_lastEvent, InpColorText);
+
+   string sigTxt = "none";
+   color  sigClr = InpColorPanelTx;
+   if(g_entryCount > 0)
+   {
+      int    dir   = g_entries[0].dir;
+      string sideS = "SELL ";
+      if(dir > 0) sideS = "BUY ";
+
+      string whyS = "accept ";
+      if(g_entries[0].reason == 0) whyS = "sweep ";
+
+      sigTxt = sideS + whyS + DoubleToString(g_entries[0].rr, 1) + "R @ " +
+               DoubleToString(g_entries[0].entry, (int)Digits);
+      sigClr = (dir > 0) ? InpColorBuy : InpColorSell;
+   }
+   AddPanelRow(PadRight("Last signal", 13) + ": " + sigTxt, sigClr);
+
+   AddPanelRow(PadRight("Signals", 13) + ": " + IntegerToString(g_entryCount) +
+               "  (sweep " + (InpEntrySweep ? "on" : "off") +
+               " / accept " + (InpEntryBreakout ? "on" : "off") + ")",
+               InpColorPanelTx);
 
    AddPanelRow(PadRight("Scan", 13) + ": " + IntegerToString(InpLookbackBars) +
                " bars | ATR " + DoubleToString(g_atrNow / g_pointsPerPip, 1) + "p", InpColorPanelTx);
@@ -1371,6 +1776,25 @@ void CheckAlerts(const datetime &t[])
                        DoubleToString(g_pools[i].sweepPrice, (int)Digits) +
                        " (" + IntegerToString(g_pools[i].touches) + " touches)";
          Notify(msg);
+      }
+   }
+
+   if(InpAlertEntry)
+   {
+      for(int i = 0; i < g_entryCount; i++)
+      {
+         if(g_entries[i].tm != t[1]) continue;
+
+         string side = "SELL";
+         if(g_entries[i].dir > 0) side = "BUY";
+
+         string why = "pool acceptance";
+         if(g_entries[i].reason == 0) why = "liquidity sweep";
+         Notify(_Symbol + " " + IntegerToString(_Period) + "min: " + side + " entry (" + why +
+                ") E " + DoubleToString(g_entries[i].entry, (int)Digits) +
+                " SL " + DoubleToString(g_entries[i].sl, (int)Digits) +
+                " TP " + DoubleToString(g_entries[i].tp, (int)Digits) +
+                "  " + DoubleToString(g_entries[i].rr, 1) + "R");
       }
    }
 
