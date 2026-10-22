@@ -26,14 +26,16 @@
 //|  Only closed bar (index 1) is evaluated → no repaint / no lag.  |
 //|  Optimized: O(limit) per tick, early exit, no heavy loops.     |
 //|                                                                  |
-//|  Version: 2.10  |  MT4 Build 1380+  |  Strict mode               |
+//|  Version: 2.20  |  MT4 Build 1380+  |  Strict mode               |
 //|  FIX v2.1: Default filters loosened so chart is never empty.     |
 //|          Sweep & Volume OFF by default, impulse 1.20 ATR,        |
 //|          brighter zones, visible on any pair/TF.                 |
+//|  NEW v2.2: Optional HTF Bias Filter (H1/H4/D1) — M5 bullish     |
+//|          now means M5, with HTF dashboard + signal filtering.    |
 //+------------------------------------------------------------------+
 #property copyright "Institutional Price Action Lab — Professional Edition"
 #property link      "https://github.com/ismailchaacha97-ui/kkk"
-#property version   "2.10"
+#property version   "2.20"
 #property description "Hidden Institutional Entry — pure price action. Detects liquidity sweep + displacement + OB/FVG mitigation with candlestick confirmation. No lagging indicators."
 #property strict
 
@@ -96,6 +98,13 @@ input double InpPinBarWickFact = 0.55;        // Pin bar wick/range ratio (0.50-
 input double InpEngulfBodyFact = 1.0;        // Engulfing: current body > prev body * factor
 input bool   InpVolumeConfirm  = false;      // Confirm with tick volume spike (OFF for Forex)
 input int    InpVolMAPeriod    = 20;         // Tick volume MA period
+
+//--- Inputs — HTF Bias Filter (NEW)
+input string Inp_Set_HTF       = "===== HTF BIAS FILTER ====="; // === HTF Filter ===
+input bool   InpUseHTFFilter   = true;       // Filter signals with Higher Timeframe bias
+input ENUM_TIMEFRAMES InpHTFTimeframe = PERIOD_H1; // HTF for bias (M15/M30/H1/H4/D1)
+input bool   InpHTFStrict      = false;      // Strict: BUY only if HTF bullish, SELL only if HTF bearish (blocks neutral too)
+input bool   InpHTFShowOnChart = true;       // Show HTF bias on dashboard
 
 //--- Inputs — Risk / Display
 input string Inp_Set_Display   = "===== DISPLAY & ALERTS ====="; // === Display ===
@@ -167,7 +176,7 @@ int OnInit()
    SetIndexEmptyValue(3, EMPTY_VALUE);
 
    IndicatorDigits(Digits);
-   IndicatorShortName("Hidden Institutional Entry v2.1");
+   IndicatorShortName("Hidden Institutional Entry v2.2 HTF");
 
    ArrayInitialize(BuySignalBuffer, EMPTY_VALUE);
    ArrayInitialize(SellSignalBuffer, EMPTY_VALUE);
@@ -793,13 +802,89 @@ void DrawZones()
    for(int i=0;i<FVG_Count;i++) if(FVG_Zones[i].active && !FVG_Zones[i].mitigated) DrawZone(FVG_Zones[i]);
 }
 
+//+------------------------------------------------------------------+
+//| HTF Bias — pure price action on higher timeframe                |
+//|  Same fractal HH/HL logic but using iHigh/iLow on HTF            |
+//+------------------------------------------------------------------+
+int GetHTFBias(ENUM_TIMEFRAMES htfTF)
+{
+   if(htfTF==PERIOD_CURRENT || htfTF==0) return CurrentStructureBias();
+   if((int)htfTF <= (int)Period())
+   {
+      // HTF must be higher than current chart; if not, fallback to current bias
+      // e.g. you are on H1 and set HTF=M15 (invalid) -> use current
+      return CurrentStructureBias();
+   }
+   int htfBars = iBars(Symbol(), htfTF);
+   if(htfBars < 60) return 0;
+
+   int half = InpSwingPeriod/2;
+   // Temporary swing storage for HTF
+   double hHighVal[50];
+   double hLowVal[50];
+   int    hHighBar[50];
+   int    hLowBar[50];
+   int hHighCount=0, hLowCount=0;
+   int limit = MathMin(htfBars-10, 250);
+
+   for(int i=half+1; i < limit-half && (hHighCount < 50 || hLowCount < 50); i++)
+   {
+      bool isH=false, isL=false;
+      // Check HTF swing high
+      double h0 = iHigh(Symbol(), htfTF, i);
+      isH = true;
+      for(int k=1;k<=half;k++)
+      {
+         if(iHigh(Symbol(), htfTF, i+k) >= h0) { isH=false; break; }
+         if(iHigh(Symbol(), htfTF, i-k) >  h0) { isH=false; break; }
+      }
+      if(isH && hHighCount<50) { hHighVal[hHighCount]=h0; hHighBar[hHighCount]=i; hHighCount++; }
+
+      double l0 = iLow(Symbol(), htfTF, i);
+      isL = true;
+      for(int k=1;k<=half;k++)
+      {
+         if(iLow(Symbol(), htfTF, i+k) <= l0) { isL=false; break; }
+         if(iLow(Symbol(), htfTF, i-k) <  l0) { isL=false; break; }
+      }
+      if(isL && hLowCount<50) { hLowVal[hLowCount]=l0; hLowBar[hLowCount]=i; hLowCount++; }
+   }
+
+   if(hHighCount < 2 || hLowCount < 2) return 0;
+   bool isHH = hHighVal[0] > hHighVal[1];
+   bool isHL = hLowVal[0]  > hLowVal[1];
+   bool isLH = hHighVal[0] < hHighVal[1];
+   bool isLL = hLowVal[0]  < hLowVal[1];
+   if(isHH && isHL) return 1;
+   if(isLH && isLL) return -1;
+   return 0;
+}
+
+string HTFBiasToString(int bias)
+{
+   if(bias>0) return "BULLISH";
+   if(bias<0) return "BEARISH";
+   return "NEUTRAL";
+}
+
 void UpdateDashboard(int bias, int obCount, int fvgCount)
 {
    if(!InpShowDashboard) return;
    string biasStr = (bias>0 ? "BULLISH" : bias<0 ? "BEARISH" : "NEUTRAL");
    string tf = TFToString(Period());
-   string txt = StringFormat("HIE v2.1 | %s %s | Bias:%s | OB:%d FVG:%d | Impulses:%d Sweeps:%d",
-                             Symbol(), tf, biasStr, obCount, fvgCount, debugImpulseCount, debugSweepCount);
+   int htfBias = 0;
+   string htfStr = "";
+   if(InpUseHTFFilter && InpHTFShowOnChart)
+   {
+      htfBias = GetHTFBias(InpHTFTimeframe);
+      htfStr = StringFormat(" | HTF %s:%s", TFToString(InpHTFTimeframe), HTFBiasToString(htfBias));
+   }
+   string filterInfo = "";
+   if(InpUseHTFFilter) filterInfo = StringFormat(" | HTF Filter:%s%s", InpHTFStrict ? "STRICT" : "ON", htfStr);
+   else filterInfo = " | HTF Filter:OFF";
+
+   string txt = StringFormat("HIE v2.2 | %s %s | Bias:%s%s | OB:%d FVG:%d | Impulses:%d",
+                             Symbol(), tf, biasStr, filterInfo, obCount, fvgCount, debugImpulseCount);
    Comment(txt);
    if(InpShowDebug && obCount==0 && fvgCount==0)
    {
@@ -815,7 +900,29 @@ void UpdateDashboard(int bias, int obCount, int fvgCount)
       ObjectSetInteger(0,bName, OBJPROP_YDISTANCE, 38);
    }
    color biasCol = (bias>0 ? clrLime : bias<0 ? clrRed : clrGold);
-   ObjectSetText(bName, "Structure: "+biasStr+"  |  OB:"+IntegerToString(obCount)+" FVG:"+IntegerToString(fvgCount), 8, "Arial Bold", biasCol);
+   string labelText = "Structure: "+biasStr+"  |  OB:"+IntegerToString(obCount)+" FVG:"+IntegerToString(fvgCount);
+   if(htfStr!="") labelText += htfStr;
+   ObjectSetText(bName, labelText, 8, "Arial Bold", biasCol);
+
+   // Second label for HTF if enabled
+   string hName="HIE_DASH_HTF";
+   if(InpUseHTFFilter && InpHTFShowOnChart)
+   {
+      if(ObjectFind(0,hName)<0)
+      {
+         ObjectCreate(0,hName, OBJ_LABEL, 0, 0, 0);
+         ObjectSetInteger(0,hName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+         ObjectSetInteger(0,hName, OBJPROP_XDISTANCE, 10);
+         ObjectSetInteger(0,hName, OBJPROP_YDISTANCE, 52);
+      }
+      color hCol = (htfBias>0 ? clrLime : htfBias<0 ? clrRed : clrGold);
+      string hText = StringFormat("HTF %s Bias: %s %s", TFToString(InpHTFTimeframe), HTFBiasToString(htfBias), InpHTFStrict ? "(STRICT)" : "(filter)");
+      ObjectSetText(hName, hText, 8, "Arial Bold", hCol);
+   }
+   else
+   {
+      if(ObjectFind(0,hName)>=0) ObjectDelete(hName);
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -946,6 +1053,10 @@ int OnCalculate(const int rates_total,
 
    CheckMitigationAndExpiry(limit);
 
+   //--- HTF Bias pre-calc (once per bar) for filtering
+   int htfBiasForFilter = 0;
+   if(InpUseHTFFilter) htfBiasForFilter = GetHTFBias(InpHTFTimeframe);
+
    // Entry signal evaluation
    for(int idx = MathMin(start, 10); idx>=1; idx--)
    {
@@ -1001,6 +1112,22 @@ int OnCalculate(const int rates_total,
             {
                sellSignal = true;
             }
+         }
+      }
+
+      //--- HTF Filter: block opposite direction signals
+      if(InpUseHTFFilter && (buySignal || sellSignal))
+      {
+         // htfBiasForFilter: +1 bullish, -1 bearish, 0 neutral
+         if(buySignal)
+         {
+            if(htfBiasForFilter==-1) buySignal=false; // HTF bearish blocks BUY
+            else if(InpHTFStrict && htfBiasForFilter!=1) buySignal=false; // strict: only bullish HTF allows BUY
+         }
+         if(sellSignal)
+         {
+            if(htfBiasForFilter==1) sellSignal=false; // HTF bullish blocks SELL
+            else if(InpHTFStrict && htfBiasForFilter!=-1) sellSignal=false; // strict: only bearish HTF allows SELL
          }
       }
 
