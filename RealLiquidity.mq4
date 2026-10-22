@@ -53,9 +53,12 @@ input int     InpPivotRight      = 0;                            // Pivot streng
 input double  InpEqualTolPips    = 2.0;                          // Equal high/low tolerance (pips)
 input double  InpMaxPoolWidthPips= 5.0;                          // Max pool width (pips, 0 = no limit)
 input int     InpMinTouches      = 2;                            // Min touches to call it a "pool"
-input int     InpMaxPools        = 12;                           // Max liquidity pools drawn
-input int     InpMaxSingleLevels = 10;                           // Max single swing levels drawn
-input int     InpExtendBars      = 60;                           // Extend zones to the right (bars)
+input int     InpMaxPools        = 6;                            // Max liquidity pools drawn
+input int     InpMaxSingleLevels = 0;                            // Max single swing levels (0 = off)
+input int     InpZonePadBars     = 8;                            // Bars a zone extends past its last touch
+input int     InpZoneMaxBars     = 40;                           // Longer zones become lines (bars, 0 = always box)
+input int     InpExtendBars      = 24;                           // Projection length for nearest levels (bars)
+input bool    InpProjectNearest  = true;                         // Project only the nearest BSL/SSL level
 input bool    InpOnlyActivePools = false;                        // Hide already swept pools
 input bool    InpShowSweeps      = true;                         // Show sweep arrows
 input bool    InpSweepCloseBack  = true;                         // Sweep = wick through + close back
@@ -67,15 +70,16 @@ input double  InpVolSpikeMult    = 1.80;                         // Volume spike
 input int     InpVolMinTicks     = 20;                           // Ignore bars below this volume
 input double  InpVolZoneATRMult  = 0.60;                         // Min bar range (x ATR) for a zone
 input bool    InpVolZoneUseBody  = false;                        // Use body instead of full bar
-input int     InpMaxVolZones     = 10;                           // Max volume zones drawn
-input int     InpVolZoneExtend   = 30;                           // Volume zone extension (bars)
+input int     InpMaxVolZones     = 4;                            // Max volume zones drawn
+input int     InpVolZoneExtend   = 10;                           // Volume zone extension (bars)
 input int     InpFlowBars        = 50;                           // Bars used for flow-bias estimate
 
 input string  InpG3              = "=== Liquidity voids ===";    // Liquidity voids
 input bool    InpShowVoids       = true;                         // Show voids / imbalances
 input double  InpVoidMinATR      = 0.35;                         // Min gap size (x ATR)
-input int     InpMaxVoids        = 8;                            // Max voids drawn
+input int     InpMaxVoids        = 3;                            // Max voids drawn
 input bool    InpHideFilledVoids = true;                         // Hide voids that price already filled
+input int     InpVoidExtendBars  = 20;                           // Void box length (bars)
 
 input string  InpG3B             = "=== Entry signals ===";        // Entry signals
 input bool    InpShowEntries     = true;                         // Show entry signals
@@ -83,12 +87,13 @@ input bool    InpEntrySweep      = true;                         // Sweep-revers
 input bool    InpEntryBreakout   = true;                         // Pool-acceptance entries
 input int     InpEntryConfirmBars= 1;                            // Bars after sweep to confirm
 input double  InpEntrySLBufferATR= 0.25;                         // Stop buffer beyond wick (x ATR)
+input double  InpEntryMaxRiskATR = 6.0;                          // Max stop distance (x ATR, 0 = off)
 input int     InpEntryTPMode     = 2;                            // Target: 0=pool only 1=fixed RR 2=pool or RR
 input double  InpEntryRR         = 2.0;                          // Fixed risk:reward target
 input double  InpEntryMinRR      = 1.0;                          // Min RR to accept a pool target
 input int     InpEntryMaxSignals = 6;                            // Max entry signals kept
 input int     InpEntryLookback   = 300;                          // Only signals within N bars
-input int     InpEntryProjectBars= 30;                           // Project entry/SL/TP lines (bars)
+input int     InpEntryProjectBars= 18;                           // Project entry/SL/TP lines (bars)
 input bool    InpEntryShowLevels = true;                         // Draw entry / SL / TP lines
 input bool    InpEntryShowZones  = false;                        // Shade risk / reward areas
 input bool    InpEntryVolFilter  = false;                        // Require volume expansion
@@ -100,9 +105,14 @@ input color   InpColorTP         = clrMediumSeaGreen;            // Take-profit 
 
 input string  InpG4              = "=== Visuals ===";            // Visuals
 input bool    InpShowPanel       = true;                         // Show information panel
-input bool    InpShowLegend      = true;                         // Show legend
-input bool    InpShowNearest     = true;                         // Highlight nearest liquidity
+input bool    InpShowLegend      = false;                        // Show legend
+input bool    InpShowNearest     = false;                        // Highlight nearest liquidity
 input int     InpFontSize        = 8;                            // Font size
+input bool    InpZoneFill        = false;                        // Shade zones (off = outline only)
+input int     InpZoneLabels      = 1;                            // Zone tags: 0=off 1=compact 2=full
+input bool    InpSweepLabels     = false;                        // Show "sweep" text (arrow only if off)
+input int     InpEntryLevelLines = 2;                            // Recent signals with E/SL/TP lines
+input int     InpLabelDensity    = 1;                            // Tag spacing: 1=tight 2=normal 3=airy
 input color   InpColorBSL        = clrOrangeRed;                  // Buy-side liquidity
 input color   InpColorSSL        = clrDodgerBlue;                 // Sell-side liquidity
 input color   InpColorBull       = clrLimeGreen;                  // Bullish volume spike
@@ -111,6 +121,7 @@ input color   InpColorVoid       = clrGold;                       // Liquidity v
 input color   InpColorSwept      = clrSlateGray;                  // Swept liquidity
 input color   InpColorText       = clrSilver;                     // Chart labels
 input color   InpColorPanelBg    = clrBlack;                      // Panel background
+input color   InpColorPanelBorder= clrDimGray;                    // Panel border
 input color   InpColorPanelTx    = clrWhite;                      // Panel text
 
 input string  InpG5              = "=== Alerts ===";             // Alerts
@@ -127,7 +138,7 @@ input bool    InpAlertSound      = false;                         // Play sound
 #define PFX_OBJ     "RLQO_"      // prefix for chart geometry
 #define PFX_PNL     "RLQP_"      // prefix for panel objects
 #define PANEL_ROWS  13
-#define PANEL_W     340
+#define PANEL_W     292
 
 #define RLQ_BSL     0            // buy-side liquidity (highs)
 #define RLQ_SSL     1            // sell-side liquidity (lows)
@@ -235,6 +246,17 @@ string    g_panelRows[PANEL_ROWS];
 color     g_panelColors[PANEL_ROWS];
 int       g_panelRowCount = 0;
 bool      g_ready         = false;
+
+double    g_lblPrices[64];        // prices already carrying a chart tag
+int       g_lblCount      = 0;
+double    g_lblGap        = 0.0;  // min vertical separation between tags
+
+#define RLQ_MAX_BANDS 32
+double    g_bTop[RLQ_MAX_BANDS];  // price bands already covered by a zone
+double    g_bBot[RLQ_MAX_BANDS];
+datetime  g_bT1[RLQ_MAX_BANDS];
+datetime  g_bT2[RLQ_MAX_BANDS];
+int       g_bCount        = 0;
 
 //+------------------------------------------------------------------+
 //| Initialisation                                                   |
@@ -982,6 +1004,12 @@ void AddEntry(datetime tm, int bar, double entry, double sl, double tp,
    double reward = MathAbs(tp - entry);
    if(risk <= 0.0 || reward <= 0.0) return;
 
+   // a stop wider than InpEntryMaxRiskATR is not a tradeable setup: it means
+   // the swept wick was an outlier. Skipping these keeps both quality and the
+   // chart readable (otherwise SL/TP lines span half the screen).
+   if(InpEntryMaxRiskATR > 0.0 && g_atrNow > 0.0)
+      if(risk > g_atrNow * InpEntryMaxRiskATR) return;
+
    int k = g_entryCount;
    g_entryCount++;
 
@@ -1283,6 +1311,119 @@ void DrawArrow(string nm, datetime tm, double price, bool up, color clr)
 }
 
 //+------------------------------------------------------------------+
+//| LABEL PLACEMENT                                                  |
+//|                                                                  |
+//|  Tags are the main source of visual clutter, so every tag has to  |
+//|  pass a vertical-spacing test first. Without this, six pools in    |
+//|  the same price area print six overlapping strings.               |
+//+------------------------------------------------------------------+
+void ResetLabelSlots()
+{
+   g_lblCount = 0;
+
+   double base = MathMax(g_atrNow, Point * 10);
+   int    dens = (int)MathMax(1, MathMin(3, InpLabelDensity));
+
+   if(dens == 1)      g_lblGap = base * 1.1;
+   else if(dens == 2) g_lblGap = base * 1.8;
+   else               g_lblGap = base * 2.8;
+
+   if(g_lblGap < Point * 12) g_lblGap = Point * 12;
+}
+
+bool LabelFits(double price, double extra)
+{
+   for(int i = 0; i < g_lblCount; i++)
+      if(MathAbs(g_lblPrices[i] - price) < g_lblGap + extra) return(false);
+   return(true);
+}
+
+void RegisterLabel(double price)
+{
+   if(g_lblCount >= 64) return;
+   g_lblPrices[g_lblCount] = price;
+   g_lblCount++;
+}
+
+//+------------------------------------------------------------------+
+//| Local right edge of a zone: a few bars past the last touch, so    |
+//| zones stay next to the structure that created them instead of     |
+//| stretching across the whole chart.                                |
+//+------------------------------------------------------------------+
+datetime ZoneEnd(datetime tLast, int padBars)
+{
+   int pad = (int)MathMax(1, padBars);
+   return(tLast + (datetime)(PeriodSeconds() * pad));
+}
+
+//+------------------------------------------------------------------+
+//| ZONE OVERLAP GUARD                                               |
+//|                                                                  |
+//|  Price often leaves several voids and volume zones in the same    |
+//|  area. Drawing all of them produces a stack of rectangles that    |
+//|  hides the candles, so every zone must claim empty space first.   |
+//+------------------------------------------------------------------+
+void ResetBands()
+{
+   g_bCount = 0;
+}
+
+bool BandFree(double top, double bottom, datetime t1, datetime t2)
+{
+   double h = top - bottom;
+   if(h <= 0.0) return(false);
+
+   // a margin keeps neighbouring zones from stacking into a ladder of boxes
+   double margin = MathMax(g_atrNow * 0.45, Point * 15);
+   top    += margin;
+   bottom -= margin;
+
+   for(int i = 0; i < g_bCount; i++)
+   {
+      if(t2 < g_bT1[i] || t1 > g_bT2[i]) continue;       // different time
+
+      double bh = g_bTop[i] - g_bBot[i];
+      double ov = MathMin(top, g_bTop[i]) - MathMax(bottom, g_bBot[i]);
+      if(ov <= 0.0) continue;
+
+      double denom = MathMin(h, bh);
+      if(denom > 0.0 && ov / denom > 0.55) return(false);  // too much shared area
+   }
+
+   return(true);
+}
+
+void RegisterBand(double top, double bottom, datetime t1, datetime t2)
+{
+   if(g_bCount >= RLQ_MAX_BANDS) return;
+   g_bTop[g_bCount] = top;
+   g_bBot[g_bCount] = bottom;
+   g_bT1[g_bCount]  = t1;
+   g_bT2[g_bCount]  = t2;
+   g_bCount++;
+}
+
+//+------------------------------------------------------------------+
+//| Compact tag text                                                 |
+//+------------------------------------------------------------------+
+string PoolTag(int kind, int touches, bool swept)
+{
+   string side = (kind == RLQ_BSL) ? "BSL" : "SSL";
+
+   if(touches >= 2) side = side + IntegerToString(touches);
+   if(swept)        side = side + "-";
+
+   if(InpZoneLabels == 2)
+   {
+      side = (kind == RLQ_BSL) ? "Buy-side" : "Sell-side";
+      side = side + " x" + IntegerToString(touches);
+      if(swept) side = side + " (swept)";
+   }
+
+   return(side);
+}
+
+//+------------------------------------------------------------------+
 //| DRAWING: liquidity pools and sweeps                              |
 //+------------------------------------------------------------------+
 void RenderLiquidity()
@@ -1320,29 +1461,61 @@ void RenderLiquidity()
          bottom = mid - Point * 2.0;
       }
 
+      // the zone stays local to the structure that formed it
       datetime t1 = g_pools[i].tFirst;
-      datetime t2 = g_tRight;
+      datetime t2 = ZoneEnd(g_pools[i].tLast, InpZonePadBars);
       if(t2 <= t1) t2 = t1 + (datetime)(PeriodSeconds() * 2);
+
+      // only the nearest level is projected to the live edge
+      bool isNear = false;
+      if(InpProjectNearest && !swept && isPool)
+      {
+         if(g_pools[i].kind == RLQ_BSL && g_hasBSL && MathAbs(g_pools[i].level - g_nearBSL) < Point * 0.5)
+            isNear = true;
+         if(g_pools[i].kind == RLQ_SSL && g_hasSSL && MathAbs(g_pools[i].level - g_nearSSL) < Point * 0.5)
+            isNear = true;
+      }
 
       int style = swept ? STYLE_DOT : STYLE_SOLID;
 
-      // pools become zones (boxes); single swings stay as clean level lines
-      if(isPool)
+      // ---- zone: outline by default, shading only when asked for ----
+      // swept zones are history: the arrow marks them, a box would just add
+      // another rectangle to an already busy chart. Wide pools become plain
+      // level lines so one old cluster cannot span the whole screen.
+      int spanBars = (int)((t2 - t1) / (datetime)PeriodSeconds());
+      bool boxed   = (InpZoneMaxBars <= 0) || (spanBars <= InpZoneMaxBars);
+
+      if(isPool && !swept && boxed)
       {
          string boxName = PFX_OBJ + "POOL_" + IntegerToString(i);
-         DrawRect(boxName, t1, top, t2, bottom, col, true, style, 1, true);
+         DrawRect(boxName, t1, top, t2, bottom, col, InpZoneFill, style, 1, true);
       }
 
+      // ---- level line --------------------------------------------
       string lineName = PFX_OBJ + "LVL_" + IntegerToString(i);
-      DrawLine(lineName, g_pools[i].tLast, g_pools[i].level, t2, g_pools[i].level,
-               col, isPool ? style : STYLE_DOT, isPool ? 2 : 1, false);
+      int      width  = isPool ? (swept ? 1 : 2) : 1;
+      datetime lineT1 = boxed ? t1 : g_pools[i].tLast;
+      DrawLine(lineName, lineT1, g_pools[i].level, t2, g_pools[i].level,
+               col, isPool ? style : STYLE_DOT, width, false);
 
-      string labelName = PFX_OBJ + "PLBL_" + IntegerToString(i);
-      string txt = (g_pools[i].kind == RLQ_BSL) ? "BSL" : "SSL";
-      if(isPool) txt = txt + " x" + IntegerToString(g_pools[i].touches);
-      if(swept)  txt = txt + " (swept)";
-      DrawText(labelName, Time[0], top, txt, col, InpFontSize, ANCHOR_LEFT_LOWER);
+      if(isNear && g_tRight > t2)
+      {
+         string projName = PFX_OBJ + "PRJ_" + IntegerToString(i);
+         DrawLine(projName, t2, g_pools[i].level, g_tRight, g_pools[i].level,
+                  col, STYLE_DOT, 1, false);
+      }
 
+      // ---- tag, at the start of the zone, if there is room --------
+      if(InpZoneLabels > 0 && isPool && !swept && LabelFits(top, 0.0))
+      {
+         string labelName = PFX_OBJ + "PLBL_" + IntegerToString(i);
+         DrawText(labelName, t1, top,
+                  PoolTag(g_pools[i].kind, g_pools[i].touches, swept),
+                  col, (int)MathMax(6, InpFontSize - 1), ANCHOR_LEFT_LOWER);
+         RegisterLabel(top);
+      }
+
+      // ---- sweep marker ------------------------------------------
       if(swept && InpShowSweeps && g_pools[i].tSwept > 0)
       {
          bool   up  = (g_pools[i].kind == RLQ_SSL);       // SSL sweep -> up arrow
@@ -1352,10 +1525,13 @@ void RenderLiquidity()
          string arrowName = PFX_OBJ + "SWA_" + IntegerToString(i);
          DrawArrow(arrowName, g_pools[i].tSwept, py, up, col);
 
-         string sweepLabel = PFX_OBJ + "SWL_" + IntegerToString(i);
-         DrawText(sweepLabel, g_pools[i].tSwept, py, "sweep", col,
-                  (int)MathMax(6, InpFontSize - 1),
-                  up ? ANCHOR_LEFT_UPPER : ANCHOR_LEFT_LOWER);
+         if(InpSweepLabels)
+         {
+            string sweepLabel = PFX_OBJ + "SWL_" + IntegerToString(i);
+            DrawText(sweepLabel, g_pools[i].tSwept, py, "sweep", col,
+                     (int)MathMax(6, InpFontSize - 1),
+                     up ? ANCHOR_LEFT_UPPER : ANCHOR_LEFT_LOWER);
+         }
       }
 
       if(isPool) poolsOut++;
@@ -1368,23 +1544,35 @@ void RenderLiquidity()
 //+------------------------------------------------------------------+
 void RenderVolumeAreas()
 {
-   for(int i = 0; i < g_volCount; i++)
+   // newest first: fresh institutional areas matter more than historical ones
+   for(int i = g_volCount - 1; i >= 0; i--)
    {
       color col = (g_volAreas[i].kind == 0) ? InpColorBull : InpColorBear;
 
       datetime t1 = g_volAreas[i].tStart;
       datetime t2 = t1 + (datetime)(PeriodSeconds() * (int)MathMax(2, InpVolZoneExtend));
 
+      if(!BandFree(g_volAreas[i].top, g_volAreas[i].bottom, t1, t2)) continue;
+      RegisterBand(g_volAreas[i].top, g_volAreas[i].bottom, t1, t2);
+
       string boxName = PFX_OBJ + "VOL_" + IntegerToString(i);
-      DrawRect(boxName, t1, g_volAreas[i].top, t2, g_volAreas[i].bottom, col, true, STYLE_SOLID, 1, true);
+      DrawRect(boxName, t1, g_volAreas[i].top, t2, g_volAreas[i].bottom,
+               col, InpZoneFill, STYLE_DOT, 1, true);
 
-      string lineName = PFX_OBJ + "VOLL_" + IntegerToString(i);
-      DrawLine(lineName, t1, g_volAreas[i].top, t2, g_volAreas[i].top, col, STYLE_DOT, 1, false);
+      if(InpZoneLabels > 0 && LabelFits(g_volAreas[i].top, 0.0))
+      {
+         string labelName = PFX_OBJ + "VOLT_" + IntegerToString(i);
+         string txt = DoubleToString(g_volAreas[i].ratio, 1) + "x";
 
-      string labelName = PFX_OBJ + "VOLT_" + IntegerToString(i);
-      string txt = DoubleToString(g_volAreas[i].ratio, 1) + "x vol";
-      DrawText(labelName, Time[0], g_volAreas[i].top, txt, col,
-               (int)MathMax(6, InpFontSize - 1), ANCHOR_LEFT_LOWER);
+         if(InpZoneLabels == 2)
+            txt = txt + " volume";
+         else
+            txt = txt + "v";
+
+         DrawText(labelName, t1, g_volAreas[i].top, txt, col,
+                  (int)MathMax(6, InpFontSize - 1), ANCHOR_LEFT_LOWER);
+         RegisterLabel(g_volAreas[i].top);
+      }
    }
 }
 
@@ -1395,21 +1583,29 @@ void RenderVoids()
 {
    if(!InpShowVoids) return;
 
-   for(int i = 0; i < g_voidCount; i++)
+   // newest first, so the freshest imbalance wins the space
+   for(int i = g_voidCount - 1; i >= 0; i--)
    {
       if(InpHideFilledVoids && g_voids[i].filled) continue;
 
       datetime t1 = g_voids[i].tStart;
-      datetime t2 = g_tRight;
+      datetime t2 = ZoneEnd(g_voids[i].tStart, InpVoidExtendBars);
+
+      if(!BandFree(g_voids[i].top, g_voids[i].bottom, t1, t2)) continue;
+      RegisterBand(g_voids[i].top, g_voids[i].bottom, t1, t2);
 
       string boxName = PFX_OBJ + "VOID_" + IntegerToString(i);
       DrawRect(boxName, t1, g_voids[i].top, t2, g_voids[i].bottom,
-               InpColorVoid, false, STYLE_DASHDOT, 1, true);
+               InpColorVoid, InpZoneFill, STYLE_DASHDOT, 1, true);
 
-      string labelName = PFX_OBJ + "VOIDT_" + IntegerToString(i);
-      string txt = (g_voids[i].kind == 0) ? "void up" : "void dn";
-      DrawText(labelName, Time[0], g_voids[i].top, txt, InpColorVoid,
-               (int)MathMax(6, InpFontSize - 1), ANCHOR_LEFT_LOWER);
+      if(InpZoneLabels == 2 && LabelFits(g_voids[i].top, 0.0))
+      {
+         string labelName = PFX_OBJ + "VOIDT_" + IntegerToString(i);
+         string txt = (g_voids[i].kind == 0) ? "void up" : "void dn";
+         DrawText(labelName, t1, g_voids[i].top, txt, InpColorVoid,
+                  (int)MathMax(6, InpFontSize - 1), ANCHOR_LEFT_LOWER);
+         RegisterLabel(g_voids[i].top);
+      }
    }
 }
 
@@ -1466,7 +1662,8 @@ void RenderEntries()
 {
    if(!InpShowEntries || g_entryCount <= 0) return;
 
-   double off = MathMax(g_atrNow * 0.7, Point * 40.0);
+   double off      = MathMax(g_atrNow * 0.7, Point * 40.0);
+   int    withLvl  = (int)MathMax(0, InpEntryLevelLines);
 
    for(int i = 0; i < g_entryCount; i++)
    {
@@ -1476,27 +1673,28 @@ void RenderEntries()
       double py   = buy ? (g_entries[i].barLow  - off)
                         : (g_entries[i].barHigh + off);
 
-      // ---- arrow -------------------------------------------------
+      // ---- arrow ------------------------------------------------
       string arrowName = PFX_OBJ + "ENTA_" + IntegerToString(i);
       DrawArrow(arrowName, g_entries[i].tm, py, buy, col);
 
-      // ---- signal label ------------------------------------------
-      string why = "breakout";
-      if(g_entries[i].reason == 0) why = "sweep";
+      // ---- compact signal tag ------------------------------------
+      string why = "a";
+      if(g_entries[i].reason == 0) why = "s";
 
-      string sideTxt = "SELL ";
-      if(buy) sideTxt = "BUY ";
+      string txt = "SELL-" + why + " " + DoubleToString(g_entries[i].rr, 1) + "R";
+      if(buy) txt = "BUY-" + why + " " + DoubleToString(g_entries[i].rr, 1) + "R";
 
-      string txt = sideTxt + why + " " + DoubleToString(g_entries[i].rr, 1) + "R" +
-                   "  E " + DoubleToString(g_entries[i].entry, (int)Digits);
+      if(LabelFits(py, 0.0))
+      {
+         string labelName = PFX_OBJ + "ENTT_" + IntegerToString(i);
+         DrawText(labelName, g_entries[i].tm, py, txt, col,
+                  (int)MathMax(6, InpFontSize - 1),
+                  buy ? ANCHOR_LEFT_UPPER : ANCHOR_LEFT_LOWER);
+         RegisterLabel(py);
+      }
 
-      string labelName = PFX_OBJ + "ENTT_" + IntegerToString(i);
-      DrawText(labelName, g_entries[i].tm, py, txt, col,
-               (int)MathMax(6, InpFontSize - 1),
-               buy ? ANCHOR_LEFT_UPPER : ANCHOR_LEFT_LOWER);
-
-      // ---- entry / stop / target levels ---------------------------
-      if(!InpEntryShowLevels) continue;
+      // ---- entry / stop / target, only for the newest signals -----
+      if(!InpEntryShowLevels || i >= withLvl) continue;
 
       datetime t2 = g_entries[i].tm +
                     (datetime)(PeriodSeconds() * (int)MathMax(2, InpEntryProjectBars));
@@ -1505,28 +1703,33 @@ void RenderEntries()
       DrawLine(eName, g_entries[i].tm, g_entries[i].entry, t2, g_entries[i].entry,
                col, STYLE_SOLID, 1, false);
 
-      string sName = PFX_OBJ + "ENTSL_" + IntegerToString(i);
-      DrawLine(sName, g_entries[i].tm, g_entries[i].sl, t2, g_entries[i].sl,
-               InpColorSL, STYLE_DOT, 1, false);
+      // a level line is only drawn together with its tag: an unlabelled
+      // fragment looks like a stray mark on the chart
+      bool slFits = LabelFits(g_entries[i].sl, 0.0);
+      if(slFits)
+      {
+         string sName = PFX_OBJ + "ENTSL_" + IntegerToString(i);
+         DrawLine(sName, g_entries[i].tm, g_entries[i].sl, t2, g_entries[i].sl,
+                  InpColorSL, STYLE_DOT, 1, false);
 
-      string pName = PFX_OBJ + "ENTTP_" + IntegerToString(i);
-      DrawLine(pName, g_entries[i].tm, g_entries[i].tp, t2, g_entries[i].tp,
-               InpColorTP, STYLE_DOT, 1, false);
+         string sTxt = PFX_OBJ + "ENTSLT_" + IntegerToString(i);
+         DrawText(sTxt, t2, g_entries[i].sl, "SL", InpColorSL,
+                  (int)MathMax(6, InpFontSize - 2), ANCHOR_LEFT_UPPER);
+         RegisterLabel(g_entries[i].sl);
+      }
 
-      string eTxt = PFX_OBJ + "ENTLT_" + IntegerToString(i);
-      DrawText(eTxt, t2, g_entries[i].entry,
-               "entry " + DoubleToString(g_entries[i].entry, (int)Digits),
-               col, (int)MathMax(6, InpFontSize - 1), ANCHOR_RIGHT_LOWER);
+      bool tpFits = LabelFits(g_entries[i].tp, 0.0);
+      if(tpFits)
+      {
+         string pName = PFX_OBJ + "ENTTP_" + IntegerToString(i);
+         DrawLine(pName, g_entries[i].tm, g_entries[i].tp, t2, g_entries[i].tp,
+                  InpColorTP, STYLE_DOT, 1, false);
 
-      string sTxt = PFX_OBJ + "ENTSLT_" + IntegerToString(i);
-      DrawText(sTxt, t2, g_entries[i].sl,
-               "SL " + DoubleToString(g_entries[i].sl, (int)Digits),
-               InpColorSL, (int)MathMax(6, InpFontSize - 1), ANCHOR_RIGHT_LOWER);
-
-      string pTxt = PFX_OBJ + "ENTTPT_" + IntegerToString(i);
-      DrawText(pTxt, t2, g_entries[i].tp,
-               "TP " + DoubleToString(g_entries[i].tp, (int)Digits),
-               InpColorTP, (int)MathMax(6, InpFontSize - 1), ANCHOR_RIGHT_LOWER);
+         string pTxt = PFX_OBJ + "ENTTPT_" + IntegerToString(i);
+         DrawText(pTxt, t2, g_entries[i].tp, "TP", InpColorTP,
+                  (int)MathMax(6, InpFontSize - 2), ANCHOR_LEFT_LOWER);
+         RegisterLabel(g_entries[i].tp);
+      }
 
       // ---- risk / reward shading ---------------------------------
       if(InpEntryShowZones)
@@ -1547,11 +1750,16 @@ void RenderEntries()
 //+------------------------------------------------------------------+
 void RenderAll()
 {
+   ResetLabelSlots();
+   ResetBands();
+
+   // entries are the most important information, so they claim label space
+   // first; zones then fill whatever is left without overlapping
+   RenderEntries();
    RenderLiquidity();
    RenderVolumeAreas();
    RenderVoids();
    RenderNearest();
-   RenderEntries();
 }
 
 //+------------------------------------------------------------------+
@@ -1581,8 +1789,8 @@ void BuildPanelRows()
    AddPanelRow(PadRight("Pools", 13) + ": " + IntegerToString(g_activePools) +
                " active / " + IntegerToString(g_sweptPools) + " swept", InpColorPanelTx);
 
-   AddPanelRow(PadRight("Volume zones", 13) + ": " + IntegerToString(g_volCount) +
-               "  (spike >= " + DoubleToString(EffVolumeMult(), 2) + "x)", InpColorPanelTx);
+   AddPanelRow(PadRight("Vol zones", 13) + ": " + IntegerToString(g_volCount) +
+               "  (>=" + DoubleToString(EffVolumeMult(), 2) + "x)", InpColorPanelTx);
 
    AddPanelRow(PadRight("Voids", 13) + ": " + IntegerToString(g_voidCount) +
                "  (" + (InpShowVoids ? "on" : "off") + ")", InpColorPanelTx);
@@ -1633,10 +1841,12 @@ void BuildPanelRows()
    }
    AddPanelRow(PadRight("Last signal", 13) + ": " + sigTxt, sigClr);
 
+   string modeS = "off";
+   if(InpEntrySweep && InpEntryBreakout) modeS = "sweep+accept";
+   else if(InpEntrySweep)                modeS = "sweep";
+   else if(InpEntryBreakout)             modeS = "accept";
    AddPanelRow(PadRight("Signals", 13) + ": " + IntegerToString(g_entryCount) +
-               "  (sweep " + (InpEntrySweep ? "on" : "off") +
-               " / accept " + (InpEntryBreakout ? "on" : "off") + ")",
-               InpColorPanelTx);
+               "  (" + modeS + ")", InpColorPanelTx);
 
    AddPanelRow(PadRight("Scan", 13) + ": " + IntegerToString(InpLookbackBars) +
                " bars | ATR " + DoubleToString(g_atrNow / g_pointsPerPip, 1) + "p", InpColorPanelTx);
@@ -1653,10 +1863,10 @@ void CreatePanelObjects()
    ObjectSetInteger(0, bg, OBJPROP_XDISTANCE,   x0);
    ObjectSetInteger(0, bg, OBJPROP_YDISTANCE,   y0);
    ObjectSetInteger(0, bg, OBJPROP_XSIZE,       PANEL_W);
-   ObjectSetInteger(0, bg, OBJPROP_YSIZE,       42 + PANEL_ROWS * 14);
+   ObjectSetInteger(0, bg, OBJPROP_YSIZE,       46 + PANEL_ROWS * 13);
    ObjectSetInteger(0, bg, OBJPROP_BGCOLOR,     InpColorPanelBg);
    ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-   ObjectSetInteger(0, bg, OBJPROP_COLOR,       InpColorText);
+   ObjectSetInteger(0, bg, OBJPROP_COLOR,       InpColorPanelBorder);
    ObjectSetInteger(0, bg, OBJPROP_BACK,        false);
    ObjectSetInteger(0, bg, OBJPROP_SELECTABLE,  false);
    ObjectSetInteger(0, bg, OBJPROP_HIDDEN,      true);
@@ -1665,7 +1875,7 @@ void CreatePanelObjects()
    if(ObjectFind(0, title) < 0) ObjectCreate(0, title, OBJ_LABEL, 0, 0, 0);
    ObjectSetInteger(0, title, OBJPROP_CORNER,     CORNER_LEFT_UPPER);
    ObjectSetInteger(0, title, OBJPROP_XDISTANCE,  x0 + 10);
-   ObjectSetInteger(0, title, OBJPROP_YDISTANCE,  y0 + 8);
+   ObjectSetInteger(0, title, OBJPROP_YDISTANCE,  y0 + 10);
    ObjectSetString(0, title,  OBJPROP_TEXT,       "REAL LIQUIDITY");
    ObjectSetString(0, title,  OBJPROP_FONT,       "Arial");
    ObjectSetInteger(0, title, OBJPROP_FONTSIZE,   InpFontSize + 1);
@@ -1680,7 +1890,7 @@ void CreatePanelObjects()
 
       ObjectSetInteger(0, nm, OBJPROP_CORNER,     CORNER_LEFT_UPPER);
       ObjectSetInteger(0, nm, OBJPROP_XDISTANCE,  x0 + 10);
-      ObjectSetInteger(0, nm, OBJPROP_YDISTANCE,  y0 + 32 + r * 14);
+      ObjectSetInteger(0, nm, OBJPROP_YDISTANCE,  y0 + 36 + r * 13);
       ObjectSetString(0, nm,  OBJPROP_FONT,       "Courier New");
       ObjectSetInteger(0, nm, OBJPROP_FONTSIZE,   InpFontSize);
       ObjectSetInteger(0, nm, OBJPROP_COLOR,      InpColorPanelTx);

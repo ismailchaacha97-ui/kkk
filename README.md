@@ -10,6 +10,10 @@
 * **Liquidity sweeps** — a wick through a level that closes back inside: a stop-run / liquidity grab, followed by a reversal.
 * **Entry signals** — the two tradeable outcomes of the above, with **entry, stop-loss and take-profit** levels and a risk:reward ratio: sweep-reversal entries and pool-acceptance (breakout) entries.
 
+![RealLiquidity on EURUSD M15](docs/preview.png)
+
+<sub>Rendered from the indicator's own chart objects: outline zones, level lines tied to their structure, compact tags, entry arrows with SL/TP.</sub>
+
 The indicator is **object based** (no indicator buffers), so it works on any symbol and timeframe without touching the chart's indicator list, and it **does not repaint confirmed structure**: a pivot is only used after its right-hand confirmation bars have closed.
 
 ```
@@ -51,13 +55,14 @@ Removal: detach the indicator; every chart object it created is prefixed `RLQO_`
 
 | On the chart | Meaning |
 |---|---|
-| **Orange shaded box** | Buy-side liquidity pool (≥ `InpMinTouches` equal highs). Stops sit just above the top edge. |
-| **Blue shaded box** | Sell-side liquidity pool (≥ `InpMinTouches` equal lows). Stops sit just below the bottom edge. |
+| **Orange outline box** | Buy-side liquidity pool (≥ `InpMinTouches` equal highs). Stops sit just above the top edge. |
+| **Blue outline box** | Sell-side liquidity pool (≥ `InpMinTouches` equal lows). Stops sit just below the bottom edge. |
+| **Box covering only part of the chart** | Zones are local to their structure and never stretch across the whole screen (see §4). |
 | **Orange / blue dotted line** | A single confirmed swing high/low — one resting level, not a pool. |
 | **Gray dashed box + dotted line** | A pool that has already been **swept** (liquidity taken). |
-| **Label `BSL x3` / `SSL x2`** | Side and number of touches in the pool. |
-| **Green box, `6.3x vol`** | Bullish volume-spike area (heavy buying participation). |
-| **Red box, `2.1x vol`** | Bearish volume-spike area (heavy selling participation). |
+| **Tag `BSL3` / `SSL2`** | Side and number of touches. `BSL3` = buy-side pool, 3 equal highs; a trailing `-` means swept (`BSL2-`). `InpZoneLabels = 2` spells it out. |
+| **Green box, `6.3xv`** | Bullish volume-spike area (heavy buying participation). |
+| **Red box, `2.1xv`** | Bearish volume-spike area (heavy selling participation). |
 | **Gold dash-dot box, `void up/dn`** | Unfilled liquidity void / 3-bar imbalance. |
 | **Up / down arrow + `sweep`** | Stop-run: price wicked through a pool and closed back inside. |
 | **Dotted horizontal line + `BSL 1.09485 (+5.9p)`** | The **nearest** liquidity level above and below the current price, with distance in pips. |
@@ -85,9 +90,12 @@ Nothing is drawn inside the future beyond `InpExtendBars` bars to the right of t
 | `InpEqualTolPips` | `2.0` | How close two highs/lows must be to count as “equal”. Effective value is scaled by sensitivity (×0.7 … ×1.3). |
 | `InpMaxPoolWidthPips` | `5.0` | Hard cap on how tall one pool may grow through clustering. Prevents tolerance chaining from merging unrelated swings into one huge band. `0` = no limit. |
 | `InpMinTouches` | `2` | Pivots required before a cluster is treated as a pool (instead of a single swing line). |
-| `InpMaxPools` | `12` | Maximum pool boxes drawn (strongest/freshest first). |
-| `InpMaxSingleLevels` | `10` | Maximum single swing lines drawn. |
-| `InpExtendBars` | `60` | How far the zones are projected to the right. |
+| `InpMaxPools` | `6` | Maximum pool zones drawn (strongest/freshest first). |
+| `InpMaxSingleLevels` | `0` | Maximum single swing lines. `0` = off, because single swings are the biggest source of clutter. |
+| `InpZonePadBars` | `8` | How many bars a zone extends past its **last** touch. |
+| `InpZoneMaxBars` | `40` | Zones wider than this are drawn as level lines instead of boxes (a 200-bar cluster otherwise dominates the screen). `0` = always box. |
+| `InpExtendBars` | `24` | Projection length used for the nearest level. |
+| `InpProjectNearest` | `true` | Project **only** the nearest BSL/SSL level to the live edge, instead of every zone. |
 | `InpOnlyActivePools` | `false` | Hide pools that were already swept. |
 | `InpShowSweeps` | `true` | Draw sweep arrows. |
 | `InpSweepCloseBack` | `true` | Require a close back inside the level for a sweep. `false` = any wick through counts. |
@@ -102,8 +110,8 @@ Nothing is drawn inside the future beyond `InpExtendBars` bars to the right of t
 | `InpVolMinTicks` | `20` | Bars below this raw volume are ignored (filters thin sessions and rollover). |
 | `InpVolZoneATRMult` | `0.60` | The bar's range must be at least this × ATR(14); a volume spike with no price travel is just noise. |
 | `InpVolZoneUseBody` | `false` | Zone = candle body instead of the full high–low range. |
-| `InpMaxVolZones` | `10` | Maximum volume zones drawn (newest first). |
-| `InpVolZoneExtend` | `30` | Right extension of a volume zone, in bars. |
+| `InpMaxVolZones` | `4` | Maximum volume zones drawn (newest first). |
+| `InpVolZoneExtend` | `10` | Length of a volume zone, in bars. |
 | `InpFlowBars` | `50` | Bars used for the flow-bias estimate (see §5). |
 
 ### Liquidity voids
@@ -112,7 +120,8 @@ Nothing is drawn inside the future beyond `InpExtendBars` bars to the right of t
 |---|---|---|
 | `InpShowVoids` | `true` | Draw 3-bar voids/imbalances. |
 | `InpVoidMinATR` | `0.35` | Minimum gap size as a fraction of ATR(14). |
-| `InpMaxVoids` | `8` | Maximum voids drawn. |
+| `InpMaxVoids` | `3` | Maximum voids drawn. |
+| `InpVoidExtendBars` | `20` | Length of a void box, in bars. |
 | `InpHideFilledVoids` | `true` | Hide voids that price has already traded back through. |
 
 ### Entry signals
@@ -129,7 +138,8 @@ Nothing is drawn inside the future beyond `InpExtendBars` bars to the right of t
 | `InpEntryMinRR` | `1.0` | A pool target is only accepted if it yields at least this RR. |
 | `InpEntryMaxSignals` | `6` | Maximum signals drawn (newest first). |
 | `InpEntryLookback` | `300` | Signals older than this many bars are dropped. |
-| `InpEntryProjectBars` | `30` | How far the entry/SL/TP lines are projected to the right. |
+| `InpEntryMaxRiskATR` | `6.0` | Reject signals whose stop is wider than this many ATRs. Keeps outlier wick-sweeps out and prevents SL/TP lines spanning the whole screen. `0` = off. |
+| `InpEntryProjectBars` | `18` | How far the entry/SL/TP lines are projected to the right. |
 | `InpEntryShowLevels` | `true` | Draw the entry, SL and TP lines with price labels. |
 | `InpEntryShowZones` | `false` | Shade the risk and reward areas. |
 | `InpEntryVolFilter` | `false` | Require volume expansion on the sweep and confirmation bars. |
@@ -144,9 +154,14 @@ Nothing is drawn inside the future beyond `InpExtendBars` bars to the right of t
 | Input | Default | Description |
 |---|---|---|
 | `InpShowPanel` | `true` | Top-left information panel. |
-| `InpShowLegend` | `true` | Bottom-left legend. |
-| `InpShowNearest` | `true` | Dotted lines + labels for the nearest liquidity above/below. |
+| `InpShowLegend` | `false` | Bottom-left legend. Off by default: the tags are self-explanatory. |
+| `InpShowNearest` | `false` | Extra dotted lines for the nearest liquidity (the panel already prints both distances). |
 | `InpFontSize` | `8` | Base font size. |
+| `InpZoneFill` | `false` | Shade zones. Off = outline only, so candles stay readable. |
+| `InpZoneLabels` | `1` | Zone tags: `0` none, `1` compact (`BSL3`, `4.6xv`), `2` full words. |
+| `InpSweepLabels` | `false` | Print the word "sweep". Off = arrow only, which is enough. |
+| `InpEntryLevelLines` | `2` | Only the newest N signals get entry/SL/TP lines; older ones keep the arrow. |
+| `InpLabelDensity` | `1` | Minimum vertical spacing between tags: `1` tight, `2` normal, `3` airy. |
 | `InpColorBSL` | `OrangeRed` | Buy-side liquidity. |
 | `InpColorSSL` | `DodgerBlue` | Sell-side liquidity. |
 | `InpColorBull` | `LimeGreen` | Bullish volume spike. |
@@ -156,6 +171,7 @@ Nothing is drawn inside the future beyond `InpExtendBars` bars to the right of t
 | `InpColorText` | `Silver` | Chart labels. |
 | `InpColorPanelBg` | `Black` | Panel background. |
 | `InpColorPanelTx` | `White` | Panel text. |
+| `InpColorPanelBorder` | `DimGray` | Panel border. |
 
 ### Alerts
 
@@ -172,7 +188,31 @@ Alerts are evaluated **once per new bar**, never on the first calculation after 
 
 ---
 
-## 4. Suggested settings per market
+## 4. Clean by default
+
+The indicator is tuned to stay readable, not to show everything it can find. Five rules do the work:
+
+1. **Outline, not fill.** Zones are drawn as thin rectangles so candles remain visible. `InpZoneFill = true` restores MT4-style shading.
+2. **Nothing spans the chart.** A zone starts at its first touch and ends `InpZonePadBars` bars after its last one. Clusters wider than `InpZoneMaxBars` degrade to a level line instead of a giant box.
+3. **Zones claim space.** Every volume zone and void must pass an overlap test against zones already drawn (same time window, more than 55 % shared vertical area + a margin) — so price areas with five stacked imbalances show one, not five. Newest wins.
+4. **Tags are de-duplicated.** Each tag tests for vertical room (`InpLabelDensity`) before printing. Entry tags claim space first, then pool tags, then volume tags. Compact text (`BSL3`, `BSL2-` for swept, `4.6xv`) keeps them small.
+5. **History is quiet.** Swept pools lose their box and tag and keep only the arrow. Only the nearest level is projected to the live edge (`InpProjectNearest`), and only the newest `InpEntryLevelLines` signals keep their SL/TP lines.
+
+Measured on a busy synthetic chart: **chart objects 65 → 19, overlapping tags 11 → 0**, with no loss of the information that matters (active pools, sweeps, entries).
+
+### If you want it busier or quieter
+
+| Goal | Change |
+|---|---|
+| Quieter still | `InpZoneLabels = 0`, `InpShowVoids = false`, `InpMaxPools = 4`, `InpLabelDensity = 3` |
+| Show only live liquidity | `InpOnlyActivePools = true`, `InpShowSweeps = false` |
+| Focus on entries only | `InpZoneLabels = 0`, `InpMaxVolZones = 2`, `InpMaxVoids = 0`, `InpShowPanel = false` |
+| Everything visible (old look) | `InpZoneFill = true`, `InpZoneLabels = 2`, `InpZoneMaxBars = 0`, `InpMaxSingleLevels = 10`, `InpShowNearest = true`, `InpEntryLevelLines = 6` |
+| Colours for a white chart | `InpColorText = clrBlack`, `InpColorPanelBg = clrWhite`, `InpColorPanelTx = clrBlack`, `InpColorPanelBorder = clrSilver` |
+
+---
+
+## 5. Suggested settings per market
 
 | Market / TF | Sensitivity | Lookback | Equal tolerance | Volume mult | Notes |
 |---|---|---|---|---|---|
@@ -190,7 +230,7 @@ If the chart is too empty: raise sensitivity, widen `InpEqualTolPips`, or increa
 
 ---
 
-## 5. How the calculation works
+## 6. How the calculation works
 
 1. **Pivot detection**
    Fractal pivots with `L` bars to the left and `R` bars to the right (strict inequality on both sides). A pivot at bar *i* is only created once bars *i−1 … i−R* have closed, which is why the structure does not repaint.
@@ -230,7 +270,7 @@ If the chart is too empty: raise sensitivity, widen `InpEqualTolPips`, or increa
 
 ---
 
-## 6. Entry signals
+## 7. Entry signals
 
 Two models, both evaluated **on closed bars only** and never re-evaluated on ticks.
 
@@ -271,7 +311,7 @@ The panel row **`Last signal`** always shows the most recent one, e.g. `BUY swee
 
 ---
 
-## 7. Reading the chart — practical use
+## 8. Reading the chart — practical use
 
 **Liquidity as a magnet.** Price is usually drawn to the nearest pool: stops above equal highs are fuel for a move up, stops below equal lows for a move down. The nearest-level lines show how many pips away that fuel is.
 
@@ -290,7 +330,7 @@ The panel row **`Last signal`** always shows the most recent one, e.g. `BUY swee
 
 ---
 
-## 8. Notes, limitations, troubleshooting
+## 9. Notes, limitations, troubleshooting
 
 * **“Real” liquidity is inferred, not observed.** MT4 is a retail charting terminal: it exposes OHLC and tick volume only, with no DOM, no depth-of-market and no per-order data. True order-flow analysis needs a futures/exchange feed (e.g. CME datamine, Bookmap, Sierra Chart) or broker-side depth. This indicator reconstructs the *most probable* resting-liquidity locations from price structure and volume proxies, which is what the concept is based on in practice. If your broker supplies exchange volume (some do for futures), switch `InpVolumeSource` to `Real volume`.
 * **Tick volume ≠ traded contracts.** On FX it is the number of price updates in a bar and correlates well with activity, but it is not contract volume.
@@ -299,20 +339,22 @@ The panel row **`Last signal`** always shows the most recent one, e.g. `BUY swee
 * **Performance:** analysis runs on new-bar events (and on history refresh), not on every tick; only the panel is refreshed per tick. A typical chart holds ~50–150 objects.
 * **Not enough bars:** below 100 bars loaded the indicator stays silent.
 * **Nothing appears:** check that the chart is not in a weekend/flat period, lower `InpSensitivity` (more strict → fewer, but also check the opposite direction), raise `InpLookbackBars`, and confirm the timeframe has visible swings.
-* **Too many boxes:** set `InpOnlyActivePools = true`, lower `InpMaxPools`/`InpMaxSingleLevels`, or raise `InpMinTouches` to 3.
+* **Too many boxes:** set `InpOnlyActivePools = true`, lower `InpMaxPools`/`InpMaxSingleLevels`, or raise `InpMinTouches` to 3. See §4 for the full clean-up table.
+* **Tags missing:** that is the de-duplication working — two levels at the same price only get one tag. Lower `InpLabelDensity` to 1 to allow more.
 * **Alerts fire once per bar**, on the bar that completes, using the last closed bar's sweep or entry.
 * **No entry arrows:** they need a confirmed sweep or acceptance plus a valid target. Try `InpEntryTPMode = 1` (fixed RR) to remove the pool-target requirement, raise `InpEntryMaxSignals`, or increase `InpEntryLookback`. With `InpEntryVolFilter = true` on quiet symbols you may get none — turn it off first.
 * **Testing:** the MQL4 source was verified with a C++/ASan harness (240 randomized parameter/bar-count cases plus targeted tests for pool detection, sweeps, volume zones, both entry models, signal geometry, and object lifecycle). Always compile in MetaEditor for your own build.
 
 ---
 
-## 9. File layout
+## 10. File layout
 
 ```
 RealLiquidity.mq4   the indicator (single file, no dependencies)
 README.md           this document
+docs/preview.png    rendering of the indicator's own chart objects
 ```
 
-## 10. Disclaimer
+## 11. Disclaimer
 
 Trading involves substantial risk. This tool is an analysis aid, not a signal service, and it is provided **as is**, without warranty of any kind. Past behaviour of liquidity zones does not guarantee future results. Test on a demo account before using it with real money.
