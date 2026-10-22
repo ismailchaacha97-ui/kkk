@@ -26,16 +26,18 @@
 //|  Only closed bar (index 1) is evaluated → no repaint / no lag.  |
 //|  Optimized: O(limit) per tick, early exit, no heavy loops.     |
 //|                                                                  |
-//|  Version: 2.20  |  MT4 Build 1380+  |  Strict mode               |
+//|  Version: 2.30  |  MT4 Build 1380+  |  Strict mode               |
 //|  FIX v2.1: Default filters loosened so chart is never empty.     |
 //|          Sweep & Volume OFF by default, impulse 1.20 ATR,        |
 //|          brighter zones, visible on any pair/TF.                 |
 //|  NEW v2.2: Optional HTF Bias Filter (H1/H4/D1) — M5 bullish     |
 //|          now means M5, with HTF dashboard + signal filtering.    |
+//|  NEW v2.3: Auto SL/TP lines (1:1.5 / 1:2) — Zone-Edge, Candle   |
+//|          or ATR mode with RR labels & pip display.               |
 //+------------------------------------------------------------------+
 #property copyright "Institutional Price Action Lab — Professional Edition"
 #property link      "https://github.com/ismailchaacha97-ui/kkk"
-#property version   "2.20"
+#property version   "2.30"
 #property description "Hidden Institutional Entry — pure price action. Detects liquidity sweep + displacement + OB/FVG mitigation with candlestick confirmation. No lagging indicators."
 #property strict
 
@@ -105,6 +107,23 @@ input bool   InpUseHTFFilter   = true;       // Filter signals with Higher Timef
 input ENUM_TIMEFRAMES InpHTFTimeframe = PERIOD_H1; // HTF for bias (M15/M30/H1/H4/D1)
 input bool   InpHTFStrict      = false;      // Strict: BUY only if HTF bullish, SELL only if HTF bearish (blocks neutral too)
 input bool   InpHTFShowOnChart = true;       // Show HTF bias on dashboard
+
+//--- Inputs — Auto SL/TP
+input string Inp_Set_SLTP       = "===== AUTO SL/TP (Institutional) ====="; // === SL/TP ===
+input bool   InpShowSLTP        = true;       // Draw Auto SL/TP lines (1:1.5 / 1:2)
+enum ENUM_HIE_SL_MODE { SL_ZONE_EDGE=0, SL_SIGNAL_CANDLE=1, SL_ATR_BASED=2 };
+input ENUM_HIE_SL_MODE InpSLMode = SL_ZONE_EDGE; // SL Mode: Zone Edge (beyond OB/FVG) | Signal Candle | ATR
+input double InpSLBufferPoints   = 12;        // SL buffer beyond zone/candle (points, 10-20)
+input double InpSL_ATR_Mult      = 1.0;        // ATR multiplier if SL Mode = ATR (0.8-1.5)
+input double InpTP1_RR           = 1.5;       // TP1 RR (1.5 = 1:1.5)
+input double InpTP2_RR           = 2.0;       // TP2 RR (2.0 = 1:2)
+input int    InpSLTP_ExtendBars  = 18;        // Extend lines N bars forward
+input color  InpSLColor          = clrRed;       // SL line color
+input color  InpTP1Color         = clrLime;      // TP1 line color
+input color  InpTP2Color         = clrGold;      // TP2 line color
+input color  InpEntryColor       = clrDodgerBlue; // Entry line color
+input bool   InpShowSLTPlabel    = true;      // Show pips & RR label on lines
+input int    InpSLTP_LineWidth   = 1;          // Line width (1-2)
 
 //--- Inputs — Risk / Display
 input string Inp_Set_Display   = "===== DISPLAY & ALERTS ====="; // === Display ===
@@ -176,7 +195,7 @@ int OnInit()
    SetIndexEmptyValue(3, EMPTY_VALUE);
 
    IndicatorDigits(Digits);
-   IndicatorShortName("Hidden Institutional Entry v2.2 HTF");
+   IndicatorShortName("Hidden Institutional Entry v2.3 SLTP");
 
    ArrayInitialize(BuySignalBuffer, EMPTY_VALUE);
    ArrayInitialize(SellSignalBuffer, EMPTY_VALUE);
@@ -208,8 +227,15 @@ void OnDeinit(const int reason)
    for(int i=ObjectsTotal()-1;i>=0;i--)
    {
       string n=ObjectName(i);
-      if(StringFind(n,"HIE_OB_")==0 || StringFind(n,"HIE_FVG_")==0 || StringFind(n,"HIE_DASH")==0 || StringFind(n,"HIE_ZONE")==0 || StringFind(n,"HIE_DBG")==0)
+      if(StringFind(n,"HIE_OB_")==0 || StringFind(n,"HIE_FVG_")==0 || StringFind(n,"HIE_DASH")==0 || StringFind(n,"HIE_ZONE")==0 || StringFind(n,"HIE_DBG")==0 || StringFind(n,"HIE_SLTP_")==0)
+      {
          ObjectDelete(n);
+         // Also delete associated label objects
+         string lbl = n+"_LBL";
+         if(ObjectFind(0,lbl)>=0) ObjectDelete(lbl);
+      }
+      // SLTP sub-objects have longer names but all start with HIE_SLTP_
+      if(StringFind(n,"HIE_SLTP_")==0) ObjectDelete(n);
    }
    Comment("");
 }
@@ -803,6 +829,123 @@ void DrawZones()
 }
 
 //+------------------------------------------------------------------+
+//| SL/TP Helpers — Institutional Risk Management                    |
+//+------------------------------------------------------------------+
+double GetPipValue()
+{
+   // pip = 10 * Point on 5/3 digit brokers, else Point
+   if(Digits==3 || Digits==5) return Point*10;
+   return Point;
+}
+double PriceToPips(double priceDiff)
+{
+   double pip = GetPipValue();
+   if(pip==0) return 0;
+   return priceDiff / pip;
+}
+void DeleteSLTPLinesForBar(datetime barTime)
+{
+   string prefix = "HIE_SLTP_"+IntegerToString(barTime);
+   for(int i=ObjectsTotal()-1;i>=0;i--)
+   {
+      string n=ObjectName(i);
+      if(StringFind(n,prefix)==0) ObjectDelete(n);
+   }
+}
+void DrawSLTPLines(int idx, int direction, double entry, double sl, double tp1, double tp2, datetime sigTime)
+{
+   if(!InpShowSLTP) return;
+   if(entry==0 || sl==0 || tp1==0 || tp2==0) return;
+   // Unique prefix per signal
+   string baseName = "HIE_SLTP_"+IntegerToString(sigTime)+"_"+IntegerToString(idx);
+   datetime start = Time[idx];
+   datetime end   = Time[0] + Period()*60*InpSLTP_ExtendBars;
+
+   // Safety: risk must be positive
+   double risk = MathAbs(entry - sl);
+   if(risk < Point) return;
+
+   // Delete old if exists (update)
+   if(ObjectFind(0, baseName+"_SL")>=0)
+   {
+      ObjectSetInteger(0, baseName+"_SL", OBJPROP_TIME2, end);
+      ObjectSetInteger(0, baseName+"_TP1", OBJPROP_TIME2, end);
+      ObjectSetInteger(0, baseName+"_TP2", OBJPROP_TIME2, end);
+      ObjectSetInteger(0, baseName+"_ENTRY", OBJPROP_TIME2, end);
+      return;
+   }
+
+   // SL line - solid red
+   ObjectCreate(0, baseName+"_SL", OBJ_TREND, 0, start, sl, end, sl);
+   ObjectSetInteger(0, baseName+"_SL", OBJPROP_COLOR, InpSLColor);
+   ObjectSetInteger(0, baseName+"_SL", OBJPROP_STYLE, STYLE_SOLID);
+   ObjectSetInteger(0, baseName+"_SL", OBJPROP_WIDTH, InpSLTP_LineWidth);
+   ObjectSetInteger(0, baseName+"_SL", OBJPROP_RAY, false);
+   ObjectSetInteger(0, baseName+"_SL", OBJPROP_BACK, false);
+   ObjectSetInteger(0, baseName+"_SL", OBJPROP_SELECTABLE, false);
+
+   // Entry line - dotted blue
+   ObjectCreate(0, baseName+"_ENTRY", OBJ_TREND, 0, start, entry, end, entry);
+   ObjectSetInteger(0, baseName+"_ENTRY", OBJPROP_COLOR, InpEntryColor);
+   ObjectSetInteger(0, baseName+"_ENTRY", OBJPROP_STYLE, STYLE_DOT);
+   ObjectSetInteger(0, baseName+"_ENTRY", OBJPROP_WIDTH, InpSLTP_LineWidth);
+   ObjectSetInteger(0, baseName+"_ENTRY", OBJPROP_RAY, false);
+   ObjectSetInteger(0, baseName+"_ENTRY", OBJPROP_BACK, false);
+   ObjectSetInteger(0, baseName+"_ENTRY", OBJPROP_SELECTABLE, false);
+
+   // TP1 - solid lime
+   ObjectCreate(0, baseName+"_TP1", OBJ_TREND, 0, start, tp1, end, tp1);
+   ObjectSetInteger(0, baseName+"_TP1", OBJPROP_COLOR, InpTP1Color);
+   ObjectSetInteger(0, baseName+"_TP1", OBJPROP_STYLE, STYLE_SOLID);
+   ObjectSetInteger(0, baseName+"_TP1", OBJPROP_WIDTH, InpSLTP_LineWidth);
+   ObjectSetInteger(0, baseName+"_TP1", OBJPROP_RAY, false);
+   ObjectSetInteger(0, baseName+"_TP1", OBJPROP_BACK, false);
+   ObjectSetInteger(0, baseName+"_TP1", OBJPROP_SELECTABLE, false);
+
+   // TP2 - dashed gold
+   ObjectCreate(0, baseName+"_TP2", OBJ_TREND, 0, start, tp2, end, tp2);
+   ObjectSetInteger(0, baseName+"_TP2", OBJPROP_COLOR, InpTP2Color);
+   ObjectSetInteger(0, baseName+"_TP2", OBJPROP_STYLE, STYLE_DASH);
+   ObjectSetInteger(0, baseName+"_TP2", OBJPROP_WIDTH, InpSLTP_LineWidth);
+   ObjectSetInteger(0, baseName+"_TP2", OBJPROP_RAY, false);
+   ObjectSetInteger(0, baseName+"_TP2", OBJPROP_BACK, false);
+   ObjectSetInteger(0, baseName+"_TP2", OBJPROP_SELECTABLE, false);
+
+   // Labels with RR & pips
+   if(InpShowSLTPlabel)
+   {
+      double slPips  = PriceToPips(MathAbs(entry-sl));
+      double tp1Pips = PriceToPips(MathAbs(tp1-entry));
+      double tp2Pips = PriceToPips(MathAbs(tp2-entry));
+      string dirStr = (direction>0 ? "BUY" : "SELL");
+
+      string slLabelName = baseName+"_SL_LBL";
+      string txtSL = StringFormat(" SL %s %.1f pips", dirStr, slPips);
+      ObjectCreate(0, slLabelName, OBJ_TEXT, 0, end, sl);
+      ObjectSetText(slLabelName, txtSL, 7, "Arial Bold", InpSLColor);
+      ObjectSetInteger(0, slLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT);
+
+      string tp1LabelName = baseName+"_TP1_LBL";
+      string txtTP1 = StringFormat(" TP1 1:%.1f %.1f pips", InpTP1_RR, tp1Pips);
+      ObjectCreate(0, tp1LabelName, OBJ_TEXT, 0, end, tp1);
+      ObjectSetText(tp1LabelName, txtTP1, 7, "Arial Bold", InpTP1Color);
+      ObjectSetInteger(0, tp1LabelName, OBJPROP_ANCHOR, ANCHOR_LEFT);
+
+      string tp2LabelName = baseName+"_TP2_LBL";
+      string txtTP2 = StringFormat(" TP2 1:%.1f %.1f pips", InpTP2_RR, tp2Pips);
+      ObjectCreate(0, tp2LabelName, OBJ_TEXT, 0, end, tp2);
+      ObjectSetText(tp2LabelName, txtTP2, 7, "Arial Bold", InpTP2Color);
+      ObjectSetInteger(0, tp2LabelName, OBJPROP_ANCHOR, ANCHOR_LEFT);
+
+      string eLabelName = baseName+"_E_LBL";
+      string txtE = StringFormat(" ENTRY %s", dirStr);
+      ObjectCreate(0, eLabelName, OBJ_TEXT, 0, end, entry);
+      ObjectSetText(eLabelName, txtE, 7, "Arial", InpEntryColor);
+      ObjectSetInteger(0, eLabelName, OBJPROP_ANCHOR, ANCHOR_LEFT);
+   }
+}
+
+//+------------------------------------------------------------------+
 //| HTF Bias — pure price action on higher timeframe                |
 //|  Same fractal HH/HL logic but using iHigh/iLow on HTF            |
 //+------------------------------------------------------------------+
@@ -973,11 +1116,16 @@ int OnCalculate(const int rates_total,
       for(int i=ObjectsTotal()-1;i>=0;i--)
       {
          string n=ObjectName(i);
-         if(StringFind(n,"HIE_OB_")==0 || StringFind(n,"HIE_FVG_")==0 || StringFind(n,"HIE_DBG")==0)
+         if(StringFind(n,"HIE_OB_")==0 || StringFind(n,"HIE_FVG_")==0 || StringFind(n,"HIE_DBG")==0 || StringFind(n,"HIE_SLTP_")==0)
          {
             ObjectDelete(n);
             ObjectDelete(n+"_L");
             ObjectDelete(n+"_TXT");
+            ObjectDelete(n+"_LBL");
+            ObjectDelete(n+"_SL_LBL");
+            ObjectDelete(n+"_TP1_LBL");
+            ObjectDelete(n+"_TP2_LBL");
+            ObjectDelete(n+"_E_LBL");
          }
       }
       start = limit;
@@ -1062,6 +1210,8 @@ int OnCalculate(const int rates_total,
    {
       bool buySignal = false;
       bool sellSignal = false;
+      Zone buyZone; bool hasBuyZone=false;
+      Zone sellZone; bool hasSellZone=false;
 
       for(int z=0; z<OB_Count && !buySignal; z++)
       {
@@ -1073,6 +1223,7 @@ int OnCalculate(const int rates_total,
             double c = barClose(idx);
             if(c < OB_Zones[z].low - 10*Point) continue;
             buySignal = true;
+            buyZone = OB_Zones[z]; hasBuyZone=true;
          }
       }
       if(!buySignal)
@@ -1085,6 +1236,7 @@ int OnCalculate(const int rates_total,
             if(IsBullishEntryTrigger(idx))
             {
                buySignal = true;
+               buyZone = FVG_Zones[z]; hasBuyZone=true;
             }
          }
       }
@@ -1099,6 +1251,7 @@ int OnCalculate(const int rates_total,
             double c = barClose(idx);
             if(c > OB_Zones[z].high + 10*Point) continue;
             sellSignal = true;
+            sellZone = OB_Zones[z]; hasSellZone=true;
          }
       }
       if(!sellSignal)
@@ -1111,6 +1264,7 @@ int OnCalculate(const int rates_total,
             if(IsBearishEntryTrigger(idx))
             {
                sellSignal = true;
+               sellZone = FVG_Zones[z]; hasSellZone=true;
             }
          }
       }
@@ -1118,16 +1272,15 @@ int OnCalculate(const int rates_total,
       //--- HTF Filter: block opposite direction signals
       if(InpUseHTFFilter && (buySignal || sellSignal))
       {
-         // htfBiasForFilter: +1 bullish, -1 bearish, 0 neutral
          if(buySignal)
          {
-            if(htfBiasForFilter==-1) buySignal=false; // HTF bearish blocks BUY
-            else if(InpHTFStrict && htfBiasForFilter!=1) buySignal=false; // strict: only bullish HTF allows BUY
+            if(htfBiasForFilter==-1) buySignal=false;
+            else if(InpHTFStrict && htfBiasForFilter!=1) buySignal=false;
          }
          if(sellSignal)
          {
-            if(htfBiasForFilter==1) sellSignal=false; // HTF bullish blocks SELL
-            else if(InpHTFStrict && htfBiasForFilter!=-1) sellSignal=false; // strict: only bearish HTF allows SELL
+            if(htfBiasForFilter==1) sellSignal=false;
+            else if(InpHTFStrict && htfBiasForFilter!=-1) sellSignal=false;
          }
       }
 
@@ -1138,6 +1291,28 @@ int OnCalculate(const int rates_total,
          if(offset < 10*Point) offset = 10*Point;
          BuySignalBuffer[idx] = barLow(idx) - offset;
          BuyZoneBuffer[idx] = barLow(idx);
+         //--- Auto SL/TP for BUY
+         if(InpShowSLTP)
+         {
+            double entry = barClose(idx);
+            double sl=0, tp1=0, tp2=0;
+            if(InpSLMode==SL_ZONE_EDGE && hasBuyZone)
+               sl = buyZone.low - InpSLBufferPoints*Point;
+            else if(InpSLMode==SL_SIGNAL_CANDLE)
+               sl = barLow(idx) - InpSLBufferPoints*Point;
+            else if(InpSLMode==SL_ATR_BASED)
+               sl = entry - GetATR(idx, InpATRPeriod)*InpSL_ATR_Mult;
+            else // fallback zone edge
+               sl = hasBuyZone ? buyZone.low - InpSLBufferPoints*Point : barLow(idx) - InpSLBufferPoints*Point;
+
+            double risk = MathAbs(entry - sl);
+            if(risk > Point)
+            {
+               tp1 = entry + risk * InpTP1_RR;
+               tp2 = entry + risk * InpTP2_RR;
+               DrawSLTPLines(idx, 1, entry, sl, tp1, tp2, Time[idx]);
+            }
+         }
          if(idx==1 && InpAlerts && Time[1] != lastAlertBuy)
          {
             string msg = StringFormat("HIE BUY  %s %s @ %s  | %s",
@@ -1164,6 +1339,28 @@ int OnCalculate(const int rates_total,
          if(offset < 10*Point) offset = 10*Point;
          SellSignalBuffer[idx] = barHigh(idx) + offset;
          SellZoneBuffer[idx] = barHigh(idx);
+         //--- Auto SL/TP for SELL
+         if(InpShowSLTP)
+         {
+            double entry = barClose(idx);
+            double sl=0, tp1=0, tp2=0;
+            if(InpSLMode==SL_ZONE_EDGE && hasSellZone)
+               sl = sellZone.high + InpSLBufferPoints*Point;
+            else if(InpSLMode==SL_SIGNAL_CANDLE)
+               sl = barHigh(idx) + InpSLBufferPoints*Point;
+            else if(InpSLMode==SL_ATR_BASED)
+               sl = entry + GetATR(idx, InpATRPeriod)*InpSL_ATR_Mult;
+            else
+               sl = hasSellZone ? sellZone.high + InpSLBufferPoints*Point : barHigh(idx) + InpSLBufferPoints*Point;
+
+            double risk = MathAbs(entry - sl);
+            if(risk > Point)
+            {
+               tp1 = entry - risk * InpTP1_RR;
+               tp2 = entry - risk * InpTP2_RR;
+               DrawSLTPLines(idx, -1, entry, sl, tp1, tp2, Time[idx]);
+            }
+         }
          if(idx==1 && InpAlerts && Time[1] != lastAlertSell)
          {
             string msg = StringFormat("HIE SELL %s %s @ %s | %s",
