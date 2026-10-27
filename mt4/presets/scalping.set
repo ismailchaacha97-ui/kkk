@@ -1,0 +1,36 @@
+; Apex Confluence Pro - scalping preset
+; load with Inputs -> Load
+InpProfile=0
+InpShowPanel=true
+InpCorner=0
+InpPanelX=12
+InpPanelY=24
+InpFont=Courier New
+InpFontSize=9
+InpAtrPeriod=14
+InpMinScore=10
+InpERMinTrend=0.22
+InpERChop=0.1
+InpERPeriod=14
+InpVolSpikeMult=1.5
+InpSessionMode=1
+InpAsiaStart=0
+InpAsiaEnd=8
+InpLondonStart=7
+InpLondonEnd=16
+InpNYStart=12
+InpNYEnd=21
+InpMaxSpreadPoints=20
+InpShowZones=true
+InpMaxZonesShown=5
+InpShowZoneLabels=true
+InpShowTradeLevels=true
+InpShowDailyLevels=true
+InpShowWeeklyLevels=false
+InpZoneExtendBars=30
+InpArrowOffsetATR=0.45
+InpAlertPopup=true
+InpAlertSound=false
+InpAlertPush=false
+InpAlertEmail=false
+InpAlertIntrabar=false
