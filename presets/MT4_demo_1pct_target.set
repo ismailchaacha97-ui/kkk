@@ -1,0 +1,49 @@
+; !!! NOT RECOMMENDED - TARGET-CHASING PRESET, KEPT FOR THE RECORD !!!
+; This is what "1% a day" would require: ~10x the validated risk per trade.
+; Backtest of this setting is in docs/RISK_AND_TARGET.md: it produces a
+; 30-60% drawdown on the same trade sequence, i.e. it violates the 4% cap by an
+; order of magnitude.  Use it on a DEMO account only, if at all.
+InpSymbols=EURUSD,GBPUSD,AUDUSD,USDJPY,XAUUSD
+InpMagicNumber=20251003
+InpSlippagePips=2
+InpPivotK=2
+InpPivotLookback=400
+InpLevelCooldown=12
+InpUsePrevDay=1
+InpUsePrevWeek=1
+InpUseSwing=1
+InpLevelMode=1
+InpMinRangeATR=55
+InpCloseFrac=45
+InpVolumeConfirm=0
+InpVolLookback=50
+InpVolMultPct=130
+InpRequireStructure=1
+InpATRPeriod=14
+InpRR=2.0
+InpSlATRBuffer=0.30
+InpMinSlATR=0.55
+InpMaxSlATR=3.20
+InpBEatR=0.9
+InpTrailATR=2.0
+InpMaxHoldBars=48
+InpRiskPercent=3.00
+InpMaxPositions=5
+InpMaxSignalsPerDay=3
+InpDailyStopPct=4.0
+InpDailyHardStopPct=8.0
+InpWeeklyStopPct=15.0
+InpMaxMarginUsePct=80.0
+InpCompound=1
+InpGMTOffsetHours=2
+InpSessionStartUTC=7
+InpSessionEndUTC=18
+InpTradeMonday=1
+InpTradeFriday=1
+InpFridayCloseHourUTC=20
+InpMaxSpreadPips=2.5
+InpMaxSpreadPipsGold=6.0
+InpOrderRetries=3
+InpRetrySleepMs=500
+InpShowDashboard=1
+InpVerboseLog=0
