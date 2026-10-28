@@ -1,5 +1,13 @@
-.venv/
-.cache/
+# market data (fetched via tools/fetch_data.py - not versioned)
+data/
+# python
 __pycache__/
-*.py[cod]
-.DS_Store
+*.pyc
+.venv/
+.venv*/
+*.egg-info/
+# MT4 build artefacts
+*.ex4
+*.ex5
+*.mqproj
+*.log

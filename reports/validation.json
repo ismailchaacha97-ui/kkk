@@ -1,0 +1,263 @@
+{
+  "params": {
+    "pivot_k": 3,
+    "sweep_scan": 3,
+    "level_cooldown": 12,
+    "require_htf_trend": 1,
+    "min_range_atr": 0.55,
+    "close_frac": 0.45,
+    "vol_lookback": 50,
+    "vol_mult": 1.3,
+    "vol_confirm": 0,
+    "atr_period": 14,
+    "sl_atr_buffer": 0.3,
+    "min_sl_atr": 0.55,
+    "max_sl_atr": 3.2,
+    "rr": 2.0,
+    "be_at_r": 0.9,
+    "trail_atr": 2.0,
+    "max_hold_bars": 48,
+    "session_start": 7,
+    "session_end": 18,
+    "trade_friday": 1,
+    "trade_monday": 1,
+    "max_penetration": 0.25,
+    "level_mode": 1,
+    "max_signals_per_day": 2,
+    "entry_slippage_pips": 0.2
+  },
+  "risk_pct": 0.2,
+  "in_sample": {
+    "stats": {
+      "start": "2013-01-01",
+      "end": "2019-12-30",
+      "days": 2554,
+      "trades": 821,
+      "total_return_pct": 135.6379549783882,
+      "cagr_pct": 13.04078142531373,
+      "max_dd_pct": 1.565406457315055,
+      "calmar": 8.3306040832877,
+      "avg_daily_pct": 0.036975793914750435,
+      "median_daily_pct": 0.0,
+      "worst_day_pct": -0.8154602915633968,
+      "std_daily_pct": 0.1645588657182763,
+      "sharpe": 3.5669456568236413,
+      "days_traded": 2328,
+      "win_rate_pct": 53.34957369062119,
+      "profit_factor": 2.8996115577426647,
+      "avg_win": 47.26962333308944,
+      "avg_loss": -18.643079692047873,
+      "expectancy_r": 0.5239054364637087,
+      "avg_bars": 5.392204628501827,
+      "trades_per_day": 0.35266323024054985,
+      "max_losing_streak": 13,
+      "by_symbol": {
+        "AUDUSD": {
+          "pnl": 477.02457142847743,
+          "n": 138
+        },
+        "EURUSD": {
+          "pnl": 3561.8779285710702,
+          "n": 217
+        },
+        "GBPUSD": {
+          "pnl": 3938.070857142407,
+          "n": 202
+        },
+        "USDJPY": {
+          "pnl": 3311.4524264107026,
+          "n": 137
+        },
+        "XAUUSD": {
+          "pnl": 2275.3697142861874,
+          "n": 127
+        }
+      }
+    },
+    "symbols": [
+      "EURUSD",
+      "GBPUSD",
+      "AUDUSD",
+      "USDJPY",
+      "XAUUSD"
+    ]
+  },
+  "out_of_sample": {
+    "stats": {
+      "start": "2024-01-02",
+      "end": "2026-02-27",
+      "days": 787,
+      "trades": 188,
+      "total_return_pct": -5.6505202667614824,
+      "cagr_pct": -2.663326394935528,
+      "max_dd_pct": 7.029021040360139,
+      "calmar": -0.37890431393545376,
+      "avg_daily_pct": -0.01030991902287827,
+      "median_daily_pct": 0.0,
+      "worst_day_pct": -1.004171251138597,
+      "std_daily_pct": 0.137666145226281,
+      "sharpe": -1.1888535875068245,
+      "days_traded": 560,
+      "win_rate_pct": 30.851063829787233,
+      "profit_factor": 0.7212380841848005,
+      "avg_win": 25.206099942067237,
+      "avg_loss": -15.592352487046513,
+      "expectancy_r": -0.15321341193227017,
+      "avg_bars": 4.808510638297872,
+      "trades_per_day": 0.3357142857142857,
+      "max_losing_streak": 15,
+      "by_symbol": {
+        "AUDUSD": {
+          "pnl": 82.59357142838874,
+          "n": 39
+        },
+        "EURUSD": {
+          "pnl": -351.2460714285195,
+          "n": 53
+        },
+        "GBPUSD": {
+          "pnl": -107.12700000007501,
+          "n": 37
+        },
+        "USDJPY": {
+          "pnl": 10.769830466868164,
+          "n": 30
+        },
+        "XAUUSD": {
+          "pnl": -200.04235714280935,
+          "n": 29
+        }
+      }
+    },
+    "symbols": [
+      "EURUSD",
+      "GBPUSD",
+      "AUDUSD",
+      "USDJPY",
+      "XAUUSD"
+    ]
+  },
+  "stress_2020": {
+    "stats": {
+      "start": "2020-01-02",
+      "end": "2021-12-30",
+      "days": 728,
+      "trades": 198,
+      "total_return_pct": 14.504246071540283,
+      "cagr_pct": 7.031544972765169,
+      "max_dd_pct": 2.5610928282882472,
+      "calmar": 2.745525228566131,
+      "avg_daily_pct": 0.026265204784075718,
+      "median_daily_pct": 0.0,
+      "worst_day_pct": -0.4238023168020022,
+      "std_daily_pct": 0.15179445783988912,
+      "sharpe": 2.746788030936415,
+      "days_traded": 519,
+      "win_rate_pct": 47.474747474747474,
+      "profit_factor": 1.9221969329759094,
+      "avg_win": 32.161886281009,
+      "avg_loss": -15.123006762123309,
+      "expectancy_r": 0.3437627402114938,
+      "avg_bars": 5.287878787878788,
+      "trades_per_day": 0.3815028901734104,
+      "max_losing_streak": 10,
+      "by_symbol": {
+        "AUDUSD": {
+          "pnl": 606.49342857143,
+          "n": 47
+        },
+        "GBPUSD": {
+          "pnl": 461.103142857235,
+          "n": 56
+        },
+        "USDJPY": {
+          "pnl": 106.95917858232235,
+          "n": 41
+        },
+        "XAUUSD": {
+          "pnl": 275.8688571430339,
+          "n": 54
+        }
+      }
+    },
+    "symbols": [
+      "GBPUSD",
+      "AUDUSD",
+      "USDJPY",
+      "XAUUSD"
+    ]
+  },
+  "walk_forward": [
+    {
+      "fold": 1,
+      "train_end": "2015-03-13",
+      "test_end": "2017-05-22",
+      "best_rr": 1.2,
+      "best_be": 0.9,
+      "best_trail": 2.0,
+      "train_cagr": 5.792468585164534,
+      "train_dd": 0.9635889433304179,
+      "test_trades": 251,
+      "test_cagr": 12.318098874615613,
+      "test_dd": 0.9196663308847941,
+      "test_pf": 3.1272727599246504
+    },
+    {
+      "fold": 2,
+      "train_end": "2017-05-22",
+      "test_end": "2019-08-01",
+      "best_rr": 1.2,
+      "best_be": 0.9,
+      "best_trail": 2.0,
+      "train_cagr": 9.063336709759406,
+      "train_dd": 0.9635889433304179,
+      "test_trades": 299,
+      "test_cagr": 15.174650314020344,
+      "test_dd": 0.995498248911797,
+      "test_pf": 3.0770364048426355
+    },
+    {
+      "fold": 3,
+      "train_end": "2019-08-01",
+      "test_end": "2021-10-10",
+      "best_rr": 1.2,
+      "best_be": 0.9,
+      "best_trail": 0.0,
+      "train_cagr": 11.251133009714831,
+      "train_dd": 1.0049168418758025,
+      "test_trades": 238,
+      "test_cagr": 7.934770111647937,
+      "test_dd": 1.4652335621281543,
+      "test_pf": 2.0576307094532114
+    },
+    {
+      "fold": 4,
+      "train_end": "2021-10-10",
+      "test_end": "2023-12-20",
+      "best_rr": 1.8,
+      "best_be": 0.9,
+      "best_trail": 2.0,
+      "train_cagr": 11.910177966652324,
+      "train_dd": 1.4454295899596792,
+      "test_trades": 148,
+      "test_cagr": -3.7092322817678047,
+      "test_dd": 8.938554084462247,
+      "test_pf": 0.5682866701191128
+    },
+    {
+      "fold": 5,
+      "train_end": "2023-12-20",
+      "test_end": "2026-03-01",
+      "best_rr": 2.5,
+      "best_be": 0.0,
+      "best_trail": 2.0,
+      "train_cagr": 9.631393792846277,
+      "train_dd": 10.03018242361331,
+      "test_trades": 187,
+      "test_cagr": -2.2746399894748026,
+      "test_dd": 6.28552310770254,
+      "test_pf": 0.7770115510967032
+    }
+  ],
+  "walk_forward_total_return_pct": 81.92604192890565
+}
