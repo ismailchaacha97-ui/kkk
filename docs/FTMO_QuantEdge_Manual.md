@@ -499,7 +499,7 @@ the shipped values; presets in `mt4/Presets/` override a subset.
 | `InpFridayCloseHour` | 20 | Friday flatten hour |
 | `InpNoNewTradesFriday` | true | no new entries late Friday |
 | `InpFridayNoTradeHour` | 17 | cut-off hour |
-| `InpMaxSpreadPoints` | 0 | hard spread cap; 0 = `InpAutoSpreadMult ×` the median spread of the last 200 bars |
+| `InpMaxSpreadPoints` | 0 | hard spread cap; 0 = `InpAutoSpreadMult ×` the median of the last 64 per-bar spread samples (a median so the rollover spike cannot inflate the cap) |
 | `InpAutoSpreadMult` | 3.0 | auto-cap multiplier |
 
 ### 7.9 Execution
@@ -651,25 +651,26 @@ matches FTMO's client area for the same day before trusting the governor.
 
 ## 11. Verification summary
 
-`tools/validate_math.py` runs 52 numerical checks against synthetic series whose
-ground truth is known: z-score breakdown behaviour, VR on random walk / OU /
-persistent processes, half-life recovery and Dickey–Fuller false-positive rates,
-ATR percentile bounds, Fibonacci geometry, score boundedness, lot sizing and
-rounding direction, governor arithmetic, execution-guard arithmetic, and a
-bar-by-bar replay of the decision loop on both a mean-reverting series and a null
-(random walk) control.
+Three tools, all runnable in a few seconds:
 
-```
-All 52 checks passed.
-```
+| Tool | Checks | Result |
+|---|---|---|
+| `tools/mq4_check.py` | statics: scope-correct identifier resolution, undefined/duplicate functions, MQL5-only calls, unbalanced blocks, input syntax | `0 error(s), 0 warning(s)` |
+| `tools/validate_math.py` | 52 numerical checks against synthetic series with known ground truth: z-score breakdown, VR on random walk / OU / persistent processes, half-life recovery and Dickey–Fuller false-positive rates, ATR percentile bounds, Fibonacci geometry, score boundedness, lot sizing and rounding direction, governor arithmetic, execution guards, and a bar-by-bar replay with a random-walk null control | `All 52 checks passed` |
+| `tools/test_checker.py` | 7 regression tests that inject the defect classes MetaEditor rejects into a copy of the EA and assert the analyser reports them | `All 7 checker tests passed` |
 
-Full output: [`docs/VALIDATION.md`](VALIDATION.md). Statics:
-`python3 tools/mq4_check.py mt4/Experts/QuantEdge/FTMO_QuantEdge.mq4` →
-`0 error(s), 0 warning(s)`.
+The static analyser is itself tested because it is the only compile-like gate in
+this environment. It was upgraded after the first MetaEditor build reported two
+errors it had missed (`iSpread`, and a variable used outside the scope it was
+declared in); it now reproduces both, on the exact lines MetaEditor named.
+
+Full output and the compile feedback: [`docs/VALIDATION.md`](VALIDATION.md).
 
 ## 12. Version history
 
-**1.00** — first release. Robust z-score, ATR-percentile fitness, variance-ratio
+**1.00** — first release; first MetaEditor build reported 2 errors (`iSpread`,
+`dow` used outside its scope) and 1 warning, all fixed in the same release and
+re-verified (§11, `docs/VALIDATION.md`). Contents: Robust z-score, ATR-percentile fitness, variance-ratio
 regime tilt with neutral fallback, Dickey–Fuller-gated OU half-life, Fibonacci
 confluence, statistical exits, FTMO daily/total/target governors with hard
 breakers, execution-efficiency guards, news blackout, CSV diagnostic log,

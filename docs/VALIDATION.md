@@ -10,6 +10,7 @@ proves the code parses, it does not prove the formulas are right.
 | Static analysis | `tools/mq4_check.py` | balanced blocks, no undefined or duplicate functions, no MQL5-only calls, no unterminated statements, no MQL5 format specifiers |
 | Numerical mirror | `tools/validate_math.py` | every formula in the EA re-implemented in Python and tested against synthetic series with known ground truth |
 | Preset integrity | `tools/gen_presets.py` | every key in every preset exists in the EA and every preset covers all 104 inputs |
+| Analyser self-tests | `tools/test_checker.py` | the static analyser actually reports the defect classes it claims to detect |
 
 Reproduce:
 
@@ -17,6 +18,7 @@ Reproduce:
 python3 tools/mq4_check.py mt4/Experts/QuantEdge/FTMO_QuantEdge.mq4   # 0 errors, 0 warnings
 python3 tools/validate_math.py                                       # 52/52 checks
 python3 tools/gen_presets.py                                         # 6 presets
+python3 tools/test_checker.py                                        # 7/7 checker tests
 ```
 
 ---
@@ -45,6 +47,57 @@ python3 tools/gen_presets.py                                         # 6 presets
 9. **Execution guards** — resulting maximum trade frequency.
 10. **Mechanism simulation** — bar-by-bar replay of the full decision loop on a
     mean-reverting series and on a random-walk control, with transaction costs.
+
+---
+
+## 1a. Compilation feedback (first MetaEditor build)
+
+The first build of commit `160df15` in MetaEditor reported:
+
+```
+'iSpread' - function not defined                        2020  26
+possible loss of data due to type conversion             2057  19
+'dow' - undeclared identifier                            1372  56
+2 errors, 1 warnings
+```
+
+All three were real, and all three are fixed. What matters for the tooling is
+that the static analyser had reported *none* of the two errors — it only checked
+that the identifiers appearing in call position were defined functions, never
+that a plain variable reference had a declaration in scope.
+
+**Root causes and fixes**
+
+| Report | Cause | Fix |
+|---|---|---|
+| `iSpread` not defined | I whitelisted `iSpread` as an MQL4 builtin. It is not one: MQL4 has no per-bar spread history, and an indicator handle cannot be created from an EA on that symbol anyway | the auto spread cap now uses a rolling median of the last 64 per-bar spread samples (`SampleSpread`), which is also more robust: a median ignores the daily rollover spike that would otherwise inflate the cap. The bogus name was removed from the whitelist |
+| `dow` undeclared | declared in `UpdateGovernors` but used in `TradingAllowed`, a different function | `dow` is now a local of `TradingAllowed` |
+| loss of data | `DoubleToString(x, g_digits)` passes a `double` to an `int` parameter | explicit `(int)g_digits` at every call site |
+
+**Tooling fix.** The analyser now resolves identifiers per function scope: it
+splits the source into function bodies, collects globals, parameters and locals
+separately, and requires every non-call identifier to resolve in the body that
+uses it. Two supporting defects surfaced while building that check and were also
+fixed: declarations that wrap over several lines (`int ticket = OrderSend(...)`)
+are now parsed with a parenthesis-depth scanner instead of a line regex, and
+`#` lines inside function bodies are blanked before scanning.
+
+**Proof that the gate works.** Run against the two superseded revisions, the
+upgraded analyser now produces exactly what MetaEditor produced:
+
+| Revision | Analyser output |
+|---|---|
+| `32d41e2` (first release) | `iSpread` undefined; `dow` undeclared in scope — **2 errors** |
+| `160df15` (second commit) | `iSpread` undefined at 2215; `dow` undeclared at 1498 — **2 errors** |
+| current | **0 errors, 0 warnings** |
+
+`tools/test_checker.py` then locks this in: 7 cases, each injecting one defect
+class into a copy of the real EA and asserting the report (clean source,
+undeclared identifier, missing MQL4 function, unbalanced brace, duplicate
+function, input without `;`, MQL5-only call).
+
+> The fixed revision has **not** been through MetaEditor itself — that step is
+> still outstanding. Compile it and confirm `0 errors`.
 
 ---
 

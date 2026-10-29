@@ -299,8 +299,10 @@ datetime g_lastEntryTime  = 0;
 datetime g_lastEntryBar   = 0;
 datetime g_tradeDay       = 0;
 int      g_tradesToday    = 0;
-int      g_spreadMedian   = 0;
-datetime g_spreadCalcTime = 0;
+int      g_spreadMedian   = 0;      // median of the sampled spreads, in points
+int      g_spreadBuf[64];           // ring buffer of per-bar spread samples
+int      g_spreadBufN      = 0;
+int      g_spreadBufIdx    = 0;
 datetime g_lastDashTime   = 0;
 datetime g_lastNewsLoad   = 0;
 
@@ -346,6 +348,39 @@ int SpreadPoints()
   {
    if(g_point <= 0.0) return(0);
    return((int)MathRound((AskPrice() - BidPrice()) / g_point));
+  }
+
+//--- rolling spread baseline: the median of the last 64 samples, taken once
+//--- per bar. A median (not a mean) ignores the daily rollover spike, which is
+//--- exactly the observation that must not inflate the cap.
+void SampleSpread()
+  {
+   int sp = SpreadPoints();
+   if(sp < 0) sp = 0;
+
+   g_spreadBuf[g_spreadBufIdx] = sp;
+   g_spreadBufIdx = (g_spreadBufIdx + 1) % 64;
+   if(g_spreadBufN < 64) g_spreadBufN++;
+
+   int tmp[64];
+   for(int i = 0; i < g_spreadBufN; i++) tmp[i] = g_spreadBuf[i];
+
+   for(int k = 1; k < g_spreadBufN; k++)         // insertion sort, n <= 64
+     {
+      int key = tmp[k];
+      int j = k - 1;
+      while(j >= 0 && tmp[j] > key)
+        {
+         tmp[j + 1] = tmp[j];
+         j--;
+        }
+      tmp[j + 1] = key;
+     }
+   if(g_spreadBufN <= 0) return;
+   if(g_spreadBufN % 2 == 1)
+      g_spreadMedian = tmp[g_spreadBufN / 2];
+   else
+      g_spreadMedian = (tmp[g_spreadBufN / 2 - 1] + tmp[g_spreadBufN / 2] + 1) / 2;
   }
 
 //--- monetary value of one point for one lot (handles tickSize != point)
@@ -1227,7 +1262,7 @@ datetime TradingDayStart(datetime t)
   {
    datetime d = DayStartOf(t);
    int roll = InpDayRollHour * 3600 + InpDayRollMinute * 60;
-   if((int)(t - d) < roll)
+   if((int)((long)t - (long)d) < roll)
       d -= 86400;
    return(d + roll);
   }
@@ -1475,8 +1510,9 @@ bool TradingAllowed(int dir, string &reason)
      { reason = "insufficient remaining daily budget"; return(false); }
 
    //--- session window
-   int hh = TimeHour(TimeCurrent());
-   int mm = TimeMinute(TimeCurrent());
+   int dow  = TimeDayOfWeek(TimeCurrent());
+   int hh   = TimeHour(TimeCurrent());
+   int mm   = TimeMinute(TimeCurrent());
    int mins = hh * 60 + mm;
    int s1 = InpSessionStartHour * 60 + InpSessionStartMin;
    int s2 = InpSessionEndHour * 60 + InpSessionEndMin;
@@ -1734,9 +1770,9 @@ int OpenTrade(int dir, double lots, double sl, double tp, string tag, int mode)
          if(OrderSelect(ticket, SELECT_BY_TICKET))
             PrintFormat("QE: %s %.2f %s @%s sl=%s tp=%s ticket=%d",
                         (dir > 0 ? "BUY" : "SELL"), lots, g_symbol,
-                        DoubleToString(OrderOpenPrice(), g_digits),
-                        DoubleToString(slAdj, g_digits),
-                        DoubleToString(tpAdj, g_digits), ticket);
+                        DoubleToString(OrderOpenPrice(), (int)g_digits),
+                        DoubleToString(slAdj, (int)g_digits),
+                        DoubleToString(tpAdj, (int)g_digits), ticket);
          CsvLog("OPEN", dir, lots, price, slAdj, tpAdj, tag);
          return(ticket);
         }
@@ -1872,7 +1908,7 @@ void ManageOnePosition()
    double px  = (dir > 0) ? BidPrice() : AskPrice();
    double profitPrice = (px - entry) * dir;      // in price units
    double rMultiple   = profitPrice / risk;
-   int    secsOpen    = (int)(TimeCurrent() - opened);              // explicit int maths
+   int    secsOpen    = (int)((long)TimeCurrent() - (long)opened);  // explicit width
    int    barSeconds  = MathMax(1, PeriodSeconds(g_period));
    int    barsOpen    = (barSeconds > 0) ? (secsOpen / barSeconds) : 0;
    bool   minDurationOk = (secsOpen >= InpMinTradeDurationSec);
@@ -2053,8 +2089,8 @@ void CsvLog(string evt, int dir, double lots, double price, double sl, double tp
       FileWrite(h, "time", "event", "symbol", "dir", "lots", "price", "sl", "tp",
                 "score", "z", "vr", "halflife", "atrpct", "equity", "daily_pct", "note");
    FileWrite(h, TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), evt, g_symbol,
-             IntegerToString(dir), DoubleToString(lots, 2), DoubleToString(price, g_digits),
-             DoubleToString(sl, g_digits), DoubleToString(tp, g_digits),
+             IntegerToString(dir), DoubleToString(lots, 2), DoubleToString(price, (int)g_digits),
+             DoubleToString(sl, (int)g_digits), DoubleToString(tp, (int)g_digits),
              DoubleToString(g_score, 3), DoubleToString(g_z, 2), DoubleToString(g_vr, 3),
              DoubleToString(g_halfLife, 1), DoubleToString(g_atrPct, 2),
              DoubleToString(AccountEquity(), 2), DoubleToString(DailyLossPct(), 2), note);
@@ -2101,7 +2137,7 @@ void UpdateDashboard()
    StringConcatenate(txt, "VR ", DoubleToString(g_vr, 3), " ", RegimeText(),
                      "   half-life ", (g_halfLife > 0 ? DoubleToString(g_halfLife, 1) + " bars" : "n/a"),
                      " (DF t ", DoubleToString(g_hlTStat, 2), ")\n");
-   StringConcatenate(txt, "ATR ", DoubleToString(g_atr, g_digits), " (pct ",
+   StringConcatenate(txt, "ATR ", DoubleToString(g_atr, (int)g_digits), " (pct ",
                      DoubleToString(g_atrPct * 100.0, 0), "%)  fib ", DoubleToString(g_fibScore, 2), "\n");
    StringConcatenate(txt, "mode ", mode, "   signal ", dirTxt, "\n");
    StringConcatenate(txt, "equity ", DoubleToString(AccountEquity(), 2), "   risk/trade ",
@@ -2207,16 +2243,11 @@ int OnInit()
    TrackClear();
    g_ready = true;
 
-   //--- spread baseline from recent bars: used by the automatic spread cap
-   int    samples = 0;
-   double sum = 0.0;
-   for(int i = 1; i <= 200; i++)
-     {
-      double s = (double)iSpread(g_symbol, g_period, i);
-      if(s > 0) { sum += s; samples++; }
-     }
-   if(samples > 0) g_spreadMedian = (int)MathRound(sum / samples);
-   if(g_spreadMedian <= 0) g_spreadMedian = (int)MathMax(1, MarketInfo(g_symbol, MODE_SPREAD));
+   //--- seed the spread baseline; it is refreshed once per bar in OnTick
+   g_spreadBufN   = 0;
+   g_spreadBufIdx = 0;
+   for(int i = 0; i < 8; i++)
+      SampleSpread();
    if(g_spreadMedian <= 0) g_spreadMedian = 20;
 
    if(InpNewsFilter) LoadNews();
@@ -2268,6 +2299,7 @@ void OnTick()
    //--- 3. decision engine once per closed bar
    if(IsNewBar())
      {
+      SampleSpread();
       UpdateSignalEngine();
       TryEntry();
      }

@@ -25,6 +25,7 @@ tools/
   mq4_check.py                             static analyser for the MQL4 source
   validate_math.py                         Python mirror of every formula, 52 numerical checks
   gen_presets.py                           regenerates the .set files from the EA's inputs
+  test_checker.py                          regression tests for the static analyser
 ```
 
 ## Quick start
@@ -43,11 +44,14 @@ tools/
 python3 tools/mq4_check.py mt4/Experts/QuantEdge/FTMO_QuantEdge.mq4   # 0 errors, 0 warnings
 python3 tools/validate_math.py                                       # 52/52 checks pass
 python3 tools/gen_presets.py                                         # regenerate presets
+python3 tools/test_checker.py                                        # 7/7 checker self-tests
 ```
 
 The Python tools exist because there is no MQL4 compiler in the build
-environment: `mq4_check.py` covers what a compiler would catch, `validate_math.py`
-covers what a compiler would *not* — that the statistics are actually statistics.
+environment: `mq4_check.py` covers what a compiler would catch (it reproduces the
+two errors the first MetaEditor build found, on the same lines),
+`validate_math.py` covers what a compiler would *not* — that the statistics are
+actually statistics — and `test_checker.py` keeps the analyser honest.
 Details and the honest limits are in [`docs/VALIDATION.md`](docs/VALIDATION.md).
 
 ## Important
