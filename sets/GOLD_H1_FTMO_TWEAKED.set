@@ -1,0 +1,65 @@
+; TWEAKED BEST SETTINGS — ForexCracked GOLD H1 (FTMO 10K+ Safe)
+; Based on your pasted set, tweaked for FTMO daily 5% / max 10% and your 0.02->0.05 ladder
+; DO NOT switch timeframe — GOLD H1 locked as you said
+; FTMO: Use this on demo first, 45m before / 30m after news pause manually (GOLD spikes on USD news)
+; REDACTED: OpenAI_API_Key removed — set your own or leave disabled. NEVER share keys.
+
+Author=FREE EA, Indicators > [ForexCracked.com] (TWEAKED for FTMO)
+ShowInfo=1
+MagicNumber=1234567
+MagicNumber2=987654321
+
+; === FTMO CORE ===
+; Fixed lot first (your ladder), NO martingale gamble
+LotSize=0.02000000
+OnlyOneTradeAllowed=1
+AutoLot=0
+AutoLotStep=200
+LotIncrement=0.00000000
+; For 25K/50K/100K: Scale to 0.05/0.10/0.20 OR enable AutoLot=1 with step 8000-10000
+; But for 10K challenge: Keep fixed 0.02 -> 0.03 -> 0.05 as you planned
+
+; === Order — TIGHTENED for FTMO (was 1200/1500 = 120pip SL = too much DD) ===
+DisableTradingOnFriday=1
+StopLoss=600
+SecondaryStopLoss=750
+TakeProfit=900
+ReverseTakeProfit=700
+ProfitLock=300
+TrailDistance=400
+EnableFloatingTP=0
+ProfitThresholdPercentage=55.00000000
+BreakEvenPips=120
+; Why: GOLD H1 600pts = ~60 pips = ~$6 risk at 0.02 lot (0.06% on 10K) -> 3 losses = 0.18% DD <<4%
+; Old 1200/1500 was 2x too wide for FTMO daily 5% = 5 losses = breach risk
+
+; === OPENAI / Strategy ===
+; If you don't use AI, leave disabled (safer, deterministic for FTMO)
+EnableReverseMartingale=0
+OpenAI_API_Key=
+strategyOption=0
+MaxLoss=3
+MaxLossPips=120
+ReverseMultiplier=1.00000000
+ReverseStopLoss2=120
+ReverseTakeProfit2=800
+TrailingStopPips=200
+TrailingStepPips=80
+EnableBreakEvenForReverse=1
+StartHour=9
+EndHour=20
+
+; === NY Session (GOLD volatility) ===
+CandlesForHighLow=5
+NYStartHour=15
+NYStartMinute=25
+UseNYOpenTime=1
+MinutesBeforeNYOpen=10
+CancelOrderAfterMinutes=40
+
+; === RSI (GOLD filter) ===
+RSI_Period=14
+RSI_BuyLimit=68.00000000
+RSI_SellLimit=32.00000000
+; Tweak: 68/32 instead of 70/30 filters whipsaw on GOLD spikes
+
