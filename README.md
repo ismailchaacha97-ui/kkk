@@ -32,9 +32,11 @@ tools/
 
 1. Copy `mt4/Experts/QuantEdge/FTMO_QuantEdge.mq4` to `MQL4/Experts/QuantEdge/`
    in your terminal data folder and compile it with **F7** in MetaEditor.
-2. Attach to an M15 chart, allow live trading, load
-   `mt4/Presets/FTMO_Challenge_Balanced.set`.
-3. Set `InpDayRollHour = 23` if your server is EET/EEST (FTMO's servers are).
+2. Attach to an **M15** chart, allow live trading, and load
+   `mt4/Presets/FTMO_Challenge_Conservative.set` (paid evaluation) or
+   `FTMO_Challenge_Balanced.set` (demo / tester).
+3. Set `InpDayRollHour = 1` if your server is GMT+2/GMT+3 (FTMO's are: CET
+   midnight lands on 01:00 server). The FTMO presets already ship with this.
 4. Run the Strategy Tester on **every tick** for at least 12 months before
    believing anything. Read §8 of the manual first.
 

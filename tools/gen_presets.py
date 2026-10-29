@@ -63,9 +63,14 @@ def parse_inputs(src):
 
 PRESETS = {
     "FTMO_Challenge_Balanced": {
-        # the shipped defaults: everything defined, nothing overridden
+        # FTMO's MetaTrader runs GMT+2/GMT+3, exactly one hour ahead of CET
+        # all year, so the CE(S)T midnight reset lands on 01:00 server time.
+        "InpDayRollHour": "1",
+        "InpDayRollMinute": "0",
     },
     "FTMO_Challenge_Conservative": {
+        "InpDayRollHour": "1",
+        "InpDayRollMinute": "0",
         "InpRiskPercent": "0.25",
         "InpMaxRiskPercent": "0.50",
         "InpMaxOpenPositions": "1",
@@ -86,6 +91,8 @@ PRESETS = {
         "InpCsvLog": "true",
     },
     "FTMO_Challenge_Active": {
+        "InpDayRollHour": "1",
+        "InpDayRollMinute": "0",
         "InpRiskPercent": "0.75",
         "InpMaxRiskPercent": "1.00",
         "InpMaxOpenPositions": "2",

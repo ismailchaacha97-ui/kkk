@@ -178,7 +178,7 @@ input double          InpMaxTotalLossPct  = 10.0;        // FTMO max loss (%) - 
 input double          InpTotalRiskBudgetPct = 8.0;       // EA halt threshold for the phase (%)
 input double          InpInitialBalance   = 0.0;         // Phase start balance (0 = auto-detect + persist)
 input ENUM_QE_ANCHOR  InpDailyAnchorMode  = QE_ANCHOR_MAX; // Daily anchor: balance / equity / max
-input int             InpDayRollHour      = 0;           // Server hour of the FTMO day rollover (EET servers: 23)
+input int             InpDayRollHour      = 0;           // Server hour of the day rollover (FTMO GMT+2/+3: 1)
 input int             InpDayRollMinute    = 0;           // Server minute of the day rollover
 input bool            InpResetStoredAnchors = false;     // Clear the stored phase balance on init
 input bool            InpCloseAllOnBreach = true;        // Flatten when a governor trips

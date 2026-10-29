@@ -233,12 +233,25 @@ equity) covers floating losses on open positions, which is how FTMO measures it.
 The anchor is captured at the configured rollover, `InpDayRollHour` /
 `InpDayRollMinute`.
 
-> **Set the rollover to your server's CET midnight.** FTMO resets at 00:00
-> CE(S)T. FTMO's MT4 servers run on EET/EEST, which is CET+1 all year, so on
-> those servers the rollover is **23:00**. Set `InpDayRollHour = 23` for FTMO.
-> If you leave it at 0 on an EET server, the EA's daily window starts one hour
-> late — the 1.5 percentage-point buffer absorbs it, but the stricter setting is
-> the correct one.
+> **Set the rollover to CET midnight in server time.** FTMO resets at 00:00
+> CE(S)T. FTMO's MetaTrader servers run GMT+2 (winter) / GMT+3 (summer), exactly
+> **one hour ahead of CET all year** — so the reset lands on **01:00 server
+> time**. Set `InpDayRollHour = 1`, `InpDayRollMinute = 0` (the FTMO presets ship
+> this way).
+>
+> Leaving it at 0 starts the EA's day one hour early: between 00:00 and 01:00
+> server the EA would believe a fresh budget exists while FTMO is still counting
+> those losses against the previous day. The 1.5-point buffer absorbs one trade,
+> but it is the wrong boundary.
+>
+> To read the offset yourself: note the server clock in the Market Watch window,
+> compare it with CET, and set the rollover to the server hour at which CET reads
+> midnight. For a GMT+0 broker that is 23:00, for a GMT+1/+2 (CET) broker 00:00,
+> for FTMO's GMT+2/+3 servers 01:00.
+>
+> `InpSkipRolloverMin` is a *separate* setting and stays around 00:00 server,
+> because that is when the daily bar closes and spreads widen — not at the CET
+> boundary.
 
 The initial balance is detected from the account on first run and persisted in a
 terminal global variable keyed by account number and magic number, so a terminal
@@ -344,17 +357,34 @@ instance id, so instances never manage each other's trades.
 
 | | |
 |---|---|
-| Symbol | EURUSD, GBPUSD, USDJPY, AUDUSD, XAUUSD (one instance each) |
-| Timeframe | **M15** or **M30**. H1 for slower profiles. Avoid M1/M5: the ATR/percentile windows then span minutes and the anti-scalping guards dominate. |
-| Preset | `FTMO_Challenge_Balanced` (defaults) for a first run; `FTMO_Challenge_Conservative` for a first *live* evaluation |
+| Symbol | EURUSD, GBPUSD, USDJPY, AUDUSD, XAUUSD (one instance each, distinct `InpInstanceId`) |
+| Timeframe | **M15** (default), M30 alternative, H1 only with `InpMaxBarsInTrade ≈ 24`. Never M1/M5. |
+| Preset | `FTMO_Challenge_Conservative` for a first *live* evaluation; `FTMO_Challenge_Balanced` for tester/demo; `FTMO_Challenge_Active` only after an evaluation has been passed on demo |
+
+**Pairing, in one line each:**
+
+* *First tester run* → `Backtest_M15_Diagnostics` on **M15**, verbose + CSV, read §8.3.
+* *First demo week* → `FTMO_Challenge_Balanced` on **M15**.
+* *First paid evaluation* → `FTMO_Challenge_Conservative` on **M15**.
+* *Research only* → `Mean_Reversion_Pure` / `Momentum_Pure`; do not run them on a paid account before a full walk-forward.
 | History | at least 2 000 bars of clean M15 data; the engine needs ~480 bars to warm up (`QE_MAX_WINDOW`) and reports the exact requirement on init |
 | VPS | recommended; the EA is event-driven but must be online to enforce the governors |
 
-**Choosing a timeframe.** The half-life gate needs `InpHalfLifeWindow` (240) bars
-plus the DF test to say anything. On M15 that is 2.5 trading days of data — a
-reasonable sample for intraday reversion. On H1 it is 10 days, which starts to
-detect slower reversion but trades rarely. On M5 the same 240-bar window covers
-20 hours and reversion estimates become noisy.
+**Choosing a timeframe.** Three windows are fixed in *bars*, so the timeframe
+decides how much wall-clock data each one sees:
+
+| Timeframe | 240 bars (half-life / VR window) | 200 bars (ATR percentile) | 48 bars (max trade life) | Verdict |
+|---|---|---|---|---|
+| M5 | 20 hours | 17 hours | 4 hours | too short for a stable DF test — avoid |
+| **M15** | **60 hours ≈ 2.5 trading days** | 50 hours | **12 hours** | **default**: a real sample, and the time stop stays inside a session |
+| M30 | 120 hours ≈ 5 days | 100 hours | 24 hours | fewer, longer trades; also fine |
+| H1 | 240 hours ≈ 10 days | 8 days | 48 hours | detects slower reversion, but 48 bars spans two days — lower `InpMaxBarsInTrade` to ~24 |
+
+M15 is the default because it is the fastest timeframe on which 240 bars still
+represent more than two trading days of behaviour. On M5 the same window covers
+under one day, the Dickey–Fuller test loses power, and the anti-scalping guards
+(6 entries/day, 2 min minimum life) start to dominate the strategy rather than
+just shape it.
 
 ### 6.1 Presets
 
@@ -479,7 +509,7 @@ the shipped values; presets in `mt4/Presets/` override a subset.
 | `InpTotalRiskBudgetPct` | 8.0 | EA halt threshold |
 | `InpInitialBalance` | 0.0 | phase starting balance; 0 = auto-detect + persist |
 | `InpDailyAnchorMode` | `QE_ANCHOR_MAX` | balance / equity / max at rollover |
-| `InpDayRollHour` / `InpDayRollMinute` | 0 / 0 | server time of the FTMO day rollover (**23** on FTMO EET servers) |
+| `InpDayRollHour` / `InpDayRollMinute` | 0 / 0 | server time of the FTMO day rollover. **Set 1 / 0 on FTMO** (their GMT+2/+3 servers are one hour ahead of CET). The FTMO presets ship with 1 / 0 |
 | `InpResetStoredAnchors` | false | clear the stored phase balance on init |
 | `InpCloseAllOnBreach` | true | flatten when a soft governor trips |
 | `InpFlattenOnProfitLock` | false | also flatten at the profit target |
@@ -644,7 +674,7 @@ matches FTMO's client area for the same day before trusting the governor.
 | `QE: OrderSend failed (invalid stops)` | stop inside the broker's minimum distance | raise `InpSL_ATR_Mult` or `InpMinStopDistancePts`; the EA already retries with the widened distance |
 | `QE: OrderSend failed (invalid volume)` | lots below the broker minimum | raise `InpRiskPercent` or accept fewer trades |
 | Panel shows `NO DATA: warming up` | fewer bars than the engine needs | scroll the chart left to load history |
-| Daily loss in the panel does not match FTMO | wrong rollover hour / anchor mode | set `InpDayRollHour = 23` on EET servers, `InpDailyAnchorMode = QE_ANCHOR_MAX` |
+| Daily loss in the panel does not match FTMO | wrong rollover hour / anchor mode | on FTMO's GMT+2/+3 servers set `InpDayRollHour = 1` (CET midnight = 01:00 server); keep `InpDailyAnchorMode = QE_ANCHOR_MAX` |
 | EA does not trade at all | session window, spread cap, news blackout, or governor | run with `InpVerbose = true`; the journal prints the exact block reason each bar |
 
 ---
