@@ -186,8 +186,26 @@ datetime NowCET() { return(TimeCurrent() - InpServerToCETOffset * 3600); }
 
 void SetGV(string name, double value)
 {
-   GlobalVariableSet(GV_PREFIX + name, value);
-   GlobalVariableTime(GV_PREFIX + name, TimeCurrent() + 365 * 86400);
+   GlobalVariableSet(GV_PREFIX + name, value);   // no expiry in MQL4: it lives until deleted
+}
+
+// MQL4 globals never expire, so prune yesterday's day keys on each new day
+void CleanOldDayKeys()
+{
+   datetime todayDt = (datetime)StrToTime(TimeToString(NowCET(), TIME_DATE));
+   // "FTMOOPS_daystart_" and "FTMOOPS_daymark_" are both 17 chars; the date follows
+   int prefixLen = StringLen(GV_PREFIX "daystart_");
+   int total = GlobalVariablesTotal();
+   for(int i = total - 1; i >= 0; i--)
+   {
+      string name = GlobalVariablesName(i);
+      if(StringFind(name, GV_PREFIX "daystart_") != 0 && StringFind(name, GV_PREFIX "daymark_") != 0)
+         continue;
+      if(StringLen(name) <= prefixLen) continue;
+      datetime d = StrToTime(StringSubstr(name, prefixLen));
+      if(d < todayDt)
+         GlobalVariableDel(name);
+   }
 }
 
 double GetGV(string name, double fallback)
@@ -215,6 +233,7 @@ void ManageDay()
    g_haltDay  = false;
    g_haltWhy  = "";
    g_newsFlatDone = false;
+   CleanOldDayKeys();
    SetGV("daystart_" + dayKey, g_dayStart);
    SetGV("daymark_" + dayKey, (double)g_dayMark);
    if(InpAlerts)
@@ -477,9 +496,8 @@ void LoadNewsList()
       string item = (cpos >= 0) ? StringSubstr(s, 0, cpos) : s;
       if(cpos >= 0) s = StringSubstr(s, cpos + 1);
       else s = "";
-      while(StringLen(item) > 0 && StringGetCharacter(item, 0) == ' ') item = StringSubstr(item, 1);
-      while(StringLen(item) > 0 && StringGetCharacter(StringLen(item) - 1) == ' ')
-         item = StringSubstr(item, 0, StringLen(item) - 1);
+      StringTrimLeft(item);
+      StringTrimRight(item);
       if(StringLen(item) < 16) continue;
       datetime t = StringToTime(item);   // "yyyy.mm.dd hh:mm" (server time)
       if(t == 0) continue;
@@ -868,10 +886,12 @@ void ManagePositions()
             {
                double ntp = isBuy ? open + InpRunnerTargetR * origR * pip
                                   : open - InpRunnerTargetR * origR * pip;
-               OrderSelect(OrderTicket(), SELECT_BY_TICKET);
-               double curSl = OrderStopLoss();
-               if(!OrderModify(OrderTicket(), open, curSl, ntp, 0, clrWhite))
-                  Print("FTMO_Ops: runner TP modify failed err=", GetLastError());
+               if(OrderSelect(OrderTicket(), SELECT_BY_TICKET))
+               {
+                  double curSl = OrderStopLoss();
+                  if(!OrderModify(OrderTicket(), open, curSl, ntp, 0, clrWhite))
+                     Print("FTMO_Ops: runner TP modify failed err=", GetLastError());
+               }
             }
             else
                Print("FTMO_Ops: partial close failed err=", GetLastError());
