@@ -438,74 +438,252 @@ bool ValidateInputs()
   {
    bool ok = true;
 
-#define QE_CHECK(cond, msg) if(!(cond)) { Print("QE INPUT ERROR: ", msg); ok = false; }
-
-   QE_CHECK(InpZPeriod >= 5 && InpZPeriod <= 64, "InpZPeriod must be in [5,64]");
-   QE_CHECK(InpATRPeriod >= 2 && InpATRPeriod <= 100, "InpATRPeriod must be in [2,100]");
-   QE_CHECK(InpMomLookback >= 1 && InpMomLookback <= 100, "InpMomLookback must be in [1,100]");
-   QE_CHECK(InpEntryThreshold >= 0.10 && InpEntryThreshold <= 0.95, "InpEntryThreshold must be in [0.10,0.95]");
-   QE_CHECK(InpZCap >= 0.5 && InpZCap <= 10.0, "InpZCap must be in [0.5,10]");
-   QE_CHECK(InpMomCap >= 0.1 && InpMomCap <= 20.0, "InpMomCap must be in [0.1,20]");
-   QE_CHECK(InpVRHorizon >= 2 && InpVRHorizon <= 60, "InpVRHorizon must be in [2,60]");
-   QE_CHECK(InpVRWindow >= InpVRHorizon + 10 && InpVRWindow <= QE_MAX_WINDOW - 8,
-            "InpVRWindow must be >= InpVRHorizon+10 and <= 472");
-   QE_CHECK(InpVRThreshold >= 0.0 && InpVRThreshold <= 0.9, "InpVRThreshold must be in [0,0.9]");
-   QE_CHECK(InpHalfLifeWindow >= 20 && InpHalfLifeWindow <= QE_MAX_WINDOW - 8,
-            "InpHalfLifeWindow must be in [20,472]");
-   QE_CHECK(InpMaxHalfLifeBars >= 5.0 && InpMaxHalfLifeBars <= 1000.0,
-            "InpMaxHalfLifeBars must be in [5,1000]");
-   QE_CHECK(InpHLTStatMin >= 0.0 && InpHLTStatMin <= 6.0,
-            "InpHLTStatMin must be in [0,6] (2.86 = Dickey-Fuller 5% critical value)");
-   QE_CHECK(InpATRPercentileWindow >= 50 && InpATRPercentileWindow <= QE_MAX_WINDOW - InpATRPeriod - 8,
-            "InpATRPercentileWindow must be >= 50 and small enough to fit the buffer");
-   QE_CHECK(InpMinATRPercentile >= 0.0 && InpMinATRPercentile < InpMaxATRPercentile &&
-            InpMaxATRPercentile <= 1.0, "ATR percentile bounds must satisfy 0 <= min < max <= 1");
-   QE_CHECK(InpTrendMAPeriod >= 20 && InpTrendMAPeriod <= QE_MAX_WINDOW - InpTrendSlopeBars - 8,
-            "InpTrendMAPeriod must be in [20, 472-InpTrendSlopeBars]");
-   QE_CHECK(InpTrendSlopeBars >= 1 && InpTrendSlopeBars <= 100, "InpTrendSlopeBars must be in [1,100]");
-   QE_CHECK(InpFibLookback >= 20 && InpFibLookback <= QE_MAX_WINDOW - 8, "InpFibLookback must be in [20,472]");
-   QE_CHECK(InpFibTolATR > 0.0 && InpFibTolATR <= 2.0, "InpFibTolATR must be in (0,2]");
-   QE_CHECK(InpSL_ATR_Mult >= 0.3 && InpSL_ATR_Mult <= 20.0, "InpSL_ATR_Mult must be in [0.3,20]");
-   QE_CHECK(InpRR > 0.0 && InpRR <= 20.0, "InpRR must be in (0,20]");
-   QE_CHECK(InpMinTP_R >= 0.1 && InpMinTP_R <= InpRR + 5.0, "InpMinTP_R must be in [0.1, InpRR+5]");
-   QE_CHECK(InpRiskPercent > 0.0 && InpRiskPercent <= InpMaxRiskPercent,
-            "InpRiskPercent must be > 0 and <= InpMaxRiskPercent");
-   QE_CHECK(InpMaxRiskPercent <= 2.0, "InpMaxRiskPercent must be <= 2.0 percent for FTMO use");
-   QE_CHECK(InpMaxOpenRiskPct > 0.0 && InpMaxOpenRiskPct < InpDailyRiskBudgetPct,
-            "InpMaxOpenRiskPct must be inside (0, InpDailyRiskBudgetPct)");
-   QE_CHECK(InpMaxOpenPositions >= 1 && InpMaxOpenPositions <= 20, "InpMaxOpenPositions must be in [1,20]");
-   QE_CHECK(InpMaxLots > 0.0, "InpMaxLots must be > 0");
-   QE_CHECK(InpProfitTargetPct > 0.0 && InpProfitTargetPct <= 50.0, "InpProfitTargetPct must be in (0,50]");
-   QE_CHECK(InpMaxDailyLossPct > 0.0 && InpMaxDailyLossPct <= 10.0, "InpMaxDailyLossPct must be in (0,10]");
-   QE_CHECK(InpDailyRiskBudgetPct > 0.0 && InpDailyRiskBudgetPct < InpMaxDailyLossPct,
-            "InpDailyRiskBudgetPct must be inside (0, InpMaxDailyLossPct)");
-   QE_CHECK(InpMaxTotalLossPct > 0.0 && InpMaxTotalLossPct <= 20.0, "InpMaxTotalLossPct must be in (0,20]");
-   QE_CHECK(InpTotalRiskBudgetPct > 0.0 && InpTotalRiskBudgetPct < InpMaxTotalLossPct,
-            "InpTotalRiskBudgetPct must be inside (0, InpMaxTotalLossPct)");
-   QE_CHECK(InpDayRollHour >= 0 && InpDayRollHour <= 23, "InpDayRollHour must be in [0,23]");
-   QE_CHECK(InpDayRollMinute >= 0 && InpDayRollMinute <= 59, "InpDayRollMinute must be in [0,59]");
-   QE_CHECK(InpInitialBalance >= 0.0, "InpInitialBalance must be >= 0");
-   QE_CHECK(InpSessionStartHour >= 0 && InpSessionStartHour <= 23, "InpSessionStartHour must be in [0,23]");
-   QE_CHECK(InpSessionEndHour >= 0 && InpSessionEndHour <= 24, "InpSessionEndHour must be in [0,24]");
-   QE_CHECK(InpFridayCloseHour >= 0 && InpFridayCloseHour <= 24, "InpFridayCloseHour must be in [0,24]");
-   QE_CHECK(InpFridayNoTradeHour >= 0 && InpFridayNoTradeHour <= 24, "InpFridayNoTradeHour must be in [0,24]");
-   QE_CHECK(InpSkipRolloverMin >= 0 && InpSkipRolloverMin <= 120, "InpSkipRolloverMin must be in [0,120]");
-   QE_CHECK(InpReopenBlackoutMin >= 0 && InpReopenBlackoutMin <= 240, "InpReopenBlackoutMin must be in [0,240]");
-   QE_CHECK(InpMaxSpreadPoints >= 0.0, "InpMaxSpreadPoints must be >= 0");
-   QE_CHECK(InpAutoSpreadMult >= 1.0, "InpAutoSpreadMult must be >= 1");
-   QE_CHECK(InpSlippagePoints >= 0 && InpSlippagePoints <= 200, "InpSlippagePoints must be in [0,200]");
-   QE_CHECK(InpMaxRetries >= 1 && InpMaxRetries <= 10, "InpMaxRetries must be in [1,10]");
-   QE_CHECK(InpMaxTradesPerDay >= 0 && InpMaxTradesPerDay <= 100, "InpMaxTradesPerDay must be in [0,100]");
-   QE_CHECK(InpMinTradeDurationSec >= 30 && InpMinTradeDurationSec <= 3600,
-            "InpMinTradeDurationSec must be in [30,3600] (anti tick-scalping guard)");
-   QE_CHECK(InpMaxBarsInTrade >= 1 && InpMaxBarsInTrade <= 5000, "InpMaxBarsInTrade must be in [1,5000]");
-   QE_CHECK(InpHalfLifeStopMult >= 0.5 && InpHalfLifeStopMult <= 20.0, "InpHalfLifeStopMult must be in [0.5,20]");
-   QE_CHECK(InpBreakEvenR > 0.0 && InpBreakEvenR <= 10.0, "InpBreakEvenR must be in (0,10]");
-   QE_CHECK(InpTrailATRMult >= 0.2 && InpTrailATRMult <= 10.0, "InpTrailATRMult must be in [0.2,10]");
-   QE_CHECK(InpNewsBeforeMin >= 0 && InpNewsAfterMin >= 0, "News blackout minutes must be >= 0");
-   QE_CHECK(InpNewsBeforeMin <= 240 && InpNewsAfterMin <= 240, "News blackout minutes must be <= 240");
-   QE_CHECK(InpDashFontSize >= 6 && InpDashFontSize <= 24, "InpDashFontSize must be in [6,24]");
-   QE_CHECK(InpDashRefreshSec >= 1, "InpDashRefreshSec must be >= 1");
+   if(!(InpZPeriod >= 5 && InpZPeriod <= 64))
+     {
+      Print("QE INPUT ERROR: InpZPeriod must be in [5,64]");
+      ok = false;
+     }
+   if(!(InpATRPeriod >= 2 && InpATRPeriod <= 100))
+     {
+      Print("QE INPUT ERROR: InpATRPeriod must be in [2,100]");
+      ok = false;
+     }
+   if(!(InpMomLookback >= 1 && InpMomLookback <= 100))
+     {
+      Print("QE INPUT ERROR: InpMomLookback must be in [1,100]");
+      ok = false;
+     }
+   if(!(InpEntryThreshold >= 0.10 && InpEntryThreshold <= 0.95))
+     {
+      Print("QE INPUT ERROR: InpEntryThreshold must be in [0.10,0.95]");
+      ok = false;
+     }
+   if(!(InpZCap >= 0.5 && InpZCap <= 10.0))
+     {
+      Print("QE INPUT ERROR: InpZCap must be in [0.5,10]");
+      ok = false;
+     }
+   if(!(InpMomCap >= 0.1 && InpMomCap <= 20.0))
+     {
+      Print("QE INPUT ERROR: InpMomCap must be in [0.1,20]");
+      ok = false;
+     }
+   if(!(InpVRHorizon >= 2 && InpVRHorizon <= 60))
+     {
+      Print("QE INPUT ERROR: InpVRHorizon must be in [2,60]");
+      ok = false;
+     }
+   if(!(InpVRWindow >= InpVRHorizon + 10 && InpVRWindow <= QE_MAX_WINDOW - 8))
+     {
+      Print("QE INPUT ERROR: InpVRWindow must be >= InpVRHorizon+10 and <= 472");
+      ok = false;
+     }
+   if(!(InpVRThreshold >= 0.0 && InpVRThreshold <= 0.9))
+     {
+      Print("QE INPUT ERROR: InpVRThreshold must be in [0,0.9]");
+      ok = false;
+     }
+   if(!(InpHalfLifeWindow >= 20 && InpHalfLifeWindow <= QE_MAX_WINDOW - 8))
+     {
+      Print("QE INPUT ERROR: InpHalfLifeWindow must be in [20,472]");
+      ok = false;
+     }
+   if(!(InpMaxHalfLifeBars >= 5.0 && InpMaxHalfLifeBars <= 1000.0))
+     {
+      Print("QE INPUT ERROR: InpMaxHalfLifeBars must be in [5,1000]");
+      ok = false;
+     }
+   if(!(InpHLTStatMin >= 0.0 && InpHLTStatMin <= 6.0))
+     {
+      Print("QE INPUT ERROR: InpHLTStatMin must be in [0,6] (2.86 = Dickey-Fuller 5% critical value)");
+      ok = false;
+     }
+   if(!(InpATRPercentileWindow >= 50 && InpATRPercentileWindow <= QE_MAX_WINDOW - InpATRPeriod - 8))
+     {
+      Print("QE INPUT ERROR: InpATRPercentileWindow must be >= 50 and small enough to fit the buffer");
+      ok = false;
+     }
+   if(!(InpMinATRPercentile >= 0.0 && InpMinATRPercentile < InpMaxATRPercentile && InpMaxATRPercentile <= 1.0))
+     {
+      Print("QE INPUT ERROR: ATR percentile bounds must satisfy 0 <= min < max <= 1");
+      ok = false;
+     }
+   if(!(InpTrendMAPeriod >= 20 && InpTrendMAPeriod <= QE_MAX_WINDOW - InpTrendSlopeBars - 8))
+     {
+      Print("QE INPUT ERROR: InpTrendMAPeriod must be in [20, 472-InpTrendSlopeBars]");
+      ok = false;
+     }
+   if(!(InpTrendSlopeBars >= 1 && InpTrendSlopeBars <= 100))
+     {
+      Print("QE INPUT ERROR: InpTrendSlopeBars must be in [1,100]");
+      ok = false;
+     }
+   if(!(InpFibLookback >= 20 && InpFibLookback <= QE_MAX_WINDOW - 8))
+     {
+      Print("QE INPUT ERROR: InpFibLookback must be in [20,472]");
+      ok = false;
+     }
+   if(!(InpFibTolATR > 0.0 && InpFibTolATR <= 2.0))
+     {
+      Print("QE INPUT ERROR: InpFibTolATR must be in (0,2]");
+      ok = false;
+     }
+   if(!(InpSL_ATR_Mult >= 0.3 && InpSL_ATR_Mult <= 20.0))
+     {
+      Print("QE INPUT ERROR: InpSL_ATR_Mult must be in [0.3,20]");
+      ok = false;
+     }
+   if(!(InpRR > 0.0 && InpRR <= 20.0)) { Print("QE INPUT ERROR: InpRR must be in (0,20]"); ok = false; }
+   if(!(InpMinTP_R >= 0.1 && InpMinTP_R <= InpRR + 5.0))
+     {
+      Print("QE INPUT ERROR: InpMinTP_R must be in [0.1, InpRR+5]");
+      ok = false;
+     }
+   if(!(InpRiskPercent > 0.0 && InpRiskPercent <= InpMaxRiskPercent))
+     {
+      Print("QE INPUT ERROR: InpRiskPercent must be > 0 and <= InpMaxRiskPercent");
+      ok = false;
+     }
+   if(!(InpMaxRiskPercent <= 2.0))
+     {
+      Print("QE INPUT ERROR: InpMaxRiskPercent must be <= 2.0 percent for FTMO use");
+      ok = false;
+     }
+   if(!(InpMaxOpenRiskPct > 0.0 && InpMaxOpenRiskPct < InpDailyRiskBudgetPct))
+     {
+      Print("QE INPUT ERROR: InpMaxOpenRiskPct must be inside (0, InpDailyRiskBudgetPct)");
+      ok = false;
+     }
+   if(!(InpMaxOpenPositions >= 1 && InpMaxOpenPositions <= 20))
+     {
+      Print("QE INPUT ERROR: InpMaxOpenPositions must be in [1,20]");
+      ok = false;
+     }
+   if(!(InpMaxLots > 0.0)) { Print("QE INPUT ERROR: InpMaxLots must be > 0"); ok = false; }
+   if(!(InpProfitTargetPct > 0.0 && InpProfitTargetPct <= 50.0))
+     {
+      Print("QE INPUT ERROR: InpProfitTargetPct must be in (0,50]");
+      ok = false;
+     }
+   if(!(InpMaxDailyLossPct > 0.0 && InpMaxDailyLossPct <= 10.0))
+     {
+      Print("QE INPUT ERROR: InpMaxDailyLossPct must be in (0,10]");
+      ok = false;
+     }
+   if(!(InpDailyRiskBudgetPct > 0.0 && InpDailyRiskBudgetPct < InpMaxDailyLossPct))
+     {
+      Print("QE INPUT ERROR: InpDailyRiskBudgetPct must be inside (0, InpMaxDailyLossPct)");
+      ok = false;
+     }
+   if(!(InpMaxTotalLossPct > 0.0 && InpMaxTotalLossPct <= 20.0))
+     {
+      Print("QE INPUT ERROR: InpMaxTotalLossPct must be in (0,20]");
+      ok = false;
+     }
+   if(!(InpTotalRiskBudgetPct > 0.0 && InpTotalRiskBudgetPct < InpMaxTotalLossPct))
+     {
+      Print("QE INPUT ERROR: InpTotalRiskBudgetPct must be inside (0, InpMaxTotalLossPct)");
+      ok = false;
+     }
+   if(!(InpDayRollHour >= 0 && InpDayRollHour <= 23))
+     {
+      Print("QE INPUT ERROR: InpDayRollHour must be in [0,23]");
+      ok = false;
+     }
+   if(!(InpDayRollMinute >= 0 && InpDayRollMinute <= 59))
+     {
+      Print("QE INPUT ERROR: InpDayRollMinute must be in [0,59]");
+      ok = false;
+     }
+   if(!(InpInitialBalance >= 0.0)) { Print("QE INPUT ERROR: InpInitialBalance must be >= 0"); ok = false; }
+   if(!(InpSessionStartHour >= 0 && InpSessionStartHour <= 23))
+     {
+      Print("QE INPUT ERROR: InpSessionStartHour must be in [0,23]");
+      ok = false;
+     }
+   if(!(InpSessionEndHour >= 0 && InpSessionEndHour <= 24))
+     {
+      Print("QE INPUT ERROR: InpSessionEndHour must be in [0,24]");
+      ok = false;
+     }
+   if(!(InpFridayCloseHour >= 0 && InpFridayCloseHour <= 24))
+     {
+      Print("QE INPUT ERROR: InpFridayCloseHour must be in [0,24]");
+      ok = false;
+     }
+   if(!(InpFridayNoTradeHour >= 0 && InpFridayNoTradeHour <= 24))
+     {
+      Print("QE INPUT ERROR: InpFridayNoTradeHour must be in [0,24]");
+      ok = false;
+     }
+   if(!(InpSkipRolloverMin >= 0 && InpSkipRolloverMin <= 120))
+     {
+      Print("QE INPUT ERROR: InpSkipRolloverMin must be in [0,120]");
+      ok = false;
+     }
+   if(!(InpReopenBlackoutMin >= 0 && InpReopenBlackoutMin <= 240))
+     {
+      Print("QE INPUT ERROR: InpReopenBlackoutMin must be in [0,240]");
+      ok = false;
+     }
+   if(!(InpMaxSpreadPoints >= 0.0)) { Print("QE INPUT ERROR: InpMaxSpreadPoints must be >= 0"); ok = false; }
+   if(!(InpAutoSpreadMult >= 1.0)) { Print("QE INPUT ERROR: InpAutoSpreadMult must be >= 1"); ok = false; }
+   if(!(InpSlippagePoints >= 0 && InpSlippagePoints <= 200))
+     {
+      Print("QE INPUT ERROR: InpSlippagePoints must be in [0,200]");
+      ok = false;
+     }
+   if(!(InpMaxRetries >= 1 && InpMaxRetries <= 10))
+     {
+      Print("QE INPUT ERROR: InpMaxRetries must be in [1,10]");
+      ok = false;
+     }
+   if(!(InpMaxTradesPerDay >= 0 && InpMaxTradesPerDay <= 100))
+     {
+      Print("QE INPUT ERROR: InpMaxTradesPerDay must be in [0,100]");
+      ok = false;
+     }
+   if(!(InpMinTradeDurationSec >= 30 && InpMinTradeDurationSec <= 3600))
+     {
+      Print("QE INPUT ERROR: InpMinTradeDurationSec must be in [30,3600] (anti tick-scalping guard)");
+      ok = false;
+     }
+   if(!(InpMaxBarsInTrade >= 1 && InpMaxBarsInTrade <= 5000))
+     {
+      Print("QE INPUT ERROR: InpMaxBarsInTrade must be in [1,5000]");
+      ok = false;
+     }
+   if(!(InpHalfLifeStopMult >= 0.5 && InpHalfLifeStopMult <= 20.0))
+     {
+      Print("QE INPUT ERROR: InpHalfLifeStopMult must be in [0.5,20]");
+      ok = false;
+     }
+   if(!(InpBreakEvenR > 0.0 && InpBreakEvenR <= 10.0))
+     {
+      Print("QE INPUT ERROR: InpBreakEvenR must be in (0,10]");
+      ok = false;
+     }
+   if(!(InpTrailATRMult >= 0.2 && InpTrailATRMult <= 10.0))
+     {
+      Print("QE INPUT ERROR: InpTrailATRMult must be in [0.2,10]");
+      ok = false;
+     }
+   if(!(InpNewsBeforeMin >= 0 && InpNewsAfterMin >= 0))
+     {
+      Print("QE INPUT ERROR: News blackout minutes must be >= 0");
+      ok = false;
+     }
+   if(!(InpNewsBeforeMin <= 240 && InpNewsAfterMin <= 240))
+     {
+      Print("QE INPUT ERROR: News blackout minutes must be <= 240");
+      ok = false;
+     }
+   if(!(InpDashFontSize >= 6 && InpDashFontSize <= 24))
+     {
+      Print("QE INPUT ERROR: InpDashFontSize must be in [6,24]");
+      ok = false;
+     }
+   if(!(InpDashRefreshSec >= 1)) { Print("QE INPUT ERROR: InpDashRefreshSec must be >= 1"); ok = false; }
 
    if(InpUseSession &&
       InpSessionEndHour * 60 + InpSessionEndMin <= InpSessionStartHour * 60 + InpSessionStartMin)
@@ -520,7 +698,6 @@ bool ValidateInputs()
       ok = false;
      }
 
-#undef QE_CHECK
    return(ok);
   }
 
