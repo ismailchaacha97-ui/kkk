@@ -1,0 +1,22 @@
+# QuantumEdge News Blackout — Example
+# Place this file in:  <MT4 Data Folder>/MQL4/Files/QuantumEdge_News.csv
+# FORMAT: YYYY.MM.DD HH:MM, Currency, Impact, Event description
+# TIMES MUST BE IN BROKER TIME (check MarketWatch clock in MT4)!
+# This example uses CET (UTC+1) broker time. Adjust to your broker.
+# The EA blocks 45m before -> 30m after each entry when UseNewsFilter=true.
+# Lines starting with # are ignored.
+
+# === Week example: Oct 28 - Nov 01, 2025 (heavy EUR/USD) ===
+2025.10.28 14:30,USD,High,US CB Consumer Confidence
+2025.10.29 14:15,USD,High,ADP Non-Farm Employment
+2025.10.29 14:30,USD,High,US Advance GDP
+2025.10.30 13:30,USD,High,US PCE Price Index + Jobless Claims
+2025.10.30 13:45,EUR,High,ECB Rate Decision
+2025.10.30 14:15,EUR,High,ECB Press Conference Lagarde
+2025.10.31 14:30,USD,High,US PCE + Employment Cost Index
+2025.11.01 13:30,USD,High,NFP + Unemployment Rate
+2025.11.01 15:00,USD,High,ISM Manufacturing PMI
+
+# Medium impact example (blocked only if NewsHighOnly=false)
+#2025.10.29 10:00,EUR,Medium,German CPI
+#2025.10.30 15:00,USD,Medium,Chicago PMI
