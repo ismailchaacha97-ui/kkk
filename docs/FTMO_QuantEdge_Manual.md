@@ -657,20 +657,23 @@ Three tools, all runnable in a few seconds:
 |---|---|---|
 | `tools/mq4_check.py` | statics: scope-correct identifier resolution, undefined/duplicate functions, MQL5-only calls, unbalanced blocks, input syntax | `0 error(s), 0 warning(s)` |
 | `tools/validate_math.py` | 52 numerical checks against synthetic series with known ground truth: z-score breakdown, VR on random walk / OU / persistent processes, half-life recovery and Dickey–Fuller false-positive rates, ATR percentile bounds, Fibonacci geometry, score boundedness, lot sizing and rounding direction, governor arithmetic, execution guards, and a bar-by-bar replay with a random-walk null control | `All 52 checks passed` |
-| `tools/test_checker.py` | 7 regression tests that inject the defect classes MetaEditor rejects into a copy of the EA and assert the analyser reports them | `All 7 checker tests passed` |
+| `tools/test_checker.py` | 9 regression tests that inject the defect classes MetaEditor rejects into a copy of the EA and assert the analyser reports them (5 error classes, 2 warning classes, clean source) | `All 9 checker tests passed` |
 
 The static analyser is itself tested because it is the only compile-like gate in
-this environment. It was upgraded after the first MetaEditor build reported two
-errors it had missed (`iSpread`, and a variable used outside the scope it was
-declared in); it now reproduces both, on the exact lines MetaEditor named.
+this environment. It was upgraded twice from MetaEditor's own output: after the
+first build reported two errors it had missed (`iSpread`, and a variable used
+outside the scope it was declared in), and after the second build reported
+warning classes it did not model (an uninitialised scratch array, and an implicit
+`double`→`int` narrowing). It now reproduces both builds' findings.
 
 Full output and the compile feedback: [`docs/VALIDATION.md`](VALIDATION.md).
 
 ## 12. Version history
 
-**1.00** — first release; first MetaEditor build reported 2 errors (`iSpread`,
-`dow` used outside its scope) and 1 warning, all fixed in the same release and
-re-verified (§11, `docs/VALIDATION.md`). Contents: Robust z-score, ATR-percentile fitness, variance-ratio
+**1.00** — first release. Two rounds of MetaEditor feedback applied: build 1
+reported 2 errors (`iSpread`, `dow` used outside its scope) and build 2 reported
+0 errors / 4 warnings (uninitialised scratch array, implicit `double`→`int`
+narrowing). All fixed and re-verified (§11, `docs/VALIDATION.md`). Contents: Robust z-score, ATR-percentile fitness, variance-ratio
 regime tilt with neutral fallback, Dickey–Fuller-gated OU half-life, Fibonacci
 confluence, statistical exits, FTMO daily/total/target governors with hard
 breakers, execution-efficiency guards, news blackout, CSV diagnostic log,

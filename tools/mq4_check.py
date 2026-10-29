@@ -419,6 +419,42 @@ def check(path: str):
     for name, line in find_undeclared_scoped(code):
         errors.append(f"{path}:{line}: '{name}' is used but never declared in scope")
 
+
+    # ---- 10. local arrays filled only through loop indices
+    # MetaEditor warns "possible use of uninitialized variable" when an array
+    # is filled via a computed index, because it cannot prove the loop covers
+    # every read. Arrays assigned through literal indices are fine and are not
+    # reported, so the rule mirrors that distinction.
+    for (fname, args, o, c) in _function_spans(code):
+        body = code[o:c + 1]
+        for decl in re.finditer(
+                r"^[ \t]*(?:int|double|bool|string|datetime|long|color)\s+"
+                r"(\w+)\s*\[[^\]]*\]\s*;", body, re.MULTILINE):
+            arr = decl.group(1)
+            if re.search(r"ArrayInitialize\s*\(\s*" + arr + r"\b", body):
+                continue
+            if re.search(arr + r"\s*\[\s*\d+\s*\]\s*=", body):
+                continue                      # assigned by literal index
+            if not re.search(arr + r"\s*\[", body[decl.end():]):
+                continue                      # never read
+            line = code[:o + decl.start()].count("\n") + 1
+            warnings.append(f"{path}:{line}: local array '{arr}' is filled through "
+                            f"computed indices and never initialised with ArrayInitialize")
+
+    # ---- 11. implicit narrowing of a Math* result (they return double in MQL4)
+    math_re = re.compile(r"\bMath(?:Max|Min|Abs|Round|Floor|Ceil|Sqrt|Pow|Mod)\s*\(")
+    cast_re = re.compile(r"^\(\s*(?:int|long|short|char|datetime)\s*\)")
+    for m in re.finditer(r"^[ \t]*(int|long|datetime|short|char)\s+(\w+)\s*=\s*([^;]+);",
+                         code, re.MULTILINE):
+        rhs = m.group(3).strip()
+        if not math_re.search(rhs):
+            continue
+        if cast_re.match(rhs):
+            continue
+        line = code[:m.start()].count("\n") + 1
+        warnings.append(f"{path}:{line}: '{m.group(2)}' is {m.group(1)} but the initialiser "
+                        f"returns double - possible loss of data, add an explicit cast")
+
     return errors, warnings
 
 

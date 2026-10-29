@@ -10,7 +10,7 @@ proves the code parses, it does not prove the formulas are right.
 | Static analysis | `tools/mq4_check.py` | balanced blocks, no undefined or duplicate functions, no MQL5-only calls, no unterminated statements, no MQL5 format specifiers |
 | Numerical mirror | `tools/validate_math.py` | every formula in the EA re-implemented in Python and tested against synthetic series with known ground truth |
 | Preset integrity | `tools/gen_presets.py` | every key in every preset exists in the EA and every preset covers all 104 inputs |
-| Analyser self-tests | `tools/test_checker.py` | the static analyser actually reports the defect classes it claims to detect |
+| Analyser self-tests | `tools/test_checker.py` | the static analyser actually reports the defect classes it claims to detect (9 cases, errors and warnings) |
 
 Reproduce:
 
@@ -18,7 +18,7 @@ Reproduce:
 python3 tools/mq4_check.py mt4/Experts/QuantEdge/FTMO_QuantEdge.mq4   # 0 errors, 0 warnings
 python3 tools/validate_math.py                                       # 52/52 checks
 python3 tools/gen_presets.py                                         # 6 presets
-python3 tools/test_checker.py                                        # 7/7 checker tests
+python3 tools/test_checker.py                                        # 9/9 checker tests
 ```
 
 ---
@@ -97,7 +97,39 @@ undeclared identifier, missing MQL4 function, unbalanced brace, duplicate
 function, input without `;`, MQL5-only call).
 
 > The fixed revision has **not** been through MetaEditor itself — that step is
-> still outstanding. Compile it and confirm `0 errors`.
+> still outstanding. Compile it and confirm `0 errors, 0 warnings`.
+### Second build: 0 errors, 4 warnings
+
+```
+possible loss of data due to type conversion             2084  19
+possible use of uninitialized variable 'tmp'              337  17
+possible use of uninitialized variable 'tmp'              348  24
+possible use of uninitialized variable 'tmp'              350  53
+0 errors, 4 warnings
+```
+
+No errors: the two real bugs from the first build are gone. The warnings were
+still worth fixing, because both classes are cheap to eliminate and one of them
+was a genuine narrowing conversion.
+
+| Warning | Cause | Fix |
+|---|---|---|
+| uninitialized `tmp` (×3) | `SampleSpread` fills its scratch array through a computed loop index, which the compiler cannot prove covers every read it later performs | `ArrayInitialize(tmp, 0)` on declaration, so the contents are defined on every path |
+| loss of data | `int x = MathMax(...)`: MQL4's `MathMax`/`MathMin` return **double**, so assigning to an `int` narrows silently | explicit `(int)` cast. There are two such sites in the source; both were fixed even though the build named only one, because the reported line numbers did not map onto the checked-out copy |
+
+**Tooling fix.** The analyser now reports both classes as warnings, mirroring the
+compiler's own distinction: local arrays that are filled through computed indices
+and never `ArrayInitialize`d, and `int`-typed variables whose initialiser returns
+`double`. The first rule deliberately does not fire on arrays assigned through
+literal indices (`double lv[3]; lv[0] = ...`), which is exactly the distinction
+the compiler makes.
+
+Two bugs in these new rules were caught by running them against the pre-fix copy
+of the EA: a backtracking flaw in the narrowing regex made it fire on a correctly
+cast line, and a naive "any local array" test false-positived on `lv`. Both are
+fixed, and `tools/test_checker.py` now covers the two warning classes as well as
+the five error classes.
+
 
 ---
 

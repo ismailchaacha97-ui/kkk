@@ -21,14 +21,15 @@ CHECKER = os.path.join(ROOT, "tools", "mq4_check.py")
 CASES = []
 
 
-def case(name, expect):
+def case(name, expect, severity="error"):
+    """severity: 'error' | 'warning' | None (None == source must be clean)"""
     def deco(fn):
-        CASES.append((name, expect, fn))
+        CASES.append((name, expect, severity, fn))
         return fn
     return deco
 
 
-@case("clean source", None)
+@case("clean source", None, None)
 def _clean(src):
     return src
 
@@ -74,6 +75,24 @@ def _mql5_call(src):
                        "void SampleSpread()\n  {\n   int n = PositionsTotal();")
 
 
+
+@case("local array without ArrayInitialize", "ArrayInitialize", "warning")
+def _uninitialised_array(src):
+    broken = src.replace("   ArrayInitialize(tmp, 0);"
+                         "                      // defined contents on every path\n", "")
+    assert broken != src, "injection point not found"
+    return broken
+
+
+@case("implicit narrowing of a Math* result", "loss of data", "warning")
+def _narrowing(src):
+    broken = src.replace(
+        "int    barSeconds  = (int)MathMax(1, PeriodSeconds(g_period));",
+        "int    barSeconds  = MathMax(1, PeriodSeconds(g_period));")
+    assert broken != src, "injection point not found"
+    return broken
+
+
 def run_checker(path):
     proc = subprocess.run([sys.executable, CHECKER, path],
                           capture_output=True, text=True)
@@ -87,7 +106,7 @@ def main():
     src = open(EA, encoding="utf-8").read()
     failures = 0
 
-    for name, expect, fn in CASES:
+    for name, expect, severity, fn in CASES:
         try:
             mutated = fn(src)
         except AssertionError as exc:
@@ -103,12 +122,15 @@ def main():
         finally:
             os.unlink(path)
 
-        if expect is None:
-            ok = ("0 error(s)" in out)
-            detail = "no errors reported" if ok else "unexpected errors on clean source"
+        if severity is None:
+            ok = ("0 error(s)" in out) and ("0 warning(s)" in out)
+            detail = ("clean report" if ok
+                      else "unexpected errors/warnings on the clean source")
         else:
-            ok = (expect in out) and ("ERROR" in out)
-            detail = f"expected '{expect}' in the report" if ok else f"'{expect}' NOT reported"
+            tag = "ERROR" if severity == "error" else "WARN"
+            ok = (expect in out) and (tag in out)
+            detail = (f"expected {tag} containing '{expect}'"
+                      if ok else f"{tag} '{expect}' NOT reported")
         print(f"  {'PASS' if ok else 'FAIL'}  {name}" + ("" if ok else f"   [{detail}]"))
         if not ok:
             print("        " + out.strip().replace("\n", "\n        "))

@@ -363,6 +363,7 @@ void SampleSpread()
    if(g_spreadBufN < 64) g_spreadBufN++;
 
    int tmp[64];
+   ArrayInitialize(tmp, 0);                      // defined contents on every path
    for(int i = 0; i < g_spreadBufN; i++) tmp[i] = g_spreadBuf[i];
 
    for(int k = 1; k < g_spreadBufN; k++)         // insertion sort, n <= 64
@@ -866,7 +867,7 @@ void ComputeMomentum()
 void ComputeTrend()
   {
    int p = InpTrendMAPeriod;
-   int s = MathMax(1, InpTrendSlopeBars);
+   int s = (int)MathMax(1, InpTrendSlopeBars);
 
    double sum = 0.0;
    for(int i = 1; i <= p; i++)
@@ -1909,7 +1910,7 @@ void ManageOnePosition()
    double profitPrice = (px - entry) * dir;      // in price units
    double rMultiple   = profitPrice / risk;
    int    secsOpen    = (int)((long)TimeCurrent() - (long)opened);  // explicit width
-   int    barSeconds  = MathMax(1, PeriodSeconds(g_period));
+   int    barSeconds  = (int)MathMax(1, PeriodSeconds(g_period));
    int    barsOpen    = (barSeconds > 0) ? (secsOpen / barSeconds) : 0;
    bool   minDurationOk = (secsOpen >= InpMinTradeDurationSec);
 

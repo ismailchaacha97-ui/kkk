@@ -44,7 +44,7 @@ tools/
 python3 tools/mq4_check.py mt4/Experts/QuantEdge/FTMO_QuantEdge.mq4   # 0 errors, 0 warnings
 python3 tools/validate_math.py                                       # 52/52 checks pass
 python3 tools/gen_presets.py                                         # regenerate presets
-python3 tools/test_checker.py                                        # 7/7 checker self-tests
+python3 tools/test_checker.py                                        # 9/9 checker self-tests
 ```
 
 The Python tools exist because there is no MQL4 compiler in the build
