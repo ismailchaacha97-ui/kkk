@@ -197,7 +197,7 @@ void CleanOldDayKeys()
    int total = GlobalVariablesTotal();
    for(int i = total - 1; i >= 0; i--)
    {
-      string name = GlobalVariablesName(i);
+      string name = GlobalVariableName(i);
       if(StringFind(name, GV_PREFIX "daystart_") != 0 && StringFind(name, GV_PREFIX "daymark_") != 0)
          continue;
       if(StringLen(name) <= prefixLen) continue;
