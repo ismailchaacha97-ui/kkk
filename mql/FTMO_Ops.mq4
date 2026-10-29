@@ -130,8 +130,7 @@ int OnInit()
    else
    {
       g_initial = (InpRefBalanceOverride > 0) ? InpRefBalanceOverride : AccountBalance();
-      GlobalVariableSet(GV_PREFIX "init", g_initial);
-      GlobalVariableTime(GV_PREFIX "init", TimeCurrent() + 365 * 86400);
+      GlobalVariableSet(GV_PREFIX "init", g_initial);   // no expiry in MQL4: lives until deleted
       Print("FTMO_Ops: reference balance fixed at ", DoubleToString(g_initial, 2),
             ". Delete ", GV_PREFIX, "* globals when the account changes.");
    }
