@@ -3,3 +3,7 @@
 __pycache__/
 *.py[cod]
 .DS_Store
+research/data/
+
+# research data (reproducible via tools/prepare_data.py)
+research/data_dst/

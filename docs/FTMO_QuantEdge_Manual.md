@@ -14,10 +14,23 @@ risk governance layer.
 | Verification | `tools/mq4_check.py` (static) + `tools/validate_math.py` (52 numerical checks) |
 | Account type | FTMO **Normal** or **Swing**; the news/weekend rules are configurable |
 
-> **This is not financial advice and no performance claim is made.** The
-> mathematics is verified; the edge is not. Any EA must be tested on demo and in
-> the Strategy Tester on your broker's data before it is allowed near a funded
-> account. See *Known limitations* before you consider it "done".
+> ### Research status: no demonstrated edge
+>
+> The strategy was backtested against two independent datasets (FTMO-Server4
+> 2025-26 and six years of 2008-2018 data), on three timeframes and three risk
+> configurations. **No configuration produced a positive expectancy that
+> survived out-of-sample.** On M15, a round trip costs about 14% of the average
+> bar range once commission is included, and the signal does not earn it back.
+>
+> Full measurement, including the controls and two data bugs that were found and
+> fixed along the way: [`docs/RESEARCH_RESULTS.md`](RESEARCH_RESULTS.md).
+>
+> **Do not run this on a paid FTMO evaluation expecting profit.** What is
+> verified is the risk layer: the mathematics, the governors, the sizing and the
+> compliance guards all behave as specified — the worst daily loss across every
+> backtest stayed under 1.7% against the 3.5% governor and the 5% FTMO limit.
+> That protection is genuine and worth having. The profitability claim is not
+> made because the evidence does not support it.
 
 ---
 
@@ -400,6 +413,11 @@ just shape it.
 Regenerate after editing inputs: `python3 tools/gen_presets.py` (it fails loudly if
 a preset references an input that no longer exists).
 
+> All six presets are **risk configurations, not edge configurations.** They
+> differ in how much they risk and how often they trade; none of them was
+> profitable out of sample (see `docs/RESEARCH_RESULTS.md` §5). The conservative
+> preset is the one that loses slowest.
+
 **Funded accounts.** There is no profit target on a funded FTMO account, and
 `InpLockAtProfitTarget` locks entries permanently once reached. On a funded
 account set `InpLockAtProfitTarget = false` (or raise `InpProfitTargetPct` well
@@ -531,6 +549,8 @@ the shipped values; presets in `mt4/Presets/` override a subset.
 | `InpFridayNoTradeHour` | 17 | cut-off hour |
 | `InpMaxSpreadPoints` | 0 | hard spread cap; 0 = `InpAutoSpreadMult ×` the median of the last 64 per-bar spread samples (a median so the rollover spike cannot inflate the cap) |
 | `InpAutoSpreadMult` | 3.0 | auto-cap multiplier |
+| `InpCommissionPoints` | 0 | round-turn commission expressed in points. Raw-spread accounts: ~7 on EURUSD. Standard (spread-only) accounts: 0, because the commission is inside the spread |
+| `InpMaxCostAtr` | 0.30 | refuse an entry when `(spread + commission) / ATR` exceeds this. Measured cost/ATR is ~14% on M15 and 3-6% on H1/H4, so the default blocks only the expensive tail on fast timeframes and nothing on slow ones. 0 disables |
 
 ### 7.9 Execution
 

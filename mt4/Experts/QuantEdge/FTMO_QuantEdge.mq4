@@ -198,6 +198,8 @@ input bool            InpNoNewTradesFriday = true;       // No new entries late 
 input int             InpFridayNoTradeHour = 17;         // ... from this hour
 input double          InpMaxSpreadPoints  = 0.0;         // Max spread in points (0 = auto)
 input double          InpAutoSpreadMult   = 3.0;         // Auto cap = this * median spread
+input double          InpCommissionPoints = 0.0;         // Round-turn commission in points (raw EURUSD: ~7)
+input double          InpMaxCostAtr       = 0.30;        // Skip entry if (spread+commission)/ATR exceeds this (0 = off)
 
 //--- 2.9 Execution -----------------------------------------------
 input int             InpSlippagePoints   = 10;          // Max deviation (points)
@@ -664,6 +666,16 @@ bool ValidateInputs()
      }
    if(!(InpMaxSpreadPoints >= 0.0)) { Print("QE INPUT ERROR: InpMaxSpreadPoints must be >= 0"); ok = false; }
    if(!(InpAutoSpreadMult >= 1.0)) { Print("QE INPUT ERROR: InpAutoSpreadMult must be >= 1"); ok = false; }
+   if(!(InpCommissionPoints >= 0.0 && InpCommissionPoints <= 100.0))
+     {
+      Print("QE INPUT ERROR: InpCommissionPoints must be in [0,100] points");
+      ok = false;
+     }
+   if(!(InpMaxCostAtr >= 0.0 && InpMaxCostAtr <= 2.0))
+     {
+      Print("QE INPUT ERROR: InpMaxCostAtr must be in [0,2] (0 disables the gate)");
+      ok = false;
+     }
    if(!(InpSlippagePoints >= 0 && InpSlippagePoints <= 200))
      {
       Print("QE INPUT ERROR: InpSlippagePoints must be in [0,200]");
@@ -805,16 +817,18 @@ void ComputeZScore()
    int n = InpZPeriod;
    double c1 = iClose(g_symbol, g_period, 1);
 
+   //--- the benchmark is the n bars BEFORE the one being judged (shifts 2..n+1),
+   //--- so the observation never pulls its own reference point
    if(InpRobustZ)
      {
       for(int i = 0; i < n; i++)
-         g_work[i] = iClose(g_symbol, g_period, i + 1);
+         g_work[i] = iClose(g_symbol, g_period, i + 2);
       SortWorkAsc(n);
 
       double med = (n % 2 == 1) ? g_work[n / 2] : 0.5 * (g_work[n / 2 - 1] + g_work[n / 2]);
 
       for(int i = 0; i < n; i++)
-         g_work[i] = MathAbs(iClose(g_symbol, g_period, i + 1) - med);
+         g_work[i] = MathAbs(iClose(g_symbol, g_period, i + 2) - med);
       SortWorkAsc(n);
 
       double mad = (n % 2 == 1) ? g_work[n / 2] : 0.5 * (g_work[n / 2 - 1] + g_work[n / 2]);
@@ -829,7 +843,7 @@ void ComputeZScore()
      {
       double sum = 0.0;
       double sum2 = 0.0;
-      for(int i = 1; i <= n; i++)
+      for(int i = 2; i <= n + 1; i++)     // same exclusion as the robust branch
         {
          double c = iClose(g_symbol, g_period, i);
          sum  += c;
@@ -1544,6 +1558,19 @@ bool TradingAllowed(int dir, string &reason)
    if(g_freezeLevel > 0 && SpreadPoints() > g_freezeLevel)
      { reason = "spread inside freeze level"; return(false); }
 
+   //--- cost gate. Research on FTMO-Server4 bars (docs/RESEARCH_RESULTS.md)
+   //--- measured an all-in cost of 5-20% of ATR on M15 once the raw-spread
+   //--- commission is included, against 2-6% on H4. A round trip that eats a
+   //--- fifth of the average bar range cannot be paid for by any realistic
+   //--- edge, so those bars are skipped rather than traded.
+   if(InpMaxCostAtr > 0.0 && g_atr > 0.0)
+     {
+      double allInPoints = (double)SpreadPoints() + InpCommissionPoints;
+      double costAtr = allInPoints * g_point / g_atr;
+      if(costAtr > InpMaxCostAtr)
+        { reason = "cost/ATR too high"; return(false); }
+     }
+
    //--- news blackout
    if(InpNewsFilter && InNewsWindow())
      { reason = "news blackout"; return(false); }
@@ -2138,6 +2165,9 @@ void UpdateDashboard()
    StringConcatenate(txt, "VR ", DoubleToString(g_vr, 3), " ", RegimeText(),
                      "   half-life ", (g_halfLife > 0 ? DoubleToString(g_halfLife, 1) + " bars" : "n/a"),
                      " (DF t ", DoubleToString(g_hlTStat, 2), ")\n");
+   StringConcatenate(txt, "cost ", DoubleToString((double)SpreadPoints() + InpCommissionPoints, 0),
+                     " pts = ", DoubleToString(100.0 * ((double)SpreadPoints() + InpCommissionPoints) * g_point / MathMax(g_atr, g_point), 1),
+                     "% of ATR (cap ", DoubleToString(InpMaxCostAtr * 100.0, 0), "%)\n");
    StringConcatenate(txt, "ATR ", DoubleToString(g_atr, (int)g_digits), " (pct ",
                      DoubleToString(g_atrPct * 100.0, 0), "%)  fib ", DoubleToString(g_fibScore, 2), "\n");
    StringConcatenate(txt, "mode ", mode, "   signal ", dirTxt, "\n");
