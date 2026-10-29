@@ -14,6 +14,7 @@ from ftmo_engine.risk import (
     DailyGuard,
     lots_for_risk,
     net_usd_exposure,
+    stop_pips_ok,
 )
 
 
@@ -61,6 +62,14 @@ class TestSizing(unittest.TestCase):
     def test_zero_inputs(self):
         self.assertEqual(lots_for_risk(100_000, 0, 25, EURUSD), 0.0)
         self.assertEqual(lots_for_risk(100_000, 0.5, 0, EURUSD), 0.0)
+
+    def test_stop_level_and_spread_gate(self):
+        # 5-point broker stop level = 0.5 pips; a 25-pip stop is fine
+        self.assertTrue(stop_pips_ok(25.0, EURUSD, spread_pips=1.5))
+        # a 0.2-pip stop is below the broker minimum
+        self.assertFalse(stop_pips_ok(0.2, EURUSD, spread_pips=1.5))
+        # and a stop smaller than 2x spread is eaten by the spread
+        self.assertFalse(stop_pips_ok(2.0, EURUSD, spread_pips=2.5))
 
 
 class TestDailyGuard(unittest.TestCase):

@@ -10,8 +10,9 @@ every claim in it can be checked against a simulation rather than taken on faith
 | `FTMO_SYSTEM.md` | this playbook — the decisions and the daily protocol |
 | `ftmo_engine/REPORT.md` | the numbers: pass rates, failure attribution, payout-policy result |
 | `ftmo_engine/` | the engine — rules, sizing, circuit breaker, Monte Carlo, CLI |
-| `ftmo_engine/tests/` | 22 tests pinning the risk maths |
-| `mql/FTMO_Governor.mq4` | in-terminal guardrail that enforces the daily budget |
+| `ftmo_engine/tests/` | 23 tests pinning the risk maths |
+| `mql/FTMO_Ops.mq4` | **the trading EA** — places the orders, enforces the full risk engine |
+| `mql/FTMO_Governor.mq4` | read-only supervisor — draws the four floor lines, halts visibly |
 | `EA_Tesshinso_review.md` | review of the EA that prompted this; explains what disqualified it |
 
 ```bash
@@ -270,19 +271,39 @@ At 0.5% risk and a 2R daily stop:
 
 ## 5. Execution protocol
 
-### 5.1 In the terminal
+### 5.1 In the terminal — the executor
 
-`mql/FTMO_Governor.mq4` implements §4.2–4.3 as a read-only guardrail: it computes the
-session's realized P&L and the day-start balance, draws the daily budget as horizontal
-lines on the chart, and **blocks order entry** (and optionally closes positions) when a halt
-condition trips. It does not place trades.
+`mql/FTMO_Ops.mq4` **places the trades**. It is the full mechanical implementation of
+§3 + §4: H1 bias, H1 zone detection, M15 trigger entry, fixed-fractional sizing off the
+stop, the complete exit ladder (breakeven at +1R, 60% split at +2R, runner to 3.5R,
+time stop at 8 M15 bars), every halt condition from §4.3, the weekly halt, the
+correlation cap (§4.4), the news window, and the 8%-profit lock from §6.
 
-> Compile and demo-test it before relying on it. The logic is a port of `risk.py`, which is
-> unit-tested; the MQL file itself has not been compiled in this environment.
+> **Compile and test before trusting it.** The logic is a port of `risk.py`/`mc.py`,
+> which are unit-tested; the MQL4 file itself has **not** been compiled or run in the
+> environment where it was written. Order of operations: MetaEditor compile →
+> Strategy Tester on "every tick based on real ticks" for 6+ months (check: no trade
+> after a halt day, no weekend holds, every order has SL+TP, lots match the risk table,
+> nothing trades inside the news window) → live demo 2–4 weeks → a real evaluation.
 
-If you prefer to run without an EA: keep a spreadsheet with `day_start_balance`,
-`realized_today`, `trades_today`, and check it before every entry. The failure mode is not
-the arithmetic — it is not doing it on the day you least want to.
+Usage notes:
+
+- One chart per symbol (EURUSD, GBPUSD, USDJPY), **same `InpMagic`** on all of them.
+  The daily caps and breakers are counted from account history by magic number, so one
+  chart cannot spend another chart's budget.
+- `InpMode` sets the risk regime: 0 = challenge/verification (0.5%), 2 = funded (0.4%).
+  The reference balance is fixed on first attach — delete the `FTMOOPS_*`
+  global variables from the terminal when the account changes.
+- Set the NFP time to your broker's **server time** (typical 08:30 UTC = 12:30 on a
+  +4h server) and list any other high-impact dates in `InpNewsTimesServer`.
+- `InpDryRun = true` logs every signal it *would* take without sending orders — run
+  this first to verify the zone/trigger logic on your feed before real orders.
+
+`mql/FTMO_Governor.mq4` remains available as a read-only supervisor (draws the four
+floor lines, halts visibly) — useful on a second screen, or if you ever trade manually.
+If you trade manually with no EA: keep a spreadsheet with `day_start_balance`,
+`realized_today`, `trades_today`, and check it before every entry. The failure mode is
+not the arithmetic — it is not doing it on the day you least want to.
 
 ### 5.2 Pre-session checklist (5 minutes, before the London open)
 
@@ -467,6 +488,6 @@ violations, skips. Anything else is entertainment.
 Everything above is arithmetic you can audit, run, and re-verify:
 
 ```bash
-python3 -m unittest discover -s ftmo_engine/tests -t .   # 22 tests, all pass
+python3 -m unittest discover -s ftmo_engine/tests -t .   # 23 tests, all pass
 python3 -m ftmo_engine.run_report                         # all tables in REPORT.md
 ```

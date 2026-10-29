@@ -65,8 +65,9 @@ def lots_for_risk(
 
 def stop_pips_ok(stop_pips: float, spec: SymbolSpec, spread_pips: float) -> bool:
     """Reject stops the broker will refuse (and that are eaten by spread anyway)."""
-    min_pips = spec.stop_level_points * spec.pip_size / spec.pip_size  # points -> pips
-    min_pips = spec.stop_level_points / 10.0 if spec.pip_size in (0.0001, 0.01) else 0.0
+    # broker stop level is quoted in points; a pip is 10 points on both 5-digit
+    # (0.0001) and 3-digit-style JPY (0.01) quotes
+    min_pips = spec.stop_level_points / 10.0
     return stop_pips >= max(min_pips, spread_pips * 2.0)
 
 

@@ -13,10 +13,11 @@ the playbook a trader actually follows.
 | [`FTMO_SYSTEM.md`](FTMO_SYSTEM.md) | the playbook: rule analysis, strategy spec, risk algorithm, psychology protocol, scaling, checklists |
 | [`ftmo_engine/REPORT.md`](ftmo_engine/REPORT.md) | simulation results — pass rates, where failures come from, the payout-policy finding |
 | [`ftmo_engine/`](ftmo_engine) | rules, sizing, daily guard, Monte Carlo, CLI (pure standard library) |
-| [`mql/FTMO_Governor.mq4`](mql/FTMO_Governor.mq4) | in-terminal daily-budget supervisor |
+| [`mql/FTMO_Ops.mq4`](mql/FTMO_Ops.mq4) | the trading EA — places orders, enforces sizing + daily/weekly breakers + halts |
+| [`mql/FTMO_Governor.mq4`](mql/FTMO_Governor.mq4) | read-only daily-budget supervisor |
 
 ```bash
-python3 -m unittest discover -s ftmo_engine/tests -t .   # 22 tests
+python3 -m unittest discover -s ftmo_engine/tests -t .   # 23 tests
 python3 -m ftmo_engine.run_report                         # regenerate REPORT.md (~1 min)
 python3 -m ftmo_engine.cli size --balance 100000 --risk 0.5 --stop-pips 25
 python3 -m ftmo_engine.cli gate --win-rate 0.45 --rr 1.8
