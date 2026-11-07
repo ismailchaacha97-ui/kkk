@@ -452,7 +452,7 @@ async def ensure_structure(guild: discord.Guild, roles: Mapping[str, discord.Rol
             category_overwrites = (
                 build_overwrites(guild, roles, "staff")
                 if category_spec.private_staff
-                else None
+                else {}
             )
             category = await guild.create_category(
                 category_spec.name,
