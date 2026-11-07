@@ -1,0 +1,34 @@
+KKK FOUR FUNDAMENTALS — INSTALL IN 60 SECONDS
+===========================================
+
+1. Copy file:
+   KKK_FourFundamentals.mq4 -> Your MT4 Data Folder/MQL4/Indicators/
+
+   How to open Data Folder: MT4 -> File -> Open Data Folder
+
+2. Compile:
+   Open MetaEditor (F4) -> Navigator -> Indicators -> KKK_FourFundamentals.mq4 -> Compile (F7)
+   Expect: 0 errors, 0 warnings (or minor warnings OK)
+
+3. Use:
+   Restart MT4 (or right-click Navigator -> Refresh)
+   Drag "KKK_FourFundamentals" onto chart (any TF, e.g., M15 or H1)
+   Inputs -> OK (defaults are for EURUSD)
+   For Gold: Inputs -> Load -> XAU_Gold.set
+
+4. Verify:
+   - Top-left dark dashboard appears with 4 fundamentals.
+   - Red/Green rectangles appear (HTF/LTF AOI).
+   - Footer shows "H2 800+ bars" (synthetic H2 working).
+
+5. Signals:
+   Lime up-arrow = BUY (all 4 fundamentals bullish)
+   Red down-arrow = SELL (all 4 bearish)
+   Alerts fire automatically.
+
+TROUBLESHOOT:
+- No zones? Increase InpZoneTolerancePips or decrease MinTouches to 2.
+- Too many signals? Enable InpStrictStructure=true.
+- No H2? Normal on fresh install; after 10 H1 bars it fills.
+
+SUPPORT: See README.md for full strategy mapping.
