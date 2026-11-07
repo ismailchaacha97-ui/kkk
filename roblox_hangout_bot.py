@@ -498,6 +498,7 @@ def validate_guild_access(guild: discord.Guild) -> None:
     if member is None:
         raise RuntimeError("The bot is not a member of the selected server.")
     required = {
+        "administrator": "Administrator (required temporarily to create roles with elevated permissions)",
         "manage_channels": "Manage Channels",
         "manage_roles": "Manage Roles",
         "view_channel": "View Channels",

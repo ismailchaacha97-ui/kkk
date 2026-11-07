@@ -37,7 +37,7 @@ The server owner's own Discord account is not shared with the bot.
 2. Open **Bot**, select **Reset Token**, and copy the token locally. Treat it like a password: do not send it to anyone or paste it into chat.
 3. Open **OAuth2 → URL Generator**:
    - Under **Scopes**, select **bot**.
-   - Under **Bot Permissions**, select **Manage Channels**, **Manage Roles**, **View Channels**, **Send Messages**, **Read Message History**, and **Manage Messages**. Manage Messages is used only to pin the guides.
+   - Under **Bot Permissions**, select **Administrator**, **Manage Channels**, **Manage Roles**, **View Channels**, **Send Messages**, **Read Message History**, and **Manage Messages**. Administrator is required temporarily because Discord does not let a bot create Admin/Moderator roles with permissions the bot does not have itself. Manage Messages is used to pin the guides. Remove the setup bot after verifying the completed server so it does not retain unnecessary access.
 4. Open the generated URL, select **Roblox Hangout**, and authorize it. You need permission to manage that server.
 5. No settings under **Privileged Gateway Intents** need to be enabled.
 
@@ -87,7 +87,7 @@ The bot connects, configures the server, prints its actions, and exits. If Disco
 
 ## 5. Finish in Discord (manual safety review)
 
-The bot intentionally does not grant itself Administrator or change server-wide safety settings. After setup:
+The bot does not change server-wide safety settings. Administrator is needed only during setup to create the elevated role presets; remove the setup bot after verification. After setup:
 
 1. Assign **Admin** only to the owner and fully trusted managers. Assign **Moderator** to trained staff. Keep the setup bot's permissions unchanged until setup finishes.
 2. Review **Server Settings → Roles** and every private channel. Confirm a test account cannot see **🛡️ STAFF** or post in information channels.
