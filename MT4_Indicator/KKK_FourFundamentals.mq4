@@ -1206,7 +1206,6 @@ void DrawDashboard(string htfBias, string ltfSyncStatus, string htfAOIStatus, st
 
    color colTitle = C'255,215,0';
    CreateLabel(OBJ_PREFIX+"DASH_T0", x0, y0, "KKK 4 FUNDAMENTALS — MAKE NO MISTAKE", colTitle, 8, "Arial Bold", 0, 0);
-   string tfNames[4] = {"W1","D1","H4","H1"};
    // line 1: HTF Trend
    string txt1 = "1.TREND HTF: W1 "+(HTF_Trend_W1==1?"▲BULL":HTF_Trend_W1==-1?"▼BEAR":"—NEUT")+"  D1 "+(HTF_Trend_D1==1?"▲BULL":HTF_Trend_D1==-1?"▼BEAR":"—NEUT")+"  => "+htfBias;
    color c1 = (htfBias=="BULLISH SYNC" ? Lime : htfBias=="BEARISH SYNC" ? Red : Yellow);
@@ -1233,7 +1232,6 @@ bool EvaluateAll(bool &isBuy, bool &isSell, string &detailHTFBias, string &detai
 {
    isBuy=false; isSell=false;
    double price = Close[0];
-   double pip = GetPipValue();
 
    // 1. HTF TREND
    HTF_Trend_W1 = GetTrend(InpHTF1);
@@ -1250,7 +1248,8 @@ bool EvaluateAll(bool &isBuy, bool &isSell, string &detailHTFBias, string &detai
    detailHTFBias = (htfBias==1?"BULLISH SYNC":htfBias==-1?"BEARISH SYNC":"NO SYNC");
 
    // LTF TRENDS
-   int tfs[4] = {InpLTF_Trend_TF1, InpLTF_Trend_TF2, InpLTF_Trend_TF3, InpLTF_Trend_TF4};
+   int tfs[4];
+   tfs[0]=InpLTF_Trend_TF1; tfs[1]=InpLTF_Trend_TF2; tfs[2]=InpLTF_Trend_TF3; tfs[3]=InpLTF_Trend_TF4;
    for(int i=0;i<4;i++)
    {
       int tf = tfs[i];
