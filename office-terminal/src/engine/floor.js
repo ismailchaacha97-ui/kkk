@@ -1,360 +1,639 @@
-// The trading floor brain: schedules debates, records the argument transcript,
-// routes approved ideas to the execution desk, enforces the risk mandate and
-// writes the day's blotter. Long and short are both tradable, 5x margin.
-import { SYMBOLS, Market, Account, LEVERAGE } from "./market.js";
-import { runDebate } from "./debate.js";
+// The floor director. It does not script anybody: it gives every trader a
+// market, a personality and a clock, then lets them choose. Debates, solo
+// trades, arguments with the house, walks to the whiteboard, hirings and
+// firings all emerge from the agents' own traits, moods, memories and models.
+import { Market, Account, buildBrief } from "./market.js";
+import { INSTRUMENTS, bySymbol } from "./instruments.js";
+import { Trader, ARCHETYPES, NAMES, chooseAction, MOODS } from "./traders.js";
+import { aggregate, riskRead, confidenceOf } from "./consensus.js";
+import { clamp, pick, uid } from "./util.js";
 
-const uid = () => Math.random().toString(36).slice(2, 9);
+export { TICK_MS } from "./market.js";
 
-export const DESKS = {
-  victor: { id: "victor", name: "Victor", role: "Bull Analyst", color: "#5ceb8e" },
-  maria: { id: "maria", name: "Maria", role: "Bear Analyst", color: "#f26457" },
-  alexei: { id: "alexei", name: "Alexei", role: "Risk Manager", color: "#f5b841" },
-  judge: { id: "judge", name: "The Arbiter", role: "Senior PM", color: "#c9a7ff" },
-};
+const ROSTER_SEED = [
+  { archetype: "trend", name: "Victor" },
+  { archetype: "contrarian", name: "Maria" },
+  { archetype: "risk", name: "Alexei" },
+  { archetype: "quant", name: "Priya" },
+  { archetype: "scalper", name: "Kenji" },
+  { archetype: "macro", name: "Amara" },
+];
 
-export const RULES_DEFAULT = {
-  stopLossPct: 0.006,
-  takeProfitPct: 0.012,
-  maxHoldBars: 46,
-  riskPerTrade: 0.01, // dollars risked per trade as % of equity
-  maxGrossExposure: 2.5, // x equity
-  maxPositions: 4,
-  requireAgreement: 2,
-  minConviction: 0.42,
-};
+const STORAGE_KEY = "meridian:floor:v2";
 
 export class Floor {
-  constructor() {
+  constructor({ restore = true } = {}) {
     this.market = new Market();
     this.account = new Account();
-    this.rules = { ...RULES_DEFAULT };
+    this.agents = [];
+    this.debates = [];
     this.log = [];
-    this.threads = [];
-    this.agents = {};
-    this.paused = false;
-    this.activeThreadId = null;
-    this.dayStart = this.account.equity(this.market);
-    this.debateCount = 0;
     this.alerts = [];
-    for (const [id, d] of Object.entries(DESKS)) {
-      this.agents[id] = {
-        ...d,
-        quote: "reading the tape...",
-        lastSpokeAt: 0,
-        pnl: 0,
-        fills: 0,
-        wins: 0,
-        losses: 0,
-        ideas: 0,
-      };
+    this.chat = []; // open mic channel between desks
+    this.tick = 0;
+    this.paused = false;
+    this.startedAt = Date.now();
+    this.cashDayStart = this.account.equity(this.market);
+    this.houseRules = {
+      minVotes: 2,
+      maxNames: 6,
+      maxGross: 3.2,
+      maxAgentExposure: 0.55, // notional cap per agent, as a fraction of her own equity
+      allowSolo: true, // free will: agents may act without a vote
+      allowHouseOverride: true,
+      evolveOnLoss: true,
+      autoHire: true,
+      maxHoldTicks: 1200,
+    };
+    this.stats = { debates: 0, votes: 0, holds: 0, soloTrades: 0, contradictions: 0, hires: 0, fires: 0, evolutions: 0 };
+    this.feedStatus = "connecting";
+    this.feedDetail = "connecting to public market feeds…";
+    this.pending = [];
+    this.lastPollAt = 0;
+    this.failureStreak = 0;
+
+    if (restore) this.restoreFromStorage();
+    if (!this.agents.length) this.seedRoster();
+    this.pushLog("system", `Floor online — ${this.agents.length} traders at the desks.`);
+  }
+
+  /* ---------------------------- roster ---------------------------- */
+  seedRoster() {
+    this.agents = ROSTER_SEED.map((s, i) => {
+        const t = new Trader({ archetype: ARCHETYPES.find((a) => a.id === s.archetype), name: s.name });
+      t.equity = 25000;
+      t.startEquity = 25000;
+      t.recomputeBeliefs();
+      return t;
+    });
+  }
+
+  hire(reason = "a seat opened up", parent = null) {
+    const used = new Set(this.agents.map((a) => a.name));
+    const free = NAMES.filter((n) => !used.has(n));
+    const t = parent ? parent.spawn(parent.name) : new Trader({ archetype: pick(ARCHETYPES) });
+    if (free.length) t.name = pick(free);
+    else t.name = `${t.name}-${this.agents.length + 1}`;
+    t.equity = 25000;
+    t.startEquity = 25000;
+    if (!t.lessons.length) t.addLesson(`Joined the floor today. ${reason}.`);
+    t.recomputeBeliefs();
+    this.agents.push(t);
+    this.stats.hires++;
+    this.pushLog("hire", `${t.name} (${t.archetypeName}, gen ${t.generation}) joined the desk — ${reason}.`);
+    this.say(t, "Just got my seat. Who's showing me the book?");
+    return t;
+  }
+
+  fire(agent, reason) {
+    if (this.agents.length <= 3) return;
+    this.agents = this.agents.filter((a) => a.id !== agent.id);
+    this.stats.fires++;
+    this.pushLog("fire", `${agent.name} was let go — ${reason}.`);
+  }
+
+  get(id) {
+    return this.agents.find((a) => a.id === id) || null;
+  }
+
+  say(agent, text) {
+    if (!agent) return;
+    agent.quote = text;
+    agent.lastSpokeAt = Date.now();
+  }
+
+  pushLog(kind, text, meta = {}) {
+    this.log.unshift({ id: uid(), t: Date.now(), kind, text, ...meta });
+    if (this.log.length > 260) this.log.pop();
+  }
+
+  /* ---------------------------- feeds ---------------------------- */
+  async connect() {
+    const { loadAll } = await import("./feeds.js");
+    this.feedDetail = "requesting live candles…";
+    const res = await loadAll();
+    let ok = 0;
+    let firstError = null;
+    for (const [sym, payload] of Object.entries(res)) {
+      if (payload.error) {
+        this.market.markError(sym, payload.error);
+        firstError ??= payload.error;
+      } else {
+        this.market.seed(sym, payload);
+        ok++;
+      }
     }
-    this.pushLog("system", "Floor opened · 09:30 cash session · risk mandate loaded (R1 veto active).");
+    this.feedStatus = ok === 0 ? "offline" : ok < INSTRUMENTS.length ? "partial" : "live";
+    this.feedDetail =
+      ok === 0
+        ? `No public feed reachable (${firstError || "network blocked"}). The floor is paused — it will not invent prices.`
+        : `${ok}/${INSTRUMENTS.length} instruments streaming real quotes.`;
+    this.lastPollAt = Date.now();
+    this.pushLog(ok ? "feed" : "risk", this.feedDetail);
+    return ok;
   }
 
-  equity() {
-    return this.account.equity(this.market);
-  }
-
-  pushLog(kind, text) {
-    const entry = { id: uid(), t: Date.now(), kind, text };
-    this.log.unshift(entry);
-    if (this.log.length > 240) this.log.pop();
-    return entry;
-  }
-
-  say(agentId, text) {
-    const a = this.agents[agentId];
-    if (!a) return;
-    a.quote = text;
-    a.lastSpokeAt = Date.now();
-  }
-
-  // -------- one simulation step (driven by the market clock) --------
-  step() {
-    if (this.paused) return;
-    this.market.tickOnce();
-
-    this.account.evaluateStops(this.market, this.rules, (trade, pnlBefore) => {
-      const desk = trade.originAgentId || "judge";
-      this._credit(desk, pnlBefore);
-      this.pushLog(
-        "exit",
-        `${trade.reason.startsWith("Stop loss") ? "STOP" : trade.reason.startsWith("Take") ? "TARGET" : "TIME"} · ${trade.symbol} closed ${pnlBefore >= 0 ? "+" : "−"}$${Math.abs(pnlBefore).toFixed(2)} — ${trade.reason}`
-      );
-      this.threads.forEach((th) => {
-        if (th.symbol === trade.symbol && th.status === "filled") th.status = "closed";
-      });
-    });
-
-    if (this.market.tick % 6 === 0) this._idleChatter();
-    if (this.market.tick % 12 === 0) this.account._snap(this.market);
-  }
-
-  _credit(agentId, pnl) {
-    const a = this.agents[agentId];
-    if (!a) return;
-    a.pnl += pnl;
-    a.fills += 1;
-    if (pnl > 0) a.wins += 1;
-    else a.losses += 1;
-  }
-
-  _idleChatter() {
-    const s = this.market.snapshot();
-    const pick = s[Math.floor(Math.random() * s.length)];
-    const f = this.market.feeds[pick.symbol];
-    const up = f.last > f.sma20 ? "above" : "below";
-    const lines = {
-      victor: [
-        `${pick.symbol} is ${up} the 20. I still like the upside here.`,
-        `Did you see that volume print on ${pick.symbol}? Buyers are not shy.`,
-        `Every pullback this week got bought. Why fight it?`,
-        `Momentum is a position, not an opinion. I'm long-biased.`,
-      ],
-      maria: [
-        `Everyone's long the same three names. That's the trade in reverse.`,
-        `Look at the upper wick on ${pick.symbol}. Read the tape, Victor.`,
-        `Rallies into resistance are for selling, not buying.`,
-        `The crowd is late. I'd rather be early and flat.`,
-      ],
-      alexei: [
-        `ATR is fine. Size is what kills, not direction.`,
-        `Nobody panic-sizes on my book.`,
-        `If the next candle is 2x ATR we stand down. I'm serious.`,
-        `I don't care where it goes. I care what happens if it gaps.`,
-      ],
-      judge: [
-        `I don't vote until I've heard all three.`,
-        `Two of three or no trade. That's the rule.`,
-        `Silence costs nothing. Bad fills cost everything.`,
-        `A hold is a decision, not a failure to decide.`,
-      ],
-    };
-    const who = ["victor", "maria", "alexei", "judge"][Math.floor(Math.random() * 4)];
-    const arr = lines[who];
-    this.say(who, arr[Math.floor(Math.random() * arr.length)]);
-  }
-
-  // -------- open a debate on a symbol --------
-  startDebate(symbol) {
-    if (this.paused) return null;
-    const f = this.market.feeds[symbol];
-    if (!f) return null;
-    const th = {
-      id: uid(),
-      symbol,
-      status: "talking",
-      openedAt: Date.now(),
-      messages: [],
-      verdict: null,
-      trade: null,
-      entryPrice: f.last,
-      digits: SYMBOLS.find((s) => s.symbol === symbol).digits,
-    };
-    this.threads.unshift(th);
-    if (this.threads.length > 16) this.threads.pop();
-    this.activeThreadId = th.id;
-    this.debateCount += 1;
-
-    const res = runDebate(this.market, symbol, this.rules);
-    const push = (speaker, text, kind = "say", extra = {}) => {
-      th.messages.push({ id: uid(), speaker, text, kind, at: Date.now(), ...extra });
-    };
-
-    push("system", `DEBATE / ${symbol} · one identical briefing, three different lenses.`);
-    push("victor", res.opinions.victor.text, "say", {
-      stance: res.opinions.victor.stance,
-      conf: res.opinions.victor.confidence,
-    });
-    push("maria", res.opinions.maria.text, "say", {
-      stance: res.opinions.maria.stance,
-      conf: res.opinions.maria.confidence,
-    });
-    push("alexei", res.opinions.alexei.text, "say", { verdict: res.opinions.alexei.verdict });
-    if (res.opinions.victor.stance === "buy" && res.opinions.maria.stance === "sell") {
-      push(
-        "judge",
-        res.verdict.signal === "hold"
-          ? "You're both right about something and neither of you is right about the trade. We stand down."
-          : `Conviction edge goes to the ${res.verdict.signal.toUpperCase()} side. Small size, tight stop.`,
-        "interject"
-      );
-    }
-    push("judge", `Verdict: ${res.verdict.signal.toUpperCase()} — ${res.verdict.comment}`, "verdict", {
-      signal: res.verdict.signal,
-      rule: res.verdict.rule,
-    });
-
-    this.say("victor", res.opinions.victor.stance === "buy" ? "I'm arguing the long side." : "Nothing here. I'll pass.");
-    this.say("maria", res.opinions.maria.stance === "sell" ? "Short side is the only honest trade." : "I'll stand down this round.");
-    this.say("alexei", res.opinions.alexei.verdict);
-    this.say("judge", `Deliberating ${symbol}...`);
-    if (res.opinions.victor.stance === "buy") this.agents.victor.ideas += 1;
-    if (res.opinions.maria.stance === "sell") this.agents.maria.ideas += 1;
-
-    this.pushLog(
-      "debate",
-      `${symbol} debate — bull ${(res.opinions.victor.confidence * 100) | 0}% · bear ${(res.opinions.maria.confidence * 100) | 0}% · risk ${res.opinions.alexei.verdict}`
+  async refresh() {
+    const { pollTicker } = await import("./feeds.js");
+    const errors = [];
+    await Promise.all(
+      INSTRUMENTS.map(async (inst) => {
+        if (this.market.feeds[inst.symbol].error && this.failureStreak % 4 !== 0) return; // retry slow
+        try {
+          const p = await pollTicker(inst.symbol);
+          this.market.applyPoll(inst.symbol, p);
+        } catch (e) {
+          errors.push(inst.symbol);
+          this.market.markError(inst.symbol, String(e.message || e));
+        }
+      })
     );
-
-    const delay = this.paused ? 400 : 900 + Math.random() * 900;
-    setTimeout(() => this._executeVerdict(th, res), delay);
-    return th;
+    this.lastPollAt = Date.now();
+    const live = this.market.liveCount;
+    this.feedStatus = live === 0 ? "offline" : live < INSTRUMENTS.length ? "partial" : "live";
+    if (live) this.failureStreak = 0;
+    else this.failureStreak++;
+    return errors;
   }
 
-  // position sizing: risk a fixed % of equity against the stop distance,
-  // then clamp to what the mandate (and the 5x margin) actually allows.
-  _sizeFor(price, equity) {
-    const riskDollars = equity * this.rules.riskPerTrade;
-    let notional = riskDollars / Math.max(0.0015, this.rules.stopLossPct);
-    const grossRoom = Math.max(0, equity * this.rules.maxGrossExposure - this.account.grossNotional(this.market)) * 0.95;
-    notional = Math.min(notional, equity * 0.6, grossRoom, this.account.buyingPower(this.market) * 0.9);
-    return Math.max(0, notional) / price;
+  /* --------------------------- main heartbeat --------------------------- */
+  onTick() {
+    if (this.paused) return;
+    this.tick++;
+    this.market.step();
+
+    // risk desk: hard stops & targets on every open position
+    this.account.managePositions(this.market, (trade, pnl, agentId) => {
+      const agent = this.get(agentId);
+      if (agent) {
+        agent.realized += pnl;
+        agent.equity += pnl;
+        agent.learn({
+          features: trade.features,
+          stance: trade.entryStance === "sell" ? "sell" : "buy",
+          pnl,
+          symbol: trade.symbol,
+        });
+        this.say(agent, pnl >= 0 ? `${trade.symbol} paid. That's the trade I wanted.` : `Stopped out of ${trade.symbol}. Lesson filed.`);
+      }
+      this.pushLog(pnl >= 0 ? "exit" : "risk", `${trade.symbol} ${trade.side} closed ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)} — ${trade.reason}`);
+      this.alerts.unshift({ id: uid(), t: Date.now(), text: `${pnl >= 0 ? "WIN" : "STOP"} ${trade.symbol} ${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(0)}`, tone: pnl >= 0 ? "up" : "down" });
+      if (this.alerts.length > 8) this.alerts.pop();
+    }, this.houseRules.maxHoldTicks);
+
+    for (const a of this.agents) a.decayMood();
+
+    // a real broker feed ticks in the background
+    if (Date.now() - this.lastPollAt > 8000) this.refresh();
+
+    // ---------- free will: each agent may act this beat ----------
+    const p = 0.055;
+    for (const a of this.agents) {
+      if (Math.random() > p * (0.6 + a.traits.aggression * 0.9)) continue;
+      this._act(a);
+    }
+
+    // ---------- reviews: hiring, firing, evolution ----------
+    if (this.tick % 90 === 0) this._review();
+    if (this.tick % 40 === 0) this.account.snap(this.market);
+    if (this.tick % 55 === 0) this._smallTalk();
   }
 
-  _roundQty(symbol, qty) {
-    if (symbol === "BTCUSD") return Math.max(0.01, Math.round(qty * 100) / 100);
-    if (symbol === "EURUSD") return Math.max(1000, Math.round(qty / 100) * 100);
-    if (symbol === "XAUUSD") return Math.max(1, Math.round(qty));
-    return Math.max(1, Math.round(qty));
-  }
+  /* ------------------------- one agent's decision ------------------------- */
+  _act(agent) {
+    const symbols = INSTRUMENTS.map((i) => i.symbol).filter((s) => this.market.feeds[s].bars.length > 20);
+    if (!symbols.length) return;
+    if (!agent.focusSymbol || Math.random() < 0.35) agent.focusSymbol = pick(symbols);
+    const brief = buildBrief(this.market, agent.focusSymbol);
+    if (!brief) return;
+    const read = agent.read(brief);
+    const action = chooseAction(agent, { lastVerdict: this.debates[0]?.signal });
 
-  _executeVerdict(th, res) {
-    if (this.paused) {
-      th.status = "no-trade";
-      this.pushLog("system", `${th.symbol} — floor paused mid-debate. No action taken.`);
-      return;
-    }
-    const { signal, comment } = res.verdict;
-    const sig = signal.toLowerCase();
-    const meta = SYMBOLS.find((s) => s.symbol === th.symbol);
-    const px = this.market.feeds[th.symbol].last;
-
-    if (sig === "hold") {
-      th.status = "no-trade";
-      th.verdict = { signal: "hold", comment };
-      this.say("judge", `No trade on ${th.symbol}. ${res.verdict.rule}.`);
-      this.pushLog("hold", `${th.symbol} — HOLD · ${comment}`);
-      return;
-    }
-
-    const held = this.account.position(th.symbol);
-    const openCount = Object.keys(this.account.positions).length;
-    if (held === 0 && openCount >= this.rules.maxPositions) {
-      th.status = "no-trade";
-      th.verdict = { signal: "hold", comment: `Portfolio already holds ${openCount} names — mandate cap is ${this.rules.maxPositions}.` };
-      this.pushLog("risk", `${th.symbol} — ${sig.toUpperCase()} blocked: max concurrent positions reached.`);
-      return;
-    }
-    if (held === 0 && this.account.grossNotional(this.market) / this.equity() >= this.rules.maxGrossExposure) {
-      th.status = "no-trade";
-      th.verdict = { signal: "hold", comment: "Gross exposure cap reached — carrying more risk would be reckless." };
-      this.pushLog("risk", `${th.symbol} — ${sig.toUpperCase()} blocked: gross exposure cap ${this.rules.maxGrossExposure}×.`);
-      return;
+    // free will: she can abandon her own trade the moment her model flips
+    const ownPos = this.account.positions[agent.focusSymbol];
+    if (ownPos && ownPos.agentId === agent.id) {
+      const dir = Math.sign(ownPos.qty);
+      const flipped = (dir > 0 && read.stance === "sell" && read.conviction > 0.45) || (dir < 0 && read.stance === "buy" && read.conviction > 0.45);
+      if (flipped && Math.random() < 0.55) {
+        const closed = this.account.execute({
+          symbol: agent.focusSymbol,
+          side: dir > 0 ? "sell" : "buy",
+          qty: Math.abs(ownPos.qty),
+          market: this.market,
+          agent,
+          reason: `${agent.name} changed her mind — model flipped to ${read.stance}`,
+        });
+        if (closed) {
+          agent.realized += closed.realizedPnl;
+          agent.equity += closed.realizedPnl;
+          agent.learn({ features: read.features, stance: dir > 0 ? "buy" : "sell", pnl: closed.realizedPnl, symbol: agent.focusSymbol });
+          this.pushLog("exit", `${agent.name} closed her ${agent.focusSymbol} ${dir > 0 ? "long" : "short"} ${closed.realizedPnl >= 0 ? "for +" : "for −"}$${Math.abs(closed.realizedPnl).toFixed(0)} — changed her mind`);
+          this.say(agent, closed.realizedPnl >= 0
+            ? `Out of ${agent.focusSymbol} with a profit. My model flipped, so I flipped.`
+            : `Cut ${agent.focusSymbol}. My own model turned on me.`);
+          agent.lastAction = "closed her own trade";
+          return;
+        }
+      }
     }
 
-    // closing / reversing an existing opposite book
-    if (held !== 0 && Math.sign(held) !== (sig === "buy" ? 1 : -1)) {
-      const trade = this.account.execute({
-        symbol: th.symbol,
-        side: sig === "buy" ? "buy" : "sell",
-        qty: Math.abs(held),
-        market: this.market,
-        agentId: "judge",
-        agentName: "The Arbiter",
-        reason: comment,
-        debateId: th.id,
-      });
-      if (!trade) {
-        th.status = "no-trade";
+    if (action === "study") {
+      agent.lastAction = "studying charts";
+      agent.lastActionAt = Date.now();
+      this.say(agent, pick([
+        `${agent.focusSymbol} at ${brief.price.toFixed(bySymbol(agent.focusSymbol).digits)}. Watching the ${brief.rsi > 60 ? "stretched" : brief.rsi < 40 ? "beaten-down" : "balanced"} tape.`,
+        `My model reads ${brief.symbol} at ${(read.conviction * 100) | 0}% conviction. Not yet.`,
+        `RSI ${brief.rsi.toFixed(0)}, ATR ${(brief.atrPct * 100).toFixed(2)}%. Same story, different day.`,
+      ]));
+      agent.boredom = clamp(agent.boredom - 0.1, 0, 1.4);
+      return;
+    }
+
+    if (action === "chat") {
+      this._smallTalk(agent);
+      return;
+    }
+
+    if (action === "rest") {
+      agent.lastAction = "stepped away";
+      this.say(agent, pick([
+        "Going for coffee. Nobody touch my book.",
+        "My head is not in it. Better flat than forced.",
+        "Ten minutes off the screens. The tape will still be here.",
+      ]));
+      agent.boredom = 0;
+      agent.setMood("focused");
+      return;
+    }
+
+    if (action === "debate") {
+      this.openDebate(agent.focusSymbol, agent);
+      return;
+    }
+
+    if (action === "impulse" || action === "contradict") {
+      if (read.stance === "neutral" && Math.random() > 0.4) {
+        this.say(agent, `Not feeling ${brief.symbol} either way. Skipping.`);
         return;
       }
-      this._credit("judge", trade.realizedPnl);
-      th.status = "filled";
-      th.verdict = { signal: sig, comment };
-      th.trade = trade;
-      this.say("judge", `Closed ${th.symbol} ${sig === "buy" ? "short" : "long"} @ ${px.toFixed(meta.digits)}. Book is flat.`);
-      this.pushLog("fill", `${sig === "buy" ? "COVER" : "SELL"} ${Math.abs(held)} ${th.symbol} @ ${px.toFixed(meta.digits)} — ${comment}`);
+      if (action === "contradict") this.stats.contradictions++;
+      // free will: act alone, with smaller size — the house did not bless this
+      const stance = read.stance === "neutral" ? (Math.random() < 0.5 ? "buy" : "sell") : read.stance;
+      const size = agent.sizeFor(agent.equity, brief.price, agent.stopPct()) * (action === "contradict" ? 0.85 : 0.7);
+      this.execute(agent, { symbol: brief.symbol, side: stance, qty: size, brief, read, solo: true, reason:
+        action === "contradict"
+          ? `went against the house on ${brief.symbol} — ${(read.conviction * 100) | 0}% conviction`
+          : `solo conviction play on ${brief.symbol} (${(read.conviction * 100) | 0}%)` });
       return;
     }
-    if (held !== 0 && Math.sign(held) === (sig === "buy" ? 1 : -1)) {
-      th.status = "no-trade";
-      th.verdict = { signal: "hold", comment: "Already long this name — pyramiding into the same idea adds no edge." };
-      this.pushLog("hold", `${th.symbol} — ${sig.toUpperCase()} already held. No add.`);
-      return;
+  }
+
+  _smallTalk(only) {
+    const speaker = only || pick(this.agents);
+    if (!speaker) return;
+    const other = pick(this.agents.filter((a) => a.id !== speaker.id));
+    const sym = speaker.focusSymbol || pick(INSTRUMENTS).symbol;
+    const f = this.market.feeds[sym];
+    const lines = [
+      `${sym} is ${f.last > f.sma20 ? "above" : "below"} the 20. ${other ? other.name : "Anyone"} — you seeing this?`,
+      `I keep losing the same way. ${speaker.lessons[0]?.text || "Need a new rule."}`,
+      `${other ? other.name : "Desk"}: your ${other?.archetypeName?.toLowerCase() || "style"} book is going to get squeezed one day.`,
+      `Who's carrying too much ${sym}? Because it feels crowded.`,
+      `Hit rate ${(speaker.winRate * 100) | 0}% over ${speaker.total}. I'll take boring consistency.`,
+      `The model says ${sym}. The model is also what got me here.`,
+    ];
+    const text = pick(lines);
+    this.say(speaker, text);
+    this.chat.unshift({ id: uid(), t: Date.now(), from: speaker.id, name: speaker.name, color: speaker.color, text });
+    if (this.chat.length > 60) this.chat.pop();
+    speaker.boredom = clamp(speaker.boredom - 0.25, 0, 1.4);
+  }
+
+  /* ---------------------------- debates ---------------------------- */
+  openDebate(symbol, initiator, opts = {}) {
+    const brief = buildBrief(this.market, symbol);
+    if (!brief) return null;
+    const participants = opts.participants || this._pickPanel(initiator, Math.min(4, this.agents.length));
+    const debate = {
+      id: uid(),
+      symbol,
+      initiator: initiator?.id,
+      openedAt: Date.now(),
+      status: "open",
+      messages: [],
+      brief,
+      reads: {},
+      signal: null,
+      rule: null,
+      comment: null,
+      risk: riskRead(brief),
+      trade: null,
+    };
+    this.debates.unshift(debate);
+    if (this.debates.length > 24) this.debates.pop();
+    this.stats.debates++;
+
+    this._msg(debate, "system", `${symbol} called to the room by ${initiator?.name || "the desk"} — ${brief.granularity} tape, ${brief.price.toFixed(bySymbol(symbol).digits)}.`);
+    if (debate.risk.verdict !== "LOW RISK") {
+      this._msg(debate, "system", `Risk pre-read: ${debate.risk.verdict} — ${debate.risk.flags[0] || "tape is normal"}.`);
     }
 
-    const qty = this._roundQty(th.symbol, this._sizeFor(px, this.equity()));
-    if (!qty) {
-      th.status = "no-trade";
-      th.verdict = { signal: "hold", comment: "No risk budget left under the mandate — sizing to zero." };
-      this.pushLog("risk", `${th.symbol} — ${sig.toUpperCase()} blocked: no remaining risk budget.`);
-      return;
+    for (const a of participants) {
+      const read = a.read(brief);
+      debate.reads[a.id] = { ...read, name: a.name, color: a.color, archetype: a.archetypeName, stance: read.stance, conviction: read.conviction };
+      this._msg(debate, a.id, a.argue(brief, read), {
+        name: a.name,
+        color: a.color,
+        archetype: a.archetypeName,
+        stance: read.stance,
+        conviction: read.conviction,
+        gen: a.generation,
+      });
+      this.say(a, read.stance === "buy" ? `Long ${symbol}. Anyone disagree?` : read.stance === "sell" ? `${symbol} is a short.` : `Flat on ${symbol}.`);
     }
-    const origin = sig === "buy" ? "victor" : "maria";
+
+    // a dissenter may openly fight the emerging consensus (free will)
+    const dissent = participants.filter((p) => {
+      const r = debate.reads[p.id];
+      return r.stance !== "neutral" && p.traits.contrarian > 0.6 && Math.random() < 0.5;
+    })[0];
+    if (dissent) {
+      this._msg(debate, dissent.id, pick([
+        `Hold on. I hear the room and I think the room is wrong. ${symbol} is a trap here.`,
+        `I'll be the one who says it: this is the exact setup that blows up.`,
+        `Everyone is looking at the same three numbers. That's why it stops working.`,
+      ]), { name: dissent.name, color: dissent.color, archetype: dissent.archetypeName, kind: "dissent", gen: dissent.generation });
+    }
+
+    const verdict = aggregate(Object.values(debate.reads), {
+      brief,
+      requireAgreement: this.houseRules.minVotes,
+    });
+    debate.signal = verdict.signal;
+    debate.rule = verdict.rule;
+    debate.comment = verdict.comment;
+    debate.risk = verdict.risk;
+    debate.status = "closed";
+    debate.confidence = confidenceOf(Object.values(debate.reads));
+    debate.closedAt = Date.now();
+
+    this._msg(debate, "house", `${verdict.signal.toUpperCase()} — ${verdict.comment}`, {
+      name: "House verdict",
+      kind: "verdict",
+      signal: verdict.signal,
+      rule: verdict.rule,
+      color: verdict.signal === "buy" ? "#5ceb8e" : verdict.signal === "sell" ? "#f26457" : "#f5b841",
+    });
+    if (verdict.signal === "hold") this.stats.holds++;
+    this.stats.votes++;
+
+    // the house acts only on a clean verdict
+    if (verdict.signal !== "hold") {
+      const champion = participants.reduce((best, p) => {
+        const r = debate.reads[p.id];
+        const aligned = r.stance === verdict.signal;
+        const score = (aligned ? 1 : 0) + r.conviction + p.reputation * 0.4;
+        return !best || score > best.score ? { p, score, aligned } : best;
+      }, null);
+      if (champion?.aligned) {
+        const read = debate.reads[champion.p.id];
+        const qty = champion.p.sizeFor(Math.min(this.account.equity(this.market), champion.p.equity * 3), brief.price, champion.p.stopPct()) * 0.9;
+        const trade = this.execute(champion.p, {
+          symbol,
+          side: verdict.signal,
+          qty,
+          brief,
+          read,
+          house: true,
+          reason: `${verdict.rule} — ${verdict.signal.toUpperCase()} ${symbol} on a ${(debate.confidence * 100) | 0}% room`,
+        });
+        debate.trade = trade;
+      }
+    }
+
+    // participants learn something about the argument itself
+    for (const a of participants) {
+      if (a.traits.curiosity > 0.5 && Math.random() < 0.35) {
+        a.addLesson(`${symbol}: room went ${verdict.signal.toUpperCase()} (${verdict.rule}). ${verdict.signal === a.read(brief).stance ? "I was aligned." : "I was not."}`);
+      }
+    }
+    this.pushLog("debate", `${symbol} — ${verdict.signal.toUpperCase()} · ${verdict.rule} · ${participants.length} desks in the room`);
+    return debate;
+  }
+
+  _pickPanel(initiator, n = 3) {
+    const pool = this.agents.filter((a) => a.id !== initiator?.id);
+    const chosen = [];
+    if (initiator) chosen.push(initiator);
+    // high-reputation / social agents get invited more often
+    const weighted = pool
+      .map((a) => ({ a, w: 0.5 + a.traits.social + a.reputation }))
+      .sort(() => Math.random() - 0.5);
+    for (const { a, w } of weighted) {
+      if (chosen.length >= n) break;
+      if (Math.random() < w / 2.1) chosen.push(a);
+    }
+    while (chosen.length < Math.min(n, this.agents.length)) {
+      const a = pick(pool);
+      if (a && !chosen.includes(a)) chosen.push(a);
+      else break;
+    }
+    return chosen;
+  }
+
+  _msg(debate, speakerId, text, extra = {}) {
+    debate.messages.push({ id: uid(), speaker: speakerId, text, at: Date.now(), ...extra });
+  }
+
+  /* --------------------------- execution --------------------------- */
+  execute(agent, { symbol, side, qty, brief, read, house = false, solo = false, reason }) {
+    const inst = bySymbol(symbol);
+    const f = this.market.feeds[symbol];
+    if (!inst || !f) return null;
+
+    const grossCap = this.account.equity(this.market) * this.houseRules.maxGross;
+    if (this.account.grossNotional(this.market) > grossCap) {
+      this.pushLog("risk", `${symbol} ${side} blocked — portfolio gross cap (${this.houseRules.maxGross}×) reached.`);
+      return null;
+    }
+    const openNames = Object.keys(this.account.positions).length;
+    const existing = this.account.positions[symbol];
+    if (!existing && openNames >= this.houseRules.maxNames) {
+      this.pushLog("risk", `${symbol} ${side} blocked — already carrying ${openNames} names.`);
+      return null;
+    }
+    // free will: a trader will happily close somebody else's book if she disagrees
+    if (existing && Math.sign(existing.qty) !== (side === "buy" ? 1 : -1)) {
+      const closeQty = Math.min(Math.abs(existing.qty), qty);
+      const closed = this.account.execute({
+        symbol,
+        side,
+        qty: closeQty,
+        market: this.market,
+        agent,
+        reason: `${agent.name} closing a ${existing.qty > 0 ? "long" : "short"} she disagrees with`,
+      });
+      if (closed) {
+        this.pushLog("fill", `CLOSE ${side.toUpperCase()} ${closeQty.toFixed(inst.qtyStep < 1 ? 3 : 0)} ${symbol} @ ${closed.price.toFixed(inst.digits)} by ${agent.name} — reversed the room`);
+        agent.fills++;
+        const owner = this.get(existing.agentId);
+        if (owner && owner.id !== agent.id) {
+          owner.equity += closed.realizedPnl;
+          owner.realized += closed.realizedPnl;
+          owner.learn({ features: closed.features, stance: existing.qty > 0 ? "buy" : "sell", pnl: closed.realizedPnl, symbol });
+          this.say(owner, `Who covered my ${symbol}? That was my trade.`);
+        }
+      }
+      if (qty <= closeQty) return closed;
+      qty -= closeQty;
+    }
+
+    // an agent's own risk budget caps her size (no leverage tricks on her own equity)
+    const maxQty = (agent.equity * this.houseRules.maxAgentExposure) / f.last;
+    qty = Math.min(qty, maxQty);
+    const step = inst.qtyStep;
+    qty = Math.floor(qty / step) * step;
+    if (qty * f.last < 50) return null;
+
     const trade = this.account.execute({
-      symbol: th.symbol,
-      side: sig,
+      symbol,
+      side,
       qty,
       market: this.market,
-      agentId: origin,
-      agentName: this.agents[origin].name,
-      reason: comment,
-      debateId: th.id,
+      agent,
+      reason,
+      debateId: house ? this.debates[0]?.id : null,
+      stopPct: agent.stopPct(),
+      features: read?.features,
     });
-    if (!trade) {
-      th.status = "no-trade";
-      th.verdict = { signal: "hold", comment: "Order rejected — not enough buying power at 5× margin." };
-      this.pushLog("risk", `${th.symbol} — ${sig.toUpperCase()} rejected: insufficient buying power.`);
-      return;
-    }
-    th.status = "filled";
-    th.verdict = { signal: sig, comment };
-    th.trade = trade;
-    th.origin = origin;
-    this.agents[origin].fills += 1;
-    this.say(
-      "judge",
-      `Filled: ${sig === "buy" ? "bought" : "sold short"} ${qty} ${th.symbol} @ ${px.toFixed(meta.digits)}.`
-    );
+    if (!trade) return null;
+
+    agent.fills++;
+    agent.lastAction = house ? "executing house trade" : "going solo";
+    agent.lastActionAt = Date.now();
+    agent.boredom = 0;
+    if (solo) this.stats.soloTrades++;
+    const tag = house ? "HOUSE" : "SOLO";
     this.pushLog(
       "fill",
-      `${sig === "buy" ? "BUY" : "SHORT"} ${qty} ${th.symbol} @ ${px.toFixed(meta.digits)} · ${(trade.notional).toFixed(0)} USD notional — ${comment}`
+      `${tag} ${side.toUpperCase()} ${qty.toFixed(inst.qtyStep < 1 ? 3 : 0)} ${symbol} @ ${trade.price.toFixed(inst.digits)} by ${agent.name} — ${reason}`
     );
     this.alerts.unshift({
       id: uid(),
       t: Date.now(),
-      text: `${sig === "buy" ? "LONG" : "SHORT"} ${qty} ${th.symbol}`,
-      tone: sig === "buy" ? "up" : "down",
+      text: `${tag} ${side.toUpperCase()} ${symbol} · ${agent.name}`,
+      tone: side === "buy" ? "up" : "down",
     });
-    if (this.alerts.length > 10) this.alerts.pop();
+    if (this.alerts.length > 8) this.alerts.pop();
+    this.say(agent, side === "buy" ? `Filled long ${symbol}. Now we see.` : `Short ${symbol} on. Stop is in.`);
+    return trade;
   }
 
-  grossExposure() {
-    return this.account.grossNotional(this.market) / this.equity();
+  /* ---------------------- reviews, evolution, jobs ---------------------- */
+  _review() {
+    for (const a of this.agents) {
+      a.recomputeBeliefs();
+      // reputation drifts with results
+      const score = a.total
+        ? clamp(0.55 + (a.winRate - 0.45) * 1.1 + clamp(a.realized / Math.max(1, a.startEquity), -0.3, 0.3), 0.02, 0.98)
+        : 0.5;
+      a.reputation = clamp(a.reputation * 0.8 + score * 0.2, 0.02, 0.98);
+    }
+    const ranked = [...this.agents].sort((x, y) => y.equity - x.equity);
+    const worst = ranked[ranked.length - 1];
+    const best = ranked[0];
+
+    // evolution: the best performer's playbook gets copied
+    if (best && this.houseRules.evolveOnLoss && best.total >= 3 && best.winRate > 0.55 && this.agents.length < 10 && Math.random() < 0.5) {
+      const child = this.hire(`${best.name}'s approach is being cloned — gen ${best.generation + 1}`, best);
+      this.stats.evolutions++;
+      child.addLesson(`Built from ${best.name}'s winning model (${(best.winRate * 100) | 0}% hit rate).`);
+    }
+
+    // firing: a long-term bleeder gets a serious conversation
+    if (worst && worst.total >= 6 && worst.winRate < 0.34 && worst.equity < worst.startEquity * 0.93) {
+      this.pushLog("review", `${worst.name} is under review: ${(worst.winRate * 100) | 0}% hit rate, equity ${worst.equity.toFixed(0)}.`);
+      if (Math.random() < 0.5 && this.agents.length > 4) this.fire(worst, `bleeding ${(100 - worst.winRate * 100) | 0}% of ideas`);
+      else worst.addLesson("Under review. Cut size, take the A+ setup only.");
+    }
+    if (this.houseRules.autoHire && this.agents.length < 7 && Math.random() < 0.35) {
+      this.hire(pick(["a seat opened up", "we need more flow", "the desk is short-staffed"]));
+    }
+    this.save();
   }
 
+  /* --------------------------- persistence --------------------------- */
+  save() {
+    try {
+      const payload = {
+        v: 2,
+        savedAt: Date.now(),
+        agents: this.agents.map((a) => a.serialize()),
+        stats: this.stats,
+        rules: this.houseRules,
+        equity: this.account.equity(this.market),
+        trades: this.account.trades.slice(0, 120),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      /* storage full or unavailable — the session keeps running */
+    }
+  }
+
+  restoreFromStorage() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (!data.agents?.length) return;
+      this.agents = data.agents.map((o) => Trader.deserialize(o));
+      Object.assign(this.houseRules, data.rules || {});
+      this.stats = { ...this.stats, ...(data.stats || {}) };
+      if (data.trades) this.account.trades = data.trades;
+      this.pushLog("system", `Restored ${this.agents.length} traders and their lessons from your last session.`);
+    } catch {
+      /* corrupt storage: start fresh */
+    }
+  }
+
+  resetProgress() {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+    this.agents = [];
+    this.stats = { debates: 0, votes: 0, holds: 0, soloTrades: 0, contradictions: 0, hires: 0, fires: 0, evolutions: 0 };
+    this.seedRoster();
+    this.pushLog("system", "Floor reset — new hires, empty memories.");
+  }
+
+  /* ----------------------------- summary ----------------------------- */
   summary() {
-    const eq = this.equity();
-    const j = this.agents.judge;
+    const equity = this.account.equity(this.market);
     const closed = this.account.trades.filter((t) => t.realizedPnl !== 0);
     const wins = closed.filter((t) => t.realizedPnl > 0).length;
+    const agentEquity = this.agents.reduce((a, x) => a + x.equity, 0);
     return {
-      equity: eq,
+      equity,
       cash: this.account.cash,
-      dayPnl: eq - this.dayStart,
-      dayPnlPct: ((eq - this.dayStart) / this.dayStart) * 100,
-      realized: this.account.realized,
+      pnl: equity - this.cashDayStart,
+      pnlPct: ((equity - this.cashDayStart) / this.cashDayStart) * 100,
       unrealized: this.account.unrealized(this.market),
+      realized: this.account.realized,
       openPositions: Object.keys(this.account.positions).length,
-      grossExposure: this.grossExposure(),
+      gross: this.account.grossNotional(this.market) / Math.max(1, equity),
       fills: this.account.trades.length,
-      wins,
-      closedCount: closed.length,
       winRate: closed.length ? (wins / closed.length) * 100 : 0,
-      debates: this.debateCount,
-      holds: this.threads.filter((t) => t.status === "no-trade").length,
+      closed: closed.length,
+      traders: this.agents.length,
+      generations: Math.max(...this.agents.map((a) => a.generation), 0),
+      lessons: this.agents.reduce((a, x) => a + x.lessons.length, 0),
+      ...this.stats,
+      feedStatus: this.feedStatus,
+      feedDetail: this.feedDetail,
+      liveCount: this.market.liveCount,
+      agentEquity,
     };
   }
 }

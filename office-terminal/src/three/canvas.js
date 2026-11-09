@@ -56,6 +56,74 @@ export function drawCity(ctx, w, h, t = 0) {
   }
 }
 
+export function drawWhiteboard(ctx, w, h, traders, log) {
+  ctx.fillStyle = "#eef3f8";
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = "#0d1b2a";
+  ctx.font = "700 40px ui-monospace, monospace";
+  ctx.fillText("FLOOR NOTES / WHAT WE LEARNED", 34, 58);
+  ctx.strokeStyle = "rgba(13,27,42,0.35)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(34, 76);
+  ctx.lineTo(w - 34, 76);
+  ctx.stroke();
+
+  ctx.font = "600 26px ui-monospace, monospace";
+  let y = 122;
+  const rows = traders.slice(0, 6);
+  for (const t of rows) {
+    ctx.fillStyle = t.color;
+    ctx.fillText(`${t.name.toUpperCase()} · gen ${t.generation}`, 34, y);
+    ctx.fillStyle = "#22303f";
+    ctx.font = "500 22px ui-monospace, monospace";
+    const lesson = t.lessons?.[0]?.text || t.beliefs?.[0] || "still learning the tape";
+    const cut = lesson.length > 74 ? lesson.slice(0, 72) + "…" : lesson;
+    ctx.fillText(cut, 360, y);
+    ctx.font = "600 26px ui-monospace, monospace";
+    y += 46;
+  }
+  ctx.strokeStyle = "#c0392b";
+  ctx.font = "700 24px ui-monospace, monospace";
+  ctx.fillStyle = "#c0392b";
+  ctx.fillText("R1 risk veto · R2 two desks agree · R3 stand-off = hold", 34, h - 30);
+}
+
+export function drawWallBoard(ctx, w, h, snapshot, feedStatus, summary) {
+  ctx.fillStyle = "#050a12";
+  ctx.fillRect(0, 0, w, h);
+  // header
+  ctx.fillStyle = feedStatus === "live" ? "#5ceb8e" : feedStatus === "partial" ? "#f5b841" : "#f26457";
+  ctx.font = "700 30px ui-monospace, monospace";
+  ctx.fillText(`LIVE FEED · ${feedStatus.toUpperCase()} · ${snapshot.filter((s) => s.live).length}/${snapshot.length}`, 30, 46);
+  ctx.font = "500 22px ui-monospace, monospace";
+  ctx.fillStyle = "rgba(159,178,205,0.9)";
+  ctx.textAlign = "right";
+  ctx.fillText(`EQ $${Math.round(summary.equity).toLocaleString()}  ·  TRADERS ${summary.traders}  ·  GEN ${summary.generations}  ·  ${summary.fills} FILLS`, w - 30, 46);
+  ctx.textAlign = "left";
+
+  const cols = 3;
+  const cellW = (w - 60) / cols;
+  const cellH = (h - 90) / 2;
+  snapshot.slice(0, 6).forEach((s, i) => {
+    const cx = 30 + (i % cols) * cellW;
+    const cy = 76 + Math.floor(i / cols) * cellH;
+    ctx.fillStyle = "rgba(255,255,255,0.035)";
+    ctx.fillRect(cx + 6, cy + 6, cellW - 16, cellH - 16);
+    ctx.fillStyle = s.color;
+    ctx.font = "700 28px ui-monospace, monospace";
+    ctx.fillText(s.symbol, cx + 20, cy + 48);
+    ctx.fillStyle = "#e6eefc";
+    ctx.fillText(s.last.toFixed(s.digits), cx + 20, cy + 88);
+    ctx.fillStyle = s.changePct >= 0 ? "#5ceb8e" : "#f26457";
+    ctx.font = "600 22px ui-monospace, monospace";
+    ctx.fillText(`${s.changePct >= 0 ? "▲" : "▼"} ${Math.abs(s.changePct).toFixed(2)}%`, cx + 20, cy + 120);
+    ctx.fillStyle = "rgba(159,178,205,0.85)";
+    ctx.font = "500 18px ui-monospace, monospace";
+    ctx.fillText(`RSI ${s.rsi.toFixed(0)} · ${s.granularity} · ${s.live ? "LIVE" : "OFFLINE"}`, cx + 20, cy + 150);
+  });
+}
+
 export function drawTicker(ctx, w, h, snapshot, offset) {
   ctx.fillStyle = "#070c15";
   ctx.fillRect(0, 0, w, h);
@@ -79,7 +147,7 @@ export function drawTicker(ctx, w, h, snapshot, offset) {
 }
 
 export function drawChart(ctx, w, h, bars, opts = {}) {
-  const { accent = "#5ceb8e", symbol = "", price = 0, digits = 2, rsi = 50 } = opts;
+  const { accent = "#5ceb8e", symbol = "", price = 0, digits = 2, rsi = 50, live = false, compact = false, granularity = "" } = opts;
   ctx.fillStyle = "#060b14";
   ctx.fillRect(0, 0, w, h);
 
@@ -146,9 +214,16 @@ export function drawChart(ctx, w, h, bars, opts = {}) {
   ctx.fillRect(w - 4, Y(price) - 10, 4, 20);
 
   // labels
-  ctx.font = "600 20px ui-monospace, monospace";
+  ctx.font = compact ? "600 16px ui-monospace, monospace" : "600 20px ui-monospace, monospace";
   ctx.fillStyle = "#e6eefc";
   ctx.fillText(symbol, 16, 30);
+  if (live) {
+    ctx.fillStyle = "#5ceb8e";
+    ctx.fillRect(16, 40, 7, 7);
+    ctx.fillStyle = "rgba(159,178,205,0.85)";
+    ctx.font = "500 13px ui-monospace, monospace";
+    ctx.fillText(`LIVE ${granularity || ""}`, 30, 48);
+  }
   ctx.fillStyle = accent;
   ctx.textAlign = "right";
   ctx.fillText(price.toFixed(digits), w - 14, 30);
@@ -156,7 +231,9 @@ export function drawChart(ctx, w, h, bars, opts = {}) {
   ctx.fillStyle = "rgba(159,178,205,0.85)";
   ctx.font = "500 16px ui-monospace, monospace";
   ctx.fillText(`RSI ${rsi.toFixed(1)}`, 16, h - 14);
-  ctx.fillText(`M1`, w - 40, h - 14);
+  ctx.textAlign = "right";
+  ctx.fillText(granularity || "", w - 12, h - 14);
+  ctx.textAlign = "left";
 }
 
 export function drawDeskScreen(ctx, w, h, agent, state) {
@@ -170,12 +247,28 @@ export function drawDeskScreen(ctx, w, h, agent, state) {
 
   ctx.font = "700 22px ui-monospace, monospace";
   ctx.fillStyle = agent.color;
-  ctx.fillText(agent.role.toUpperCase(), 14, 34);
+  ctx.fillText(`${agent.name.toUpperCase()} · ${agent.archetypeName}`, 14, 30);
+
+  // mood pill
+  const mood = state?.mood;
+  if (mood) {
+    ctx.font = "600 15px ui-monospace, monospace";
+    const label = mood.label.toUpperCase();
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = mood.color;
+    ctx.globalAlpha = 0.18;
+    ctx.fillRect(w - tw - 30, 12, tw + 18, 24);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = mood.color;
+    ctx.fillText(label, w - tw - 21, 29);
+  }
 
   ctx.font = "600 30px ui-monospace, monospace";
   ctx.fillStyle = "#e6eefc";
   const last = state?.lastMessage || "reading the tape";
-  wrap(ctx, last, 14, 76, w - 28, 30, 4);
+  ctx.font = "600 26px ui-monospace, monospace";
+  ctx.fillStyle = "#e6eefc";
+  wrap(ctx, last, 14, 74, w - 28, 32, 3);
 
   ctx.font = "500 18px ui-monospace, monospace";
   ctx.fillStyle = "rgba(159,178,205,0.9)";
@@ -186,6 +279,11 @@ export function drawDeskScreen(ctx, w, h, agent, state) {
   ctx.textAlign = "right";
   ctx.fillText(`${state?.trades || 0} fills`, w - 14, h - 18);
   ctx.textAlign = "left";
+  // belief line
+  ctx.font = "500 15px ui-monospace, monospace";
+  ctx.fillStyle = "rgba(159,178,205,0.6)";
+  const belief = agent.beliefs?.[0] || "";
+  if (belief) ctx.fillText(belief.length > 58 ? belief.slice(0, 56) + "…" : belief, 14, h - 44);
 }
 
 function wrap(ctx, text, x, y, maxW, lh, maxLines) {
