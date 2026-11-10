@@ -124,8 +124,18 @@ Everything between the `//=== CORE-BEGIN` and `//=== CORE-END` markers in the
 re-implemented) and compiled with `gcc -std=c99 -Wall -Wextra`, then fed
 synthetic OHLC series with a known structure.
 
+The one edit made on the way in is stripping `&` from array parameter
+declarations, because MQL4 requires `double &high[]` and C has no such syntax.
+The harness proves that is the *only* change: an independent
+whitespace-insensitive pattern must reproduce the compiled source exactly, and
+no logical `&&` may be altered. If anyone edits the core in a way that breaks
+that equivalence, the test refuses to run rather than quietly testing a
+different program.
+
 ```
 $ python3 tools/test_core.py
+extracted CORE verbatim (7678 chars); stripped '&' from 18 array parameter
+declarations for C, nothing else changed
 ...
 73 passed, 0 failed
 ```
@@ -153,5 +163,21 @@ $ python3 tools/check_mql4_api.py     # ~3 min, uses the GitHub code-search API
 
 The second script cross-checks every MQL4 built-in and constant the file uses
 against real `.mq4` sources, which catches misspelled or MQL5-only names.
-It does **not** prove argument types — the authoritative check is still
-pressing **F7** in MetaEditor, which must report `0 errors`.
+
+**What these offline checks are worth — measured, not assumed.** The first
+version of this indicator passed both of them cleanly and MetaEditor still
+reported **22 errors and 4 warnings**. All of them were things a name check
+cannot see:
+
+- 18× *"arrays are passed by reference only"* — MQL4 requires `&` on every
+  array parameter. Nothing was misspelled, so the lint was satisfied.
+- 4× *"cannot convert enum"* — `ANCHOR_TOP` / `ANCHOR_BOTTOM` belong to
+  `ENUM_ARROW_ANCHOR` (for `OBJ_ARROW`), not the `ENUM_ANCHOR_POINT` used by
+  `OBJ_LABEL`. Both names exist in the MQL4 corpus, so the API check passed
+  them. `ANCHOR_BOTTOM` was silently resolving to `ANCHOR_LEFT`.
+- `Period()` returns `int` in MQL4, so assigning it to `ENUM_TIMEFRAMES` needs
+  a cast; and `stLocal` needed initialising at its declaration.
+
+All are fixed. The lesson is written into the tooling: **the authoritative
+check is pressing F7 in MetaEditor**, which must report `0 errors`. Treat the
+scripts as a fast pre-filter for typos, not as a compiler.
