@@ -91,6 +91,55 @@ MUTATIONS = [
     ("unknown structure counts as confirming",
      "if(st1 == want) n++;",
      "if(st1 != ST_BEAR) n++;"),
+
+    # --- PickZone ----------------------------------------------------------
+    # Anchored on the line below the loop head because `for(int i = 0; i < n;
+    # i++)` appears in both of PickZone's loops and in the wider core.
+    ("inside test ignores the zone ceiling",
+     "         if(price <= zTop[i] && price >= zBot[i]) return(i);",
+     "         if(price >= zBot[i]) return(i);"),
+
+    ("inside test ignores the zone floor",
+     "         if(price <= zTop[i] && price >= zBot[i]) return(i);",
+     "         if(price <= zTop[i]) return(i);"),
+
+    ("undirected zone counts as a zone price is inside",
+     "         if(zType[i] == AOI_NONE) continue;\n"
+     "         if(price <= zTop[i] && price >= zBot[i]) return(i);",
+     "         if(0) continue;\n"
+     "         if(price <= zTop[i] && price >= zBot[i]) return(i);"),
+
+    ("higher timeframe no longer wins",
+     "      for(int i = 0; i < n; i++)\n"
+     "        {\n"
+     "         if(zType[i] == AOI_NONE) continue;\n"
+     "         if(price <= zTop[i] && price >= zBot[i]) return(i);",
+     "      for(int i = n - 1; i >= 0; i--)\n"
+     "        {\n"
+     "         if(zType[i] == AOI_NONE) continue;\n"
+     "         if(price <= zTop[i] && price >= zBot[i]) return(i);"),
+
+    ("unknown price allowed to match an inside zone",
+     "   if(price > 0.0)",
+     "   if(1)"),
+
+    ("tested fallback ignores the allowTested flag",
+     "   if(allowTested != 1) return(-1);",
+     "   if(0) return(-1);"),
+
+    ("allowTested becomes a truthiness test instead of a strict flag",
+     "   if(allowTested != 1) return(-1);",
+     "   if(allowTested < 1) return(-1);"),
+
+    ("tested fallback ignores the zone direction",
+     "      if(zType[i] == AOI_NONE) continue;\n"
+     "      if(zState[i] == AOI_TESTED) return(i);",
+     "      if(0) continue;\n"
+     "      if(zState[i] == AOI_TESTED) return(i);"),
+
+    ("tested fallback matches any state, not just TESTED",
+     "      if(zState[i] == AOI_TESTED) return(i);",
+     "      if(zState[i] != AOI_SPENT) return(i);"),
 ]
 
 

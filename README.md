@@ -12,7 +12,7 @@
 
 ```
 python3 tools/test_core.py        # compiles + runs the structure engine (gcc)
-python3 tools/mutate_check.py     # breaks FindAOI/EntrySignal 16 ways and requires the suite to catch each
+python3 tools/mutate_check.py     # breaks FindAOI/EntrySignal/PickZone 26 ways and requires the suite to catch each
 python3 tools/lint_mq4.py         # static lint of the .mq4
 python3 tools/check_mql4_api.py   # cross-checks MQL4 API names against real .mq4 sources
 ```

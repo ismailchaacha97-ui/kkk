@@ -376,6 +376,38 @@ int EntrySignal(int aoiDir, int st1, int st2, int st3, int minConfirm, int &out[
    return(out[0]);
   }
 
+//+------------------------------------------------------------------+
+//| Which zone is price trading in?                                   |
+//| An INSIDE zone wins over a TESTED one, and the higher timeframe   |
+//| (lower index) wins over the lower. Returns the index, or -1.      |
+//|                                                                   |
+//| price <= 0 means the price is unknown, which can still match a    |
+//| TESTED zone but never an INSIDE one.                              |
+//+------------------------------------------------------------------+
+int PickZone(int &zType[], int &zState[], double &zTop[], double &zBot[],
+             int n, double price, int allowTested)
+  {
+   if(n < 1) return(-1);
+
+   if(price > 0.0)
+     {
+      for(int i = 0; i < n; i++)
+        {
+         if(zType[i] == AOI_NONE) continue;
+         if(price <= zTop[i] && price >= zBot[i]) return(i);
+        }
+     }
+
+   if(allowTested != 1) return(-1);
+
+   for(int i = 0; i < n; i++)
+     {
+      if(zType[i] == AOI_NONE) continue;
+      if(zState[i] == AOI_TESTED) return(i);
+     }
+   return(-1);
+  }
+
 //=== CORE-END =======================================================
 
 
@@ -461,6 +493,9 @@ input bool   DrawEntryArrows    = true;               // draw an arrow on this c
 input bool   EntryArrowEveryBar = false;              // false = only the bar the signal appeared on
 input int    EntryArrowPoints   = 100;                // arrow offset from the bar, in points
 input int    EntryArrowMax      = 50;                 // how many entry arrows to keep on the chart
+input bool   EntryUseClosedBars = true;               // grade entries on closed bars only (no repaint)
+input bool   EntryBackfill      = true;               // reconstruct and draw past signals on load
+input int    EntryBackfillBars  = 300;                // how many chart bars of history to reconstruct
 
 
 //============================= GLOBALS ==============================
@@ -499,6 +534,14 @@ struct SymRec
    int      entrySig;            // ENTRY_NONE / ENTRY_LONG / ENTRY_SHORT
    int      entryConfirm;        // how many entry timeframes agreed
    int      entryTF;             // index of the AOI that triggered it (0=W1, 1=D1)
+   // the zone entries are graded against, built from CLOSED W1/D1 bars only.
+   // Kept apart from aoiType/aoiTop/aoiBot above on purpose: those drive the
+   // panel and follow the forming bar, these must not move mid-week or an
+   // entry arrow could be created by a bar that has not closed yet.
+   int      eZoneType[MAX_TF];
+   int      eZoneState[MAX_TF];
+   double   eZoneTop[MAX_TF];
+   double   eZoneBot[MAX_TF];
   };
 
 SymRec   g_syms[];
@@ -532,6 +575,10 @@ int      g_arrowHead    = 0;    // next slot to write in the ring
 int      g_arrowUsed    = 0;    // how many slots hold a live arrow
 int      g_arrowLastSig = ENTRY_NONE; // signal we last drew for (re-arms on NONE)
 datetime g_arrowLastBar = 0;    // bar we last stamped an arrow on
+bool     g_entryClosed  = true; // grade entries on closed bars only
+int      g_backfillBars = 0;    // chart bars of history to reconstruct
+bool     g_backfillDone = false;
+int      g_backfillTries = 0;   // history may still be loading on pass 1
 
 ENUM_TIMEFRAMES g_tfs[MAX_TF];
 ENUM_TIMEFRAMES g_efs[MAX_ENTRY];   // entry timeframes
@@ -689,7 +736,16 @@ color SyncColor(int s)
 //| Pull the series for one symbol/timeframe and analyse it.         |
 //| Returns an ST_* state, or RES_INSUFFICIENT / RES_NODATA.         |
 //+------------------------------------------------------------------+
-int AnalyzeTF(string sym, ENUM_TIMEFRAMES tf, bool withAOI,
+// shift = how many of the newest bars of `tf` to skip before the window starts.
+//   shift 0 -> the window ends on the bar still forming (live, repaints)
+//   shift 1 -> the window ends on the last CLOSED bar
+//   shift k -> the series as it looked k bars ago
+// That single knob is what makes both closed-bar grading and an honest
+// backfill possible: the same function answers "what is true now, on closed
+// data" and "what was true at that moment, on the data that existed then".
+// Without it a backfill would have to apply today's zone to old bars, which
+// is pure lookahead.
+int AnalyzeTF(string sym, ENUM_TIMEFRAMES tf, bool withAOI, int shift,
               int &ageOut, double &hiOut, double &loOut, bool &staleOut,
               int &aoiTypeOut, int &aoiStateOut,
               double &aoiTopOut, double &aoiBotOut, datetime &aoiTimeOut)
@@ -704,10 +760,12 @@ int AnalyzeTF(string sym, ENUM_TIMEFRAMES tf, bool withAOI,
    aoiBotOut   = 0.0;
    aoiTimeOut  = 0;
 
+   if(shift < 0) shift = 0;
+
    int need = g_pivotsPerSide;
    if(need < 2) need = 2;
 
-   int total = iBars(sym, tf);
+   int total = iBars(sym, tf) - shift;      // bars usable once `shift` are skipped
    if(total < MinBarsNeeded(g_pivotLeft, g_pivotRight, need)) return(RES_NODATA);
 
    int want = MathMin(g_lookback, total);
@@ -722,10 +780,10 @@ int AnalyzeTF(string sym, ENUM_TIMEFRAMES tf, bool withAOI,
    int valid = want;
    for(int i = 0; i < want; i++)
      {
-      double   h = iHigh(sym, tf, i);
-      double   l = iLow(sym, tf, i);
-      double   c = iClose(sym, tf, i);
-      datetime t = iTime(sym, tf, i);
+      double   h = iHigh(sym, tf, i + shift);
+      double   l = iLow(sym, tf, i + shift);
+      double   c = iClose(sym, tf, i + shift);
+      datetime t = iTime(sym, tf, i + shift);
       if(h <= 0.0 || l <= 0.0 || c <= 0.0 || t <= 0)
         {
          valid = i;                 // broker history ends here
@@ -779,28 +837,73 @@ int AnalyzeTF(string sym, ENUM_TIMEFRAMES tf, bool withAOI,
 //| Analyse one symbol across all three timeframes.                  |
 //+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
-//| Index of the higher-timeframe zone price is trading in right now. |
-//| INSIDE always wins over TESTED, and Weekly wins over Daily.       |
-//| Returns 0 (W1), 1 (D1) or -1 when price is in neither.            |
+//| The W1/D1 zones entries are graded against.                       |
+//|                                                                   |
+//| Built with shift 1 - closed bars only. This is the half of the    |
+//| repaint fix that is easy to miss: the entry structure can be made |
+//| stable and the zone can still move underneath it, because a       |
+//| forming Weekly bar can invalidate the pivot the zone is built on. |
+//| So the zone geometry here cannot change until a W1/D1 bar closes. |
 //+------------------------------------------------------------------+
-int ZoneAtPrice(int idx)
+void ScanEntryZones(int idx)
   {
-   for(int t = 0; t < 2; t++)
+   for(int t = 0; t < MAX_TF; t++)
      {
-      if(g_syms[idx].data[t] == DATA_READY &&
-         g_syms[idx].aoiType[t] != AOI_NONE &&
-         g_syms[idx].aoiState[t] == AOI_INSIDE) return(t);
+      g_syms[idx].eZoneType[t]  = AOI_NONE;
+      g_syms[idx].eZoneState[t] = AOI_FRESH;
+      g_syms[idx].eZoneTop[t]   = 0.0;
+      g_syms[idx].eZoneBot[t]   = 0.0;
      }
 
-   if(!g_entryAllowTested) return(-1);
+   if(!g_scanEntries || !g_scanAOI) return;
+
+   int shift = g_entryClosed ? 1 : 0;
 
    for(int t = 0; t < 2; t++)
      {
-      if(g_syms[idx].data[t] == DATA_READY &&
-         g_syms[idx].aoiType[t] != AOI_NONE &&
-         g_syms[idx].aoiState[t] == AOI_TESTED) return(t);
+      int      age = 0;
+      double   hp = 0.0, lp = 0.0;
+      bool     stale = false;
+      int      aType = AOI_NONE, aState = AOI_FRESH;
+      double   aTop = 0.0, aBot = 0.0;
+      datetime aTime = 0;
+
+      int r = AnalyzeTF(g_syms[idx].symbol, g_tfs[t], true, shift,
+                        age, hp, lp, stale, aType, aState, aTop, aBot, aTime);
+      if(r == RES_NODATA) continue;
+
+      g_syms[idx].eZoneType[t]  = aType;
+      g_syms[idx].eZoneState[t] = aState;
+      g_syms[idx].eZoneTop[t]   = aTop;
+      g_syms[idx].eZoneBot[t]   = aBot;
      }
-   return(-1);
+  }
+
+//+------------------------------------------------------------------+
+//| Index of the zone `price` is trading in: 0 (W1), 1 (D1) or -1.    |
+//| INSIDE always wins over TESTED, and Weekly wins over Daily.       |
+//|                                                                   |
+//| The price is passed in rather than read here so the caller decides |
+//| the moment being judged. In closed-bar mode that is the last      |
+//| closed entry-timeframe close, which is what makes the signal      |
+//| change only when an M15 bar closes instead of tick by tick.       |
+//+------------------------------------------------------------------+
+int ZoneAtPrice(int idx, double price)
+  {
+   // copied into locals so the rule itself lives in one place (PickZone, in
+   // the gcc-tested core) and the backfill cannot drift away from it
+   int    zType[2], zState[2];
+   double zTop[2], zBot[2];
+   for(int t = 0; t < 2; t++)
+     {
+      zType[t]  = g_syms[idx].eZoneType[t];
+      zState[t] = g_syms[idx].eZoneState[t];
+      zTop[t]   = g_syms[idx].eZoneTop[t];
+      zBot[t]   = g_syms[idx].eZoneBot[t];
+     }
+
+   return(PickZone(zType, zState, zTop, zBot, 2, price,
+                   g_entryAllowTested ? 1 : 0));
   }
 
 //+------------------------------------------------------------------+
@@ -824,7 +927,16 @@ void ScanEntryTimeframes(int idx)
 
    if(!g_scanEntries || !g_scanAOI) return;
 
-   int zone = ZoneAtPrice(idx);
+   ScanEntryZones(idx);
+
+   // In closed-bar mode the signal is judged as of the last CLOSED bar of the
+   // first entry timeframe, so it cannot flicker inside a bar. That is the
+   // whole point: an arrow drawn on this signal is still valid at the close.
+   int    shift = g_entryClosed ? 1 : 0;
+   double price = iClose(g_syms[idx].symbol, g_entryClosed ? g_efs[0] : (ENUM_TIMEFRAMES)Period(),
+                         shift);
+
+   int zone = ZoneAtPrice(idx, price);
    if(zone < 0) return;
 
    for(int e = 0; e < MAX_ENTRY; e++)
@@ -837,7 +949,7 @@ void ScanEntryTimeframes(int idx)
       datetime aTime = 0;
 
       // entries never carry their own AOI - the zone is the higher timeframe's
-      int r = AnalyzeTF(g_syms[idx].symbol, g_efs[e], false,
+      int r = AnalyzeTF(g_syms[idx].symbol, g_efs[e], false, shift,
                         age, hp, lp, stale, aType, aState, aTop, aBot, aTime);
 
       if(r == RES_NODATA)
@@ -859,8 +971,11 @@ void ScanEntryTimeframes(int idx)
 
    for(int e = 0; e < MAX_ENTRY; e++) g_syms[idx].eSt[e] = est[e];
 
+   // eZoneType, not aoiType: aoiType follows the forming W1/D1 bar and feeds
+   // the panel. Grading an entry off it would let a bar that has not closed
+   // flip a signal from long to short.
    int eo[2];
-   EntrySignal(g_syms[idx].aoiType[zone], est[0], est[1], est[2],
+   EntrySignal(g_syms[idx].eZoneType[zone], est[0], est[1], est[2],
                g_entryMinConfirm, eo);
 
    g_syms[idx].entrySig     = eo[0];
@@ -885,8 +1000,10 @@ void ScanSymbol(int idx)
       datetime aTime = 0;
 
       // AOI is only tracked on the two higher timeframes (Weekly, Daily)
+      // shift 0 here is deliberate: the panel reports what is true right now,
+      // forming bar included. Only entry grading opts into closed bars.
       bool withAOI = (g_scanAOI && t < 2);
-      int  r = AnalyzeTF(g_syms[idx].symbol, g_tfs[t], withAOI,
+      int  r = AnalyzeTF(g_syms[idx].symbol, g_tfs[t], withAOI, 0,
                          age, hp, lp, stale, aType, aState, aTop, aBot, aTime);
 
       stLocal[t]              = ST_NONE;
@@ -1057,6 +1174,9 @@ void OnPassComplete()
    CheckEntryAlert();
    if(ShowPivotsOnChart) DrawChartPivots();
    DrawAOIZones();
+   // before the live arrows, so the ring buffer retires the oldest historical
+   // markers first and the live path picks up where the backfill left off
+   BackfillEntries();
    RenderEntryArrows();
 
    if(PrintResults)
@@ -1759,10 +1879,15 @@ void RememberArrow(string name)
    if(g_arrowUsed < g_arrowMax) g_arrowUsed++;
   }
 
-void DrawEntryArrow(int idx, datetime barTime)
+// One arrow. Everything that varies between "the bar forming now" and "a bar
+// three weeks ago during the backfill" is passed in, so the live path and the
+// historical path draw through exactly one piece of code rather than two that
+// can drift apart.
+void DrawEntryArrow(int idx, int sig, int zoneIdx, int confirm,
+                    datetime barTime, double barLow, double barHigh)
   {
-   int sig = g_syms[idx].entrySig;
    if(sig == ENTRY_NONE) return;
+   if(zoneIdx < 0 || zoneIdx >= MAX_TF) return;
 
    bool up   = (sig == ENTRY_LONG);
    // datetime is already a long and IntegerToString takes a long, so no cast:
@@ -1771,7 +1896,7 @@ void DrawEntryArrow(int idx, datetime barTime)
    if(ObjectFind(0, nm) >= 0) return;         // already stamped on this bar
 
    double off   = g_arrowPoints * _Point;
-   double price = up ? iLow(Symbol(), 0, 0) - off : iHigh(Symbol(), 0, 0) + off;
+   double price = up ? barLow - off : barHigh + off;
    if(price <= 0.0) return;
 
    if(!ObjectCreate(0, nm, OBJ_ARROW, 0, barTime, price)) return;
@@ -1788,9 +1913,9 @@ void DrawEntryArrow(int idx, datetime barTime)
    ObjectSetInteger(0, nm, OBJPROP_BACK,       false);
    ObjectSetString (0, nm, OBJPROP_TOOLTIP,
                     (up ? "LONG" : "SHORT") + " entry | " + g_syms[idx].symbol +
-                    " | in " + TFLabel(g_tfs[g_syms[idx].entryTF]) +
-                    ((g_syms[idx].aoiType[g_syms[idx].entryTF] == AOI_DEMAND) ? " DEMAND" : " SUPPLY") +
-                    " zone | " + IntegerToString(g_syms[idx].entryConfirm) + "/" +
+                    " | in " + TFLabel(g_tfs[zoneIdx]) +
+                    ((g_syms[idx].eZoneType[zoneIdx] == AOI_DEMAND) ? " DEMAND" : " SUPPLY") +
+                    " zone | " + IntegerToString(confirm) + "/" +
                     IntegerToString(MAX_ENTRY) + " entry TFs agree");
 
    RememberArrow(nm);
@@ -1812,12 +1937,16 @@ void RenderEntryArrows()
 
    int sig = g_syms[ci].entrySig;
 
+   double barLow  = iLow(Symbol(), 0, 0);
+   double barHigh = iHigh(Symbol(), 0, 0);
+
    if(EntryArrowEveryBar)
      {
       // one arrow per bar the signal is alive on
       if(barTime != g_arrowLastBar && sig != ENTRY_NONE)
         {
-         DrawEntryArrow(ci, barTime);
+         DrawEntryArrow(ci, sig, g_syms[ci].entryTF, g_syms[ci].entryConfirm,
+                        barTime, barLow, barHigh);
          g_arrowLastBar = barTime;
         }
      }
@@ -1825,10 +1954,183 @@ void RenderEntryArrows()
      {
       // only the bar the signal first appeared on, so a signal that holds
       // for six bars leaves one marker rather than a stripe of them
-      if(sig != ENTRY_NONE && sig != g_arrowLastSig) DrawEntryArrow(ci, barTime);
+      if(sig != ENTRY_NONE && sig != g_arrowLastSig)
+         DrawEntryArrow(ci, sig, g_syms[ci].entryTF, g_syms[ci].entryConfirm,
+                        barTime, barLow, barHigh);
      }
 
    g_arrowLastSig = sig;                     // falling back to NONE re-arms
+  }
+
+//+------------------------------------------------------------------+
+//| Reconstruct past signals, honestly.                               |
+//|                                                                   |
+//| For every chart bar this rebuilds the Weekly/Daily zone AND the   |
+//| M15/M30/H1 structure AS THEY WERE at that moment, by telling      |
+//| AnalyzeTF to skip every bar of those timeframes that had not      |
+//| closed yet. Nothing from after the bar is ever read, so an arrow  |
+//| here was knowable when it happened.                               |
+//|                                                                   |
+//| The cheap alternative - applying today's zone to old bars - would |
+//| be pure lookahead and would make the arrows look far better than  |
+//| live trading ever could. That is deliberately not what this does. |
+//|                                                                   |
+//| Cost: 5 timeframe analyses per bar. EntryBackfillBars is the      |
+//| throttle; it runs once, on the first pass with enough history.    |
+//+------------------------------------------------------------------+
+void BackfillEntries()
+  {
+   if(g_backfillDone) return;
+   if(!g_scanEntries || !g_scanAOI || !DrawEntryArrows || !EntryBackfill)
+     {
+      g_backfillDone = true;                 // nothing will ever enable it now
+      return;
+     }
+   if(g_backfillBars < 1)
+     {
+      g_backfillDone = true;
+      return;
+     }
+
+   string sym  = Symbol();
+   int    ci   = FindIdx(sym);
+   if(ci < 0) return;                        // chart symbol not scanned yet
+
+   int bars = iBars(sym, 0);
+   // +4 so bar k+1 exists for the price test and there is room to spare
+   if(bars < g_backfillBars + 4)
+     {
+      if(++g_backfillTries >= 10) g_backfillDone = true;   // history never came
+      return;
+     }
+
+   // Readiness is judged once, on the newest bar. If the Weekly history is not
+   // downloaded yet we retry on a later pass, and stop trying after ten.
+   //
+   // Judging it per bar instead would be wrong in both directions: an old bar
+   // that simply predates the available Weekly history would abort the whole
+   // backfill and draw nothing at all.
+   int need      = g_pivotsPerSide;
+   if(need < 2)  need = 2;
+   // datetime throughout - narrowing it to int to hold a time is the same
+   // 2038 truncation bug this file already had once
+   datetime probeTime = iTime(sym, 0, 1);
+   int      probe     = (probeTime > 0) ? iBarShift(sym, g_tfs[0], probeTime, false) : -1;
+   if(probe < 0 || iBars(sym, g_tfs[0]) - (probe + 1) < MinBarsNeeded(g_pivotLeft, g_pivotRight, need))
+     {
+      if(++g_backfillTries >= 10) g_backfillDone = true;   // history never came
+      return;
+     }
+
+   int prevSig = ENTRY_NONE;
+   int drawn   = 0;
+
+   // oldest -> newest, so when the ring buffer fills it retires the oldest
+   // markers and the ones that survive are the most recent
+   for(int k = g_backfillBars; k >= 1; k--)
+     {
+      datetime t = iTime(sym, 0, k);
+      if(t <= 0) continue;
+
+      // The last price known BEFORE bar k opened. Using bar k's own close
+      // here would be reading the future relative to the decision point.
+      double price = iClose(sym, 0, k + 1);
+      if(price <= 0.0) continue;
+
+      // ---- the W1/D1 zones as they stood then ------------------------
+      int    zType[2], zState[2];
+      double zTop[2], zBot[2];
+      for(int z = 0; z < 2; z++)
+        {
+         zType[z] = AOI_NONE; zState[z] = AOI_FRESH; zTop[z] = 0.0; zBot[z] = 0.0;
+        }
+
+      bool zonesReady = false;
+      for(int z = 0; z < 2; z++)
+        {
+         int zs = iBarShift(sym, g_tfs[z], t, false);
+         if(zs < 0) continue;
+
+         int      age = 0;
+         double   hp = 0.0, lp = 0.0;
+         bool     stale = false;
+         int      aType = AOI_NONE, aState = AOI_FRESH;
+         double   aTop = 0.0, aBot = 0.0;
+         datetime aTime = 0;
+
+         // zs + 1: the bar holding `t` was still open at `t`, so it is skipped
+         int r = AnalyzeTF(sym, g_tfs[z], true, zs + 1,
+                           age, hp, lp, stale, aType, aState, aTop, aBot, aTime);
+         if(r == RES_NODATA) continue;
+
+         zonesReady = true;
+         zType[z]  = aType;
+         zState[z] = aState;
+         zTop[z]   = aTop;
+         zBot[z]   = aBot;
+        }
+
+      // this bar simply predates the higher-timeframe history - skip it and
+      // keep going rather than giving up on the rest of the reconstruction
+      if(!zonesReady)
+        {
+         prevSig = ENTRY_NONE;
+         continue;
+        }
+
+      int zone = PickZone(zType, zState, zTop, zBot, 2, price,
+                          g_entryAllowTested ? 1 : 0);
+      if(zone < 0)
+        {
+         prevSig = ENTRY_NONE;
+         continue;
+        }
+
+      // ---- the M15/M30/H1 structure as it stood then -----------------
+      int est[MAX_ENTRY];
+      for(int e = 0; e < MAX_ENTRY; e++)
+        {
+         int es = iBarShift(sym, g_efs[e], t, false);
+         if(es < 0) { est[e] = ST_NONE; continue; }
+
+         // distinct names from the zone loop above: both blocks are siblings
+         // in one function, and MQL4's handling of repeated declarations in
+         // sibling scopes is not something this repo can compile-check
+         int      eAge = 0;
+         double   eHp = 0.0, eLp = 0.0;
+         bool     eStale = false;
+         int      eType = AOI_NONE, eState = AOI_FRESH;
+         double   eTop = 0.0, eBot = 0.0;
+         datetime eTime = 0;
+
+         int r = AnalyzeTF(sym, g_efs[e], false, es + 1,
+                           eAge, eHp, eLp, eStale, eType, eState, eTop, eBot, eTime);
+         if(r == RES_NODATA)            est[e] = ST_NONE;
+         else if(r == RES_INSUFFICIENT) est[e] = ST_FEW;
+         else                           est[e] = r;
+        }
+
+      int eo[2];
+      EntrySignal(zType[zone], est[0], est[1], est[2], g_entryMinConfirm, eo);
+
+      int sig = eo[0];
+      if(sig != ENTRY_NONE && (EntryArrowEveryBar || sig != prevSig))
+        {
+         DrawEntryArrow(ci, sig, zone, eo[1], t,
+                        iLow(sym, 0, k), iHigh(sym, 0, k));
+         drawn++;
+        }
+      prevSig = sig;
+     }
+
+   // hand continuity to the live path: if the newest reconstructed signal is
+   // still running, do not stamp a second arrow for the same one
+   g_arrowLastSig = prevSig;
+   g_arrowLastBar = 0;
+   g_backfillDone = true;
+
+   Print("MSS backfill: reconstructed ", g_backfillBars, " bars of ", sym,
+         ", ", drawn, " entry arrow(s) drawn (kept: most recent ", g_arrowMax, ")");
   }
 
 //+------------------------------------------------------------------+
@@ -1964,6 +2266,12 @@ int OnInit()
    g_scanEntries     = ScanEntries;
    g_entryMinConfirm = MathMax(1, MathMin(MAX_ENTRY, EntryMinConfirm));
    g_entryAllowTested = EntryAllowTested;
+   g_entryClosed     = EntryUseClosedBars;
+   // 5000 bars x 5 timeframe analyses each is already slow enough on a cold
+   // start; anything past that is a footgun rather than a feature
+   g_backfillBars    = MathMax(0, MathMin(5000, EntryBackfillBars));
+   g_backfillDone    = false;
+   g_backfillTries   = 0;
    g_arrowPoints     = MathMax(1, MathMin(5000, EntryArrowPoints));
    g_arrowMax        = MathMax(1, MathMin(500, EntryArrowMax));
    g_arrowLastBar    = 0;

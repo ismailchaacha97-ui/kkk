@@ -34,7 +34,7 @@ BUILTINS = {
     # time
     "TimeCurrent", "TimeToString", "PeriodSeconds",
     # series access
-    "iBars", "iHigh", "iLow", "iClose", "iTime",
+    "iBars", "iHigh", "iLow", "iClose", "iTime", "iBarShift",
     # symbols
     "Symbol", "Period", "SymbolsTotal", "SymbolName", "SymbolSelect",
     "SymbolInfoInteger",

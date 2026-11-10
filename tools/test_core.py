@@ -98,7 +98,7 @@ def extract_core(path):
     # "FindAOI" and would otherwise slip through this guard.
     for fn in ("IsPivotHigh", "IsPivotLow", "CollectPivots",
                "ClassifyStructure", "SyncOf", "MinBarsNeeded", "AnalyzeSeries",
-               "FindAOI", "EntrySignal"):
+               "FindAOI", "EntrySignal", "PickZone"):
         if not re.search(r"(?<![A-Za-z0-9_])" + re.escape(fn) + r"\s*\(", body):
             raise SystemExit("expected function %s inside the CORE block" % fn)
 
@@ -362,6 +362,81 @@ ENTRY_CASES = [
     ("min99_clamps_to_3",          AOI_DEMAND, (ST_BULL, ST_BULL, ST_BULL), 99, (ENTRY_LONG, 3)),
     ("min99_blocked_by_two",       AOI_DEMAND, (ST_BULL, ST_BULL, ST_NONE), 99, (ENTRY_NONE, 2)),
     ("negative_min_clamps",        AOI_SUPPLY, (ST_BEAR, ST_NONE, ST_NONE), -5, (ENTRY_SHORT, 1)),
+]
+
+
+# --------------------------------------------------------------------------
+# PickZone fixtures: (name, zones, price, allowTested, expected index)
+#
+# Each zone is (type, state, top, bottom). Index 0 is the higher timeframe,
+# so "weekly wins" means index 0 is returned whenever it qualifies.
+#
+# The zone used for entries is built from closed bars, so the geometry here
+# is stable and only `price` moves. That split is the whole point of these
+# cases: the inside test is live, the zone is not.
+# --------------------------------------------------------------------------
+D1 = (AOI_DEMAND, AOI_INSIDE, 1.0750, 1.0600)
+W1 = (AOI_DEMAND, AOI_INSIDE, 1.1000, 1.0800)
+ZONE_CASES = [
+    ("inside_weekly_only",        [W1, D1], 1.0900, 0, 0),
+    ("inside_daily_only",         [W1, D1], 1.0700, 0, 1),
+    # overlapping zones: both contain the price, the higher timeframe must win
+    ("inside_both_weekly_wins",   [W1, (AOI_DEMAND, AOI_INSIDE, 1.1200, 1.0900)],
+                                  1.0950, 0, 0),
+    ("outside_both",              [W1, D1], 1.2000, 0, -1),
+    # the range is inclusive at both ends - a touch on the edge counts
+    ("exactly_on_weekly_top",     [W1, D1], 1.1000, 0, 0),
+    ("exactly_on_weekly_bottom",  [W1, D1], 1.0800, 0, 0),
+    ("just_above_weekly_top",     [W1, D1], 1.1001, 0, -1),
+    ("just_below_daily_bottom",   [W1, D1], 1.0599, 0, -1),
+    # price 0 means unknown; an INSIDE match needs a real price
+    ("unknown_price_never_inside", [W1, D1], 0.0, 0, -1),
+    ("unknown_price_can_be_tested",
+                                  [(AOI_DEMAND, AOI_TESTED, 1.1000, 1.0800), D1],
+                                  0.0, 1, 0),
+    # an INSIDE zone outranks a TESTED one even when the TESTED zone is higher
+    ("inside_beats_tested",
+                                  [(AOI_SUPPLY, AOI_TESTED, 1.1000, 1.0800), D1],
+                                  1.0700, 1, 1),
+    ("tested_fallback_picks_higher",
+                                  [(AOI_DEMAND, AOI_TESTED, 1.1000, 1.0800),
+                                   (AOI_SUPPLY, AOI_TESTED, 1.0750, 1.0600)],
+                                  5.0, 1, 0),
+    ("tested_fallback_disabled",
+                                  [(AOI_DEMAND, AOI_TESTED, 1.1000, 1.0800), D1],
+                                  5.0, 0, -1),
+    # allowTested is a strict flag, not a truthiness test
+    ("allow_tested_must_be_one",
+                                  [(AOI_DEMAND, AOI_TESTED, 1.1000, 1.0800), D1],
+                                  5.0, 2, -1),
+    # a zone with no direction is skipped in both loops, even when the price
+    # sits inside its range
+    ("none_type_skipped_when_inside",
+                                  [(AOI_NONE, AOI_INSIDE, 1.1000, 1.0800),
+                                   (AOI_NONE, AOI_INSIDE, 1.0750, 1.0600)],
+                                  1.0900, 1, -1),
+    ("none_type_skipped_in_tested",
+                                  [(AOI_NONE, AOI_TESTED, 1.1000, 1.0800),
+                                   (AOI_DEMAND, AOI_TESTED, 1.0750, 1.0600)],
+                                  5.0, 1, 1),
+    # the weekly zone has no direction, so it is skipped and the daily one is
+    # reached - the price is inside the DAILY range here, not the weekly one
+    ("weekly_none_lets_daily_through",
+                                  [(AOI_NONE, AOI_INSIDE, 1.1000, 1.0800), D1],
+                                  1.0700, 0, 1),
+    # a SPENT zone has been broken - price in its range is not a setup
+    ("spent_zone_is_not_inside",
+                                  [(AOI_DEMAND, AOI_SPENT, 1.1000, 1.0800), D1],
+                                  5.0, 1, -1),
+    # price 0 is the "unknown" sentinel (iClose returns it when there is no
+    # data). Without a zone that spans zero this guard is untestable, so here
+    # is one: an unknown price must not match a zone it happens to cover.
+    ("zero_is_unknown_not_a_price",
+                                  [(AOI_DEMAND, AOI_INSIDE, 5.0000, -5.0000)],
+                                  0.0, 0, -1),
+    ("real_zero_price_would_match_if_known",
+                                  [(AOI_DEMAND, AOI_INSIDE, 5.0000, -5.0000)],
+                                  0.0001, 0, 0),
 ]
 
 
@@ -716,6 +791,28 @@ static void expect_near(const char *label, double got, double want)
     out.append("}")
     out.append("")
 
+    # --- PickZone ----------------------------------------------------------
+    out.append("static void run_zone(void)")
+    out.append("{")
+    out.append('  printf("\\n[PickZone] which zone price is trading in\\n");')
+    for name, zones, price, allow, want in ZONE_CASES:
+        n = len(zones)
+        zt = ", ".join(str(z[0]) for z in zones)
+        zs = ", ".join(str(z[1]) for z in zones)
+        zp = ", ".join("%.6f" % z[2] for z in zones)
+        zb = ", ".join("%.6f" % z[3] for z in zones)
+        out.append("  {")
+        out.append("    int    zt[4] = {%s, 0, 0, 0};" % zt)
+        out.append("    int    zs[4] = {%s, 0, 0, 0};" % zs)
+        out.append("    double zp[4] = {%s, 0.0, 0.0, 0.0};" % zp)
+        out.append("    double zb[4] = {%s, 0.0, 0.0, 0.0};" % zb)
+        out.append("    int r = PickZone(zt, zs, zp, zb, %d, %.6f, %d);"
+                   % (n, price, allow))
+        out.append('    expect_int("%s", r, %d);' % (name, want))
+        out.append("  }")
+    out.append("}")
+    out.append("")
+
     out.append("""
 int main(void)
 {
@@ -729,6 +826,7 @@ int main(void)
   run_sync();
   run_aoi();
   run_entry();
+  run_zone();
   printf("\\n%d passed, %d failed\\n", g_pass, g_fail);
   return g_fail == 0 ? 0 : 1;
 }

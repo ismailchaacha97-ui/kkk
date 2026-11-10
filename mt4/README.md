@@ -39,9 +39,24 @@ For each symbol and each of the three timeframes:
 
 1. **Swing points** are found as fractal pivots. A bar is a swing high when it
    is higher than `PivotLeft` bars on its newer side and `PivotRight` bars on
-   its older side (lows are mirrored). `PivotRight` is what makes a swing
-   *confirmed* — the scanner never repaints off an unfinished pivot. On a flat
-   top the **newest** bar of the plateau is taken as the pivot.
+   its older side (lows are mirrored). On a flat top the **newest** bar of the
+   plateau is taken as the pivot.
+
+   **The panel path does repaint, and this is worth understanding.** `PivotRight`
+   confirms a swing against *older* bars, which is safe. But `PivotLeft`
+   confirms it against *newer* bars, and with index 0 being the bar still
+   forming, the unclosed bar takes part in that comparison. If the forming bar
+   runs past a pivot, that pivot stops being a pivot. Measured on the real core
+   with gcc — identical closed history, only bar 0 changed:
+
+   ```
+   as the broker prints it now               state=ST_BULL     swingHigh=118.00
+   bar 0 high pushed above the swing high    state=RES_NODATA  swingHigh=  0.00
+   ```
+
+   A confirmed `HH HL` structure vanished. So treat the panel's newest columns
+   as provisional until the bar closes. **Entry grading opts out of this** — see
+   [Entry arrows on the chart](#entry-arrows-on-the-chart).
 2. The **last swing high is compared with the previous swing high**, and the
    **last swing low with the previous swing low**:
 
@@ -190,14 +205,64 @@ alive on instead.
 
 `EntryArrowMax` (clamped 1–500) caps how many arrows stay on the chart; the
 oldest is retired first. `EntryArrowPoints` (clamped 1–5000) is the offset from
-the bar, in points.
+the bar, in points. Note the cap applies to the backfill too — with
+`EntryBackfillBars = 300` you may find 300 bars of signals but only keep the
+most recent `EntryArrowMax` of them, so raise that setting if you want to see
+further back.
 
-**These arrows are not a backtest.** The scanner keeps no history of what the
-entry timeframes looked like on past bars, so it cannot claim a signal existed
-back there. An arrow means "an entry was valid here, detected on this bar" —
-not "this is where you should have entered". Arrows only ever appear at the
-right-hand edge and accumulate forward from the moment you attach the
-indicator.
+### Do the arrows repaint?
+
+**The arrows do not. The signal they record used to, and now does not.**
+
+An arrow, once stamped, is permanent: `DrawEntryArrow` returns early if the
+object already exists, the name is pinned to its bar's timestamp, and nothing
+ever repositions one. That is exactly why the repaint mattered — a signal that
+flickered into existence mid-bar got stamped, and then stayed on the chart
+forever even though no signal existed at the close. A repainting indicator at
+least corrects itself; a permanent arrow does not.
+
+So with `EntryUseClosedBars = true` (the default) entries are graded on
+**closed bars only**:
+
+* the M15/M30/H1 structure is read from the last *closed* bar of each, so the
+  forming bar can neither create nor destroy a signal;
+* the Weekly/Daily zone is rebuilt from closed bars as well — the half that is
+  easy to miss, since a forming Weekly bar can invalidate the very pivot the
+  zone is built on;
+* the inside test uses the last closed entry-timeframe close rather than the
+  live tick, so the signal changes only when a bar closes.
+
+The trade-off is deliberate: **signals appear up to one M15 bar later**, and in
+exchange every arrow on your chart was still true at its bar's close. Set
+`EntryUseClosedBars = false` to get the old tick-reactive behaviour back, and
+with it the repainting.
+
+The panel's AOI columns still follow the forming bar on purpose — they report
+what is true right now. Only entry grading opts into closed bars.
+
+### Past signals
+
+`EntryBackfill = true` reconstructs past signals on load and draws them as
+arrows, scanning back `EntryBackfillBars` (clamped 0–5000) chart bars.
+
+This is the honest version, not the cheap one. For each past bar it rebuilds
+the Weekly/Daily zone **and** the M15/M30/H1 structure *as they were at that
+moment*, by telling the analyser to skip every bar of those timeframes that had
+not closed yet. Nothing from after the bar is ever read — the price test uses
+the close of the bar *before*, the one that was already known. An arrow in the
+backfill was knowable when it happened.
+
+The tempting alternative is to apply today's zone to old bars. That is pure
+lookahead, and it would make the chart look far better than live trading ever
+could, so it is deliberately not offered.
+
+It costs five timeframe analyses per bar and runs once, on the first pass that
+has enough history (it retries while history is still downloading, then gives
+up after ten attempts). A line is printed to the log when it finishes:
+
+```
+MSS backfill: reconstructed 300 bars of EURUSD, 14 entry arrow(s) drawn (kept: most recent 50)
+```
 
 ---
 
@@ -233,6 +298,9 @@ indicator.
 | `EntryArrowEveryBar` | `false` | `false` = only the bar the signal appeared on; `true` = every bar it is alive on |
 | `EntryArrowPoints` | `100` | Arrow offset from the bar, in points (clamped 1–5000) |
 | `EntryArrowMax` | `50` | How many arrows to keep on the chart before retiring the oldest (clamped 1–500) |
+| `EntryUseClosedBars` | `true` | Grade entries on closed bars only — no repaint, signals up to one M15 bar later |
+| `EntryBackfill` | `true` | Reconstruct and draw past signals on load |
+| `EntryBackfillBars` | `300` | Chart bars of history to reconstruct (clamped 0–5000) |
 
 **Note on broker suffixes.** If your broker uses `EURUSD.m` / `EURUSDm`,
 `IncludeFilter` matching is a plain substring test, so `EUR` still matches.
@@ -265,10 +333,10 @@ different program.
 
 ```
 $ python3 tools/test_core.py
-extracted CORE verbatim (13914 chars); stripped '&' from 26 array parameter
+extracted CORE verbatim (15022 chars); stripped '&' from 30 array parameter
 declarations for C, nothing else changed
 ...
-287 passed, 0 failed
+307 passed, 0 failed
 ```
 
 Covered: clean up/down trends, expanding and contracting ranges, 2-pivot and
@@ -281,21 +349,25 @@ must *not* count as a touch, `AOI_ANY` recency in both directions, the
 lookback clamp, zone levels and pivot time, and the guards — and
 `EntrySignal`: both zone polarities, every confirm threshold and the ones just
 either side of it, sideways structure never confirming, an undirected zone
-never producing a signal in *either* polarity, and the `minConfirm` clamps.
+never producing a signal in *either* polarity, and the `minConfirm` clamps;
+and `PickZone`: which zone price is in when two overlap, the inclusive zone
+edges, `AOI_NONE` and `AOI_SPENT` zones being skipped, `INSIDE` outranking
+`TESTED`, the higher timeframe outranking the lower, and the unknown-price
+sentinel being refused by a zone that happens to span zero.
 
 **1b. Those tests are checked against deliberately broken code.** A green suite
 only means something if it goes red when the code is wrong, so
-`tools/mutate_check.py` applies 17 small defects to `FindAOI` and
-`EntrySignal`, re-runs the suite after each one, requires every one to be
+`tools/mutate_check.py` applies 26 small defects to `FindAOI`,
+`EntrySignal` and `PickZone`, re-runs the suite after each one, requires every one to be
 caught *by a failing assertion* (a compile error does not count as a catch),
 and restores the file afterwards.
 
 ```
 $ python3 tools/mutate_check.py
-baseline (unmutated)     : 287 passed, 0 failed  [pass]
+baseline (unmutated)     : 307 passed, 0 failed  [pass]
   INSIDE ignores the zone ceiling                      CAUGHT  [257 passed, 6 failed]
   ...
-ok: all 17 mutations were caught by the core fixtures
+ok: all 26 mutations were caught by the core fixtures
 ```
 
 This is not decoration, and it has caught real gaps twice. The first draft of
@@ -313,14 +385,14 @@ so those are checked statically:
 
 ```
 $ python3 tools/lint_mq4.py
-lint ok: brackets balanced; 47 external calls and 49 constants recognised;
+lint ok: brackets balanced; 48 external calls and 49 constants recognised;
 no input/function/global name collisions; anchor enums match their object
-type; all 66 settings referenced
+type; all 69 settings referenced
 ```
 
 ```
 $ python3 tools/check_mql4_api.py     # ~10 min, uses the GitHub code-search API
-97 ok, 0 with zero hits, 0 query failures
+98 ok, 0 with zero hits, 0 query failures
 ```
 
 The second script cross-checks every MQL4 built-in and constant the file uses
