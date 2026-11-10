@@ -13,6 +13,7 @@ Usage:  python3 tools/test_core.py
 
 import math
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -39,6 +40,47 @@ STATE_NAMES = {
 # --------------------------------------------------------------------------
 # extract the shipping code
 # --------------------------------------------------------------------------
+# MQL4 requires `&` on every array parameter (`double &high[]`); C has no such
+# syntax. Stripping that one character from parameter declarations is the ONLY
+# edit made to the shipping code before compiling it here. The regex is
+# deliberately narrow: a type keyword, then `&`, then `identifier[]`.
+ARRAY_PARAM = re.compile(
+    r"\b(double|long|int|ushort|datetime|bool|string|float|char|color)"
+    r"\s+&\s*(\w+)\s*(\[\s*\])")
+
+
+def core_to_c(core):
+    return ARRAY_PARAM.sub(r"\1 \2\3", core)
+
+
+def assert_faithful(core, c_core):
+    """Prove the C we compile differs from the .mq4 only by removed `&`.
+
+    Independent of ARRAY_PARAM: we re-derive the same result from the original
+    text using a whitespace-insensitive pattern and require an exact match.
+    """
+    removed = core.count("&") - c_core.count("&")
+    expected = len(ARRAY_PARAM.findall(core))
+    if removed != expected:
+        raise SystemExit("integrity check failed: removed %d '&' but the array-param "
+                         "regex matched %d" % (removed, expected))
+    if core.count("&&") != c_core.count("&&"):
+        raise SystemExit("integrity check failed: a logical '&&' operator was altered")
+
+    squeeze = lambda s: re.sub(r"\s+", "", s)
+    squeezed_pattern = re.compile(
+        r"(double|long|int|ushort|datetime|bool|string|float|char|color)&(\w+)(\[\])")
+    n_sub = len(squeezed_pattern.findall(squeeze(core)))
+    if n_sub != expected:
+        raise SystemExit("integrity check failed: whitespace-insensitive pattern found "
+                         "%d array params, the other found %d" % (n_sub, expected))
+    derived = squeezed_pattern.sub(r"\1\2\3", squeeze(core))
+    if derived != squeeze(c_core):
+        raise SystemExit("integrity check failed: the compiled C is not the .mq4 core "
+                         "with only '&' removed")
+    return removed
+
+
 def extract_core(path):
     with open(path, "r", encoding="utf-8") as fh:
         src = fh.read()
@@ -52,7 +94,12 @@ def extract_core(path):
                "ClassifyStructure", "SyncOf", "MinBarsNeeded", "AnalyzeSeries"):
         if fn not in body:
             raise SystemExit("expected function %s inside the CORE block" % fn)
-    return body
+
+    c_body = core_to_c(body)
+    n = assert_faithful(body, c_body)
+    print("extracted CORE verbatim (%d chars); stripped '&' from %d array "
+          "parameter declarations for C, nothing else changed" % (len(body), n))
+    return c_body
 
 
 # --------------------------------------------------------------------------

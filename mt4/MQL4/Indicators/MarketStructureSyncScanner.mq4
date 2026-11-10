@@ -54,7 +54,7 @@
 //| Plateau rule: the NEWEST bar of a flat top is the pivot, so the  |
 //| pivot must be > every newer bar and >= every older bar.          |
 //+------------------------------------------------------------------+
-int IsPivotHigh(double high[], int total, int i, int leftBars, int rightBars)
+int IsPivotHigh(double &high[], int total, int i, int leftBars, int rightBars)
   {
    if(i - leftBars < 0)          return(0);
    if(i + rightBars >= total)    return(0);
@@ -72,7 +72,7 @@ int IsPivotHigh(double high[], int total, int i, int leftBars, int rightBars)
 //| True when bar i is a confirmed swing low (mirror of the above).  |
 //| The newest bar of a flat bottom is the pivot.                    |
 //+------------------------------------------------------------------+
-int IsPivotLow(double low[], int total, int i, int leftBars, int rightBars)
+int IsPivotLow(double &low[], int total, int i, int leftBars, int rightBars)
   {
    if(i - leftBars < 0)         return(0);
    if(i + rightBars >= total)   return(0);
@@ -92,10 +92,10 @@ int IsPivotLow(double low[], int total, int i, int leftBars, int rightBars)
 //| Index 0 of every output array is the MOST RECENT pivot.          |
 //| Returns the number of pivots collected per side, or -1.          |
 //+------------------------------------------------------------------+
-int CollectPivots(double high[], double low[], long tArr[], int total,
+int CollectPivots(double &high[], double &low[], long &tArr[], int total,
                   int leftBars, int rightBars, int need, int maxLookback,
-                  double hiP[], long hiT[], int hiS[],
-                  double loP[], long loT[], int loS[])
+                  double &hiP[], long &hiT[], int &hiS[],
+                  double &loP[], long &loT[], int &loS[])
   {
    int start = leftBars;
    int stop  = total - rightBars - 1;
@@ -132,7 +132,7 @@ int CollectPivots(double high[], double low[], long tArr[], int total,
 //| comps = number of consecutive comparisons (pivots per side - 1). |
 //| hiP[0] / loP[0] are the newest pivots.                           |
 //+------------------------------------------------------------------+
-int ClassifyStructure(double hiP[], double loP[], int comps)
+int ClassifyStructure(double &hiP[], double &loP[], int comps)
   {
    if(comps < 1) return(ST_NONE);
 
@@ -181,9 +181,9 @@ int MinBarsNeeded(int leftBars, int rightBars, int need)
 //|   out[2] = 1 when that age exceeds maxAge (stale structure)      |
 //|   outP[0] = newest swing high price, outP[1] = newest swing low  |
 //+------------------------------------------------------------------+
-int AnalyzeSeries(double high[], double low[], long tArr[], int total,
+int AnalyzeSeries(double &high[], double &low[], long &tArr[], int total,
                   int leftBars, int rightBars, int need, int maxLookback, int maxAge,
-                  int out[], double outP[])
+                  int &out[], double &outP[])
   {
    out[0]  = RES_NODATA;
    out[1]  = 0;
@@ -525,7 +525,7 @@ void ScanSymbol(int idx)
   {
    if(idx < 0 || idx >= g_symCount) return;
 
-   int stLocal[MAX_TF];
+   int stLocal[MAX_TF] = {ST_NONE, ST_NONE, ST_NONE};
    int readyCount = 0;
 
    for(int t = 0; t < MAX_TF; t++)
@@ -1077,7 +1077,12 @@ void ClearChartPivots()
    ObjectsDeleteAll(0, PREFIX + "PL");
   }
 
-void DrawDot(string name, datetime t, double price, color clr, ENUM_ANCHOR_POINT anchor)
+//+------------------------------------------------------------------+
+//| OBJ_ARROW uses ENUM_ARROW_ANCHOR (ANCHOR_TOP / ANCHOR_BOTTOM),   |
+//| which is a different enum from the ENUM_ANCHOR_POINT used by     |
+//| OBJ_LABEL - do not mix them.                                     |
+//+------------------------------------------------------------------+
+void DrawDot(string name, datetime t, double price, color clr, ENUM_ARROW_ANCHOR anchor)
   {
    if(ObjectFind(0, name) < 0)
      {
@@ -1097,7 +1102,7 @@ void DrawDot(string name, datetime t, double price, color clr, ENUM_ANCHOR_POINT
 void DrawChartPivots()
   {
    string          sym = Symbol();
-   ENUM_TIMEFRAMES tf  = Period();
+   ENUM_TIMEFRAMES tf  = (ENUM_TIMEFRAMES)Period();
 
    int need = g_chartPivots;
    if(need < 2) need = 2;
@@ -1140,8 +1145,10 @@ void DrawChartPivots()
 
    for(int i = 0; i < need; i++)
      {
-      DrawDot(PREFIX + "PH" + IntegerToString(i), (datetime)hiT[i], hiP[i], ColorSwingHigh, ANCHOR_BOTTOM);
-      DrawDot(PREFIX + "PL" + IntegerToString(i), (datetime)loT[i], loP[i], ColorSwingLow,  ANCHOR_TOP);
+      // ANCHOR_TOP pins the top of the icon to the price, so the dot hangs
+      // BELOW a swing high; ANCHOR_BOTTOM makes it sit ABOVE a swing low.
+      DrawDot(PREFIX + "PH" + IntegerToString(i), (datetime)hiT[i], hiP[i], ColorSwingHigh, ANCHOR_TOP);
+      DrawDot(PREFIX + "PL" + IntegerToString(i), (datetime)loT[i], loP[i], ColorSwingLow,  ANCHOR_BOTTOM);
      }
   }
 
