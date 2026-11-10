@@ -162,6 +162,32 @@ def main():
     for c in unknown_caps:
         fails.append("'%s' is neither #defined here nor a known MQL4 constant" % c)
 
+    # ---- 2c. namespace collisions ----------------------------------------
+    # MQL4 keeps global variables, inputs and functions in one namespace, so an
+    # input and a function cannot share a name. This is invisible to every
+    # other check here: the call still "resolves" to something, and the API
+    # cross-check only ever looks names up in other people's files.
+    func_names = {}
+    for m in re.finditer(r"^\s*[A-Za-z_][\w]*\s+([A-Za-z_]\w*)\s*\(", clean, re.M):
+        func_names.setdefault(m.group(1), clean[:m.start()].count("\n") + 1)
+    global_names = {}
+    for m in re.finditer(
+            r"^\s*(?:int|void|bool|string|double|datetime|color|long)\s+(g_\w+)\s*[\[;=]",
+            clean, re.M):
+        global_names.setdefault(m.group(1), clean[:m.start()].count("\n") + 1)
+    input_names = {}
+    for m in re.finditer(r"^\s*input\s+[\w<>]+\s+(\w+)\s*=", clean, re.M):
+        input_names.setdefault(m.group(1), clean[:m.start()].count("\n") + 1)
+
+    for label, others in (("a function", func_names), ("a global", global_names)):
+        for name in sorted(set(input_names) & set(others)):
+            fails.append("input '%s' (line %d) collides with %s of the same name "
+                         "(line %d) - MQL4 has one namespace for both"
+                         % (name, input_names[name], label, others[name]))
+    for name in sorted(set(func_names) & set(global_names)):
+        fails.append("function '%s' (line %d) collides with a global of the same "
+                     "name (line %d)" % (name, func_names[name], global_names[name]))
+
     # ---- 3. inputs referenced --------------------------------------------
     inputs = re.findall(r"^\s*input\s+[\w<>]+\s+(\w+)\s*=", clean, re.M)
     for name in inputs:

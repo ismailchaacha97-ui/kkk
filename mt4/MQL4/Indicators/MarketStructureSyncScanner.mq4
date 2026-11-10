@@ -808,7 +808,7 @@ int ZoneAtPrice(int idx)
 //| one of the higher-timeframe zones - an M15 signal with no zone    |
 //| behind it is noise, and scanning it for every symbol is waste.    |
 //+------------------------------------------------------------------+
-void ScanEntries(int idx)
+void ScanEntryTimeframes(int idx)
   {
    g_syms[idx].entrySig     = ENTRY_NONE;
    g_syms[idx].entryConfirm = 0;
@@ -933,7 +933,7 @@ void ScanSymbol(int idx)
      }
    g_syms[idx].sync = sync;
 
-   ScanEntries(idx);
+   ScanEntryTimeframes(idx);
   }
 
 
@@ -1057,7 +1057,7 @@ void OnPassComplete()
    CheckEntryAlert();
    if(ShowPivotsOnChart) DrawChartPivots();
    DrawAOIZones();
-   DrawEntryArrows();
+   RenderEntryArrows();
 
    if(PrintResults)
      {
@@ -1796,7 +1796,7 @@ void DrawEntryArrow(int idx, datetime barTime)
    RememberArrow(nm);
   }
 
-void DrawEntryArrows()
+void RenderEntryArrows()
   {
    if(!g_scanEntries || !DrawEntryArrows)
      {
