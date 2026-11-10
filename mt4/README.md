@@ -319,7 +319,7 @@ recognised, all 66 settings referenced
 
 ```
 $ python3 tools/check_mql4_api.py     # ~10 min, uses the GitHub code-search API
-96 ok, 0 with zero hits, 0 query failures
+97 ok, 0 with zero hits, 0 query failures
 ```
 
 The second script cross-checks every MQL4 built-in and constant the file uses
