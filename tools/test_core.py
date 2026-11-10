@@ -31,6 +31,8 @@ RES_INSUFFICIENT, RES_NODATA = -1, -2
 SYNC_NONE, SYNC_BULL, SYNC_BEAR = 0, 1, 2
 AOI_NONE, AOI_DEMAND, AOI_SUPPLY, AOI_ANY = 0, 1, 2, 3
 AOI_FRESH, AOI_TESTED, AOI_INSIDE, AOI_SPENT = 0, 1, 2, 3
+ENTRY_NONE, ENTRY_LONG, ENTRY_SHORT = 0, 1, 2
+ST_FEW = 6   # display-only, lives outside the core
 
 STATE_NAMES = {
     ST_NONE: "ST_NONE", ST_BULL: "ST_BULL", ST_BEAR: "ST_BEAR",
@@ -96,7 +98,7 @@ def extract_core(path):
     # "FindAOI" and would otherwise slip through this guard.
     for fn in ("IsPivotHigh", "IsPivotLow", "CollectPivots",
                "ClassifyStructure", "SyncOf", "MinBarsNeeded", "AnalyzeSeries",
-               "FindAOI"):
+               "FindAOI", "EntrySignal"):
         if not re.search(r"(?<![A-Za-z0-9_])" + re.escape(fn) + r"\s*\(", body):
             raise SystemExit("expected function %s inside the CORE block" % fn)
 
@@ -314,6 +316,45 @@ AOI_GUARDS = [
     ("lookback_zero",   UPTREND, AOI_DEMAND, 2, 2, 0),
 ]
 
+# --------------------------------------------------------------------------
+# EntrySignal fixtures: (name, zone direction, three entry-TF structures,
+#                        minConfirm, (expected signal, expected confirm count))
+# A demand zone is bought, so it wants bullish structure underneath it; a
+# supply zone is sold, so it wants bearish. Anything else is not a trigger.
+# --------------------------------------------------------------------------
+ENTRY_CASES = [
+    ("demand_all3_confirm_min1",   AOI_DEMAND, (ST_BULL, ST_BULL, ST_BULL), 1, (ENTRY_LONG, 3)),
+    ("demand_all3_confirm_min3",   AOI_DEMAND, (ST_BULL, ST_BULL, ST_BULL), 3, (ENTRY_LONG, 3)),
+    ("demand_2of3_min2",           AOI_DEMAND, (ST_BULL, ST_NONE, ST_BULL), 2, (ENTRY_LONG, 2)),
+    ("demand_2of3_min3_blocked",   AOI_DEMAND, (ST_BULL, ST_NONE, ST_BULL), 3, (ENTRY_NONE, 2)),
+    ("demand_1of3_min1",           AOI_DEMAND, (ST_NONE, ST_BULL, ST_NONE), 1, (ENTRY_LONG, 1)),
+    ("demand_1of3_min2_blocked",   AOI_DEMAND, (ST_NONE, ST_BULL, ST_NONE), 2, (ENTRY_NONE, 1)),
+    ("demand_zero_confirm",        AOI_DEMAND, (ST_BEAR, ST_BEAR, ST_BEAR), 1, (ENTRY_NONE, 0)),
+    # the wrong-way structure is not a near miss, it is the opposite trade
+    ("demand_against_bearish",     AOI_DEMAND, (ST_BEAR, ST_BEAR, ST_BEAR), 1, (ENTRY_NONE, 0)),
+    ("supply_all3_confirm",        AOI_SUPPLY, (ST_BEAR, ST_BEAR, ST_BEAR), 1, (ENTRY_SHORT, 3)),
+    ("supply_2of3_min2",           AOI_SUPPLY, (ST_BEAR, ST_WIDE, ST_BEAR), 2, (ENTRY_SHORT, 2)),
+    ("supply_against_bullish",     AOI_SUPPLY, (ST_BULL, ST_BULL, ST_BULL), 1, (ENTRY_NONE, 0)),
+    # sideways structures never confirm anything, in either direction
+    ("demand_wide_and_inside",     AOI_DEMAND, (ST_WIDE, ST_INSIDE, ST_NONE), 1, (ENTRY_NONE, 0)),
+    ("supply_wide_and_inside",     AOI_SUPPLY, (ST_WIDE, ST_INSIDE, ST_NONE), 1, (ENTRY_NONE, 0)),
+    # A zone with no direction has nothing to align the entry against. Both
+    # polarities are needed: without them this guard can be deleted without
+    # any test noticing, because the surviving code defaults to wanting
+    # bearish structure and an all-bullish input confirms nothing either way.
+    ("no_zone_direction",          AOI_NONE,   (ST_BULL, ST_BULL, ST_BULL), 1, (ENTRY_NONE, 0)),
+    ("no_zone_bearish_not_short",  AOI_NONE,   (ST_BEAR, ST_BEAR, ST_BEAR), 1, (ENTRY_NONE, 0)),
+    ("any_is_not_a_direction",     AOI_ANY,    (ST_BULL, ST_BULL, ST_BULL), 1, (ENTRY_NONE, 0)),
+    ("any_bearish_not_short",      AOI_ANY,    (ST_BEAR, ST_BEAR, ST_BEAR), 1, (ENTRY_NONE, 0)),
+    ("bogus_direction",            7,          (ST_BEAR, ST_BEAR, ST_BEAR), 1, (ENTRY_NONE, 0)),
+    # minConfirm is clamped, so nonsense settings cannot disable or force it
+    ("min0_clamps_to_1",           AOI_DEMAND, (ST_NONE, ST_NONE, ST_NONE), 0, (ENTRY_NONE, 0)),
+    ("min0_still_fires_on_one",    AOI_DEMAND, (ST_NONE, ST_NONE, ST_BULL), 0, (ENTRY_LONG, 1)),
+    ("min99_clamps_to_3",          AOI_DEMAND, (ST_BULL, ST_BULL, ST_BULL), 99, (ENTRY_LONG, 3)),
+    ("min99_blocked_by_two",       AOI_DEMAND, (ST_BULL, ST_BULL, ST_NONE), 99, (ENTRY_NONE, 2)),
+    ("negative_min_clamps",        AOI_SUPPLY, (ST_BEAR, ST_NONE, ST_NONE), -5, (ENTRY_SHORT, 1)),
+]
+
 
 def aoi_case_c(name, series, wantdir, lb, rb, lookback, expected):
     """Emit one FindAOI fixture as a C block. `expected` is None when the call
@@ -411,6 +452,22 @@ static const char *aostatename(int v)
     case AOI_SPENT:  return "SPENT";
   }
   return "?";
+}
+
+static const char *entryname(int v)
+{
+  switch(v){
+    case ENTRY_NONE:  return "ENTRY_NONE";
+    case ENTRY_LONG:  return "ENTRY_LONG";
+    case ENTRY_SHORT: return "ENTRY_SHORT";
+  }
+  return "?";
+}
+
+static void expect_entry(const char *label, int got, int want)
+{
+  if(got == want){ g_pass++; printf("  ok   %-34s -> %s\\n", label, entryname(got)); }
+  else { g_fail++; printf("  FAIL %-34s -> %s (expected %s)\\n", label, entryname(got), entryname(want)); }
 }
 
 static void expect_sync(const char *label, int got, int want)
@@ -634,6 +691,22 @@ static void expect_near(const char *label, double got, double want)
     out.append("}")
     out.append("")
 
+    # --- EntrySignal -------------------------------------------------------
+    out.append("static void run_entry(void)")
+    out.append("{")
+    out.append('  printf("\\n[EntrySignal] entry timeframes vs the zone direction\\n");')
+    for name, aoidir, sts, minconf, (sig, conf) in ENTRY_CASES:
+        out.append("  {")
+        out.append("    int eo[2];")
+        out.append("    int r = EntrySignal(%d, %d, %d, %d, %d, eo);"
+                   % (aoidir, sts[0], sts[1], sts[2], minconf))
+        out.append('    expect_entry("%s", r, %d);' % (name, sig))
+        out.append('    expect_entry("%s out[0]", eo[0], %d);' % (name, sig))
+        out.append('    expect_int("%s confirm", eo[1], %d);' % (name, conf))
+        out.append("  }")
+    out.append("}")
+    out.append("")
+
     out.append("""
 int main(void)
 {
@@ -646,6 +719,7 @@ int main(void)
   run_direct();
   run_sync();
   run_aoi();
+  run_entry();
   printf("\\n%d passed, %d failed\\n", g_pass, g_fail);
   return g_fail == 0 ? 0 : 1;
 }

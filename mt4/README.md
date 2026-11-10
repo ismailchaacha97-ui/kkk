@@ -73,13 +73,15 @@ symbols 28    ready 26    pending 2    pass 14    11:32:05
 SYNC BULLISH (3): EURUSD  GBPJPY  XAUUSD
 SYNC BEARISH (1): USDJPY
 AT W1/D1 AOI (2): EURUSD(W1)  USDJPY(D1)
+ENTRY LONG (1): EURUSD(W1)
+ENTRY SHORT (1): USDJPY(D1)
 --------------------------------------------------
-SYMBOL        W1     D1     H4    SYNC     AGE        W1 AOI     D1 AOI
-EURUSD     HH HL HH HL HH HL    BULL     3/1/2    D 1.08432  D 1.08120
-GBPJPY     HH HL HH HL HH HL    BULL     5/2/4    S 193.450t D 191.020
-USDJPY     LH LL LH LL LH LL    BEAR     2/1/1    D 148.900  S 149.620>
-AUDUSD     HH HL LH LL HH HL    -        4/6/2    D 0.65210  -
-NZDUSD     ~load ~load HH HL    -        -/-/3    -          -
+SYMBOL        W1     D1     H4    SYNC     AGE        W1 AOI     D1 AOI   M15   M30   H1    ENTRY
+EURUSD     HH HL HH HL HH HL    BULL     3/1/2    D 1.08432  D 1.08120 HH HL HH HL HH HL LONG 3/3
+GBPJPY     HH HL HH HL HH HL    BULL     5/2/4    S 193.450t D 191.020 -     -     -     -
+USDJPY     LH LL LH LL LH LL    BEAR     2/1/1    D 148.900  S 149.620>LH LL mixed LH LL SHORT 2/3
+AUDUSD     HH HL LH LL HH HL    -        4/6/2    D 0.65210  -          -     -     -     -
+NZDUSD     ~load ~load HH HL    -        -/-/3    -          -          -     -     -     -
 ```
 
 - **AGE** = bars since the newest confirmed swing, per timeframe (`W1/D1/H4`).
@@ -87,7 +89,13 @@ NZDUSD     ~load ~load HH HL    -        -/-/3    -          -
 - **`~load`** history still downloading, **`nodat`** the broker has no usable
   history for that timeframe, **`~few`** history exists but not enough swings
   yet, **`mixed`** pivots do not form a clean sequence.
-- Rows are sorted **at-AOI first**, then synced, then alphabetical.
+- **`M15 / M30 / H1`** are only graded while price is actually inside a live
+  W1/D1 zone. Outside a zone they read `-`, because nobody asked the question.
+- **ENTRY** = `LONG n/3` or `SHORT n/3`, where `n` is how many of the three
+  entry timeframes agree with the zone. `wait n/3` means price is in a zone
+  but not enough of them agree yet.
+- Rows are sorted **confirmed entries first**, then at-AOI, then synced, then
+  alphabetical.
 
 ---
 
@@ -132,6 +140,44 @@ alert — it re-arms only after price leaves again.
 
 ---
 
+## Entries on M15 / M30 / H1
+
+The higher timeframes say **where** to look. They do not say **when** — a
+Weekly demand zone can be valid for days. The entry timeframes answer the
+*when*: an entry is a lower-timeframe structure turning the same way as the
+zone price is standing in.
+
+Two conditions, both required:
+
+1. **Price is inside a live W1 or D1 zone.** `INSIDE` always wins over `TESTED`,
+   and Weekly wins over Daily. If price is in neither, the entry timeframes are
+   **not scanned at all** — an M15 signal with no zone behind it is noise, and
+   grading 28 symbols × 3 extra timeframes for nothing is waste. Set
+   `EntryAllowTested = true` to also accept zones price has touched and left.
+2. **Enough entry timeframes agree with the zone.** A demand zone is bought, so
+   it wants `HH HL` underneath it; a supply zone is sold, so it wants `LH LL`.
+   `EntryMinConfirm` (1–3) sets how many of the three must agree.
+
+| ENTRY cell | Meaning |
+|---|---|
+| `LONG n/3` | in a demand zone, `n` entry timeframes have turned bullish |
+| `SHORT n/3` | in a supply zone, `n` entry timeframes have turned bearish |
+| `wait n/3` | in a zone, but fewer than `EntryMinConfirm` agree |
+| `-` | price is in no zone, so nothing was graded |
+
+Structure that disagrees with the zone is not a near miss — it is the opposite
+trade, and it never counts toward the tally.
+
+An alert fires when a symbol **acquires** a signal and re-arms when the signal
+goes away, so a signal that holds across passes shouts once rather than every
+`RescanSeconds`. The first pass after attaching only records a baseline, same as
+the sync alerts.
+
+**`EntryMinConfirm` is clamped to 1–3**, so `0` cannot disable the check and
+`99` cannot make it unreachable.
+
+---
+
 ## The settings that matter most
 
 | Input | Default | What it does |
@@ -154,6 +200,12 @@ alert — it re-arms only after price leaves again.
 | `AOIShowSpent` | `false` | Also draw/report zones price has already closed through |
 | `AOIAlertOnTouch` | `true` | One alert when the chart symbol's price enters a live zone |
 | `ColorDemand` / `ColorSupply` / `ColorAOISpent` | green / red / grey | Zone colours |
+| `ScanEntries` | `true` | Master switch for the M15/M30/H1 entry columns |
+| `TF_Entry1` / `TF_Entry2` / `TF_Entry3` | `M15 / M30 / H1` | The entry timeframes — any three work |
+| `EntryMinConfirm` | `1` | How many entry timeframes must agree with the zone (clamped 1–3) |
+| `EntryAllowTested` | `false` | Also signal on zones price has touched and left, not only ones it is inside |
+| `EntryAlert` | `true` | Alert when a symbol acquires an entry signal |
+| `ColorEntryLong` / `ColorEntryShort` | green / red | Entry verdict colours |
 
 **Note on broker suffixes.** If your broker uses `EURUSD.m` / `EURUSDm`,
 `IncludeFilter` matching is a plain substring test, so `EUR` still matches.
@@ -171,8 +223,8 @@ There is no MetaEditor in CI, so the verification is split in two.
 **1. The structure engine is compiled and run for real.**
 Everything between the `//=== CORE-BEGIN` and `//=== CORE-END` markers in the
 `.mq4` — `IsPivotHigh`, `IsPivotLow`, `CollectPivots`, `ClassifyStructure`,
-`SyncOf`, `MinBarsNeeded`, `AnalyzeSeries`, `FindAOI` — is extracted
-**verbatim** (not re-implemented) and compiled with
+`SyncOf`, `MinBarsNeeded`, `AnalyzeSeries`, `FindAOI`, `EntrySignal` — is
+extracted **verbatim** (not re-implemented) and compiled with
 `gcc -std=c99 -Wall -Wextra`, then fed synthetic OHLC series with a known
 structure.
 
@@ -186,38 +238,47 @@ different program.
 
 ```
 $ python3 tools/test_core.py
-extracted CORE verbatim (12075 chars); stripped '&' from 25 array parameter
+extracted CORE verbatim (13914 chars); stripped '&' from 26 array parameter
 declarations for C, nothing else changed
 ...
-203 passed, 0 failed
+272 passed, 0 failed
 ```
 
 Covered: clean up/down trends, expanding and contracting ranges, 2-pivot and
 3-pivot modes, fractal `2/2` and `3/3`, newest-first pivot ordering and prices,
 flat-top/flat-bottom plateau handling, short series, flat series, a lookback
 too small to reach the pivots, the stale-structure flag, the full sync
-matrix (including the near-misses that must *not* sync), and the AOI engine —
+matrix (including the near-misses that must *not* sync), the AOI engine —
 demand/supply selection, all four zone states, the adjacent-overlap case that
 must *not* count as a touch, `AOI_ANY` recency in both directions, the
-lookback clamp, zone levels and pivot time, and the guards.
+lookback clamp, zone levels and pivot time, and the guards — and
+`EntrySignal`: both zone polarities, every confirm threshold and the ones just
+either side of it, sideways structure never confirming, an undirected zone
+never producing a signal in *either* polarity, and the `minConfirm` clamps.
 
 **1b. Those tests are checked against deliberately broken code.** A green suite
 only means something if it goes red when the code is wrong, so
-`tools/mutate_check.py` applies 9 small defects to `FindAOI`, re-runs the suite
-after each one, requires every one to be caught *by a failing assertion* (a
-compile error does not count as a catch), and restores the file afterwards.
+`tools/mutate_check.py` applies 16 small defects to `FindAOI` and
+`EntrySignal`, re-runs the suite after each one, requires every one to be
+caught *by a failing assertion* (a compile error does not count as a catch),
+and restores the file afterwards.
 
 ```
 $ python3 tools/mutate_check.py
-baseline (unmutated)     : 203 passed, 0 failed  [pass]
-  INSIDE ignores the zone ceiling                      CAUGHT  [197 passed, 6 failed]
+baseline (unmutated)     : 272 passed, 0 failed  [pass]
+  INSIDE ignores the zone ceiling                      CAUGHT  [257 passed, 6 failed]
   ...
-ok: all 9 mutations were caught by the AOI fixtures
+ok: all 16 mutations were caught by the core fixtures
 ```
 
-This is not theoretical: the first draft of the AOI fixtures passed cleanly
-while two of the nine mutations went undetected. Those gaps are why the
-adjacent-overlap and `AOI_ANY`-recency cases exist.
+This is not decoration, and it has caught real gaps twice. The first draft of
+the AOI fixtures passed cleanly while two of nine mutations went undetected,
+which is why the adjacent-overlap and `AOI_ANY`-recency cases exist. Then the
+first draft of the entry fixtures let *"undirected zone still produces a
+signal"* through: both of my undirected-zone cases used all-bullish structure,
+and the mutated code defaults to wanting bearish, so it confirmed nothing
+either way and the test could not tell the difference. Both polarities are now
+covered.
 
 **2. The MT4 shell is linted, not executed.**
 Panel drawing, symbol iteration and history loading can only run inside MT4,
@@ -225,8 +286,8 @@ so those are checked statically:
 
 ```
 $ python3 tools/lint_mq4.py
-lint ok: brackets balanced, 47 external calls and 45 constants all
-recognised, all 53 settings referenced
+lint ok: brackets balanced, 47 external calls and 48 constants all
+recognised, all 62 settings referenced
 ```
 
 ```

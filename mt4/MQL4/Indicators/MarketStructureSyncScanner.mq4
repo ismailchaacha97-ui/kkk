@@ -328,6 +328,54 @@ int FindAOI(double &high[], double &low[], double &close[], long &tArr[], int to
    return(dir);
   }
 
+// ---- Entries -----------------------------------------------------
+// The higher timeframes say WHERE to look; the entry timeframes say
+// WHEN.  An entry is a lower-timeframe structure turning in the same
+// direction as the zone price is standing in.
+#define ENTRY_NONE  0
+#define ENTRY_LONG  1
+#define ENTRY_SHORT 2
+
+#define MAX_ENTRY 3
+
+//+------------------------------------------------------------------+
+//| Combine a higher-timeframe zone direction with the structure of   |
+//| the entry timeframes.                                             |
+//|   aoiDir     : AOI_DEMAND (want longs) or AOI_SUPPLY (want shorts)|
+//|   st1..st3   : ST_* of the three entry timeframes                 |
+//|   minConfirm : how many of the three must agree (clamped 1..3)    |
+//|   out[0]     : ENTRY_NONE / ENTRY_LONG / ENTRY_SHORT              |
+//|   out[1]     : how many entry timeframes actually confirmed       |
+//| Returns out[0].                                                   |
+//+------------------------------------------------------------------+
+int EntrySignal(int aoiDir, int st1, int st2, int st3, int minConfirm, int &out[])
+  {
+   out[0] = ENTRY_NONE;
+   out[1] = 0;
+
+   // a zone with no direction gives nothing to align against
+   if(aoiDir != AOI_DEMAND && aoiDir != AOI_SUPPLY) return(ENTRY_NONE);
+
+   int need = minConfirm;
+   if(need < 1) need = 1;
+   if(need > MAX_ENTRY) need = MAX_ENTRY;
+
+   // a demand zone is bought, so it wants bullish structure underneath it;
+   // a supply zone is sold, so it wants bearish structure
+   int want = (aoiDir == AOI_DEMAND) ? ST_BULL : ST_BEAR;
+
+   int n = 0;
+   if(st1 == want) n++;
+   if(st2 == want) n++;
+   if(st3 == want) n++;
+   out[1] = n;
+
+   if(n < need) return(ENTRY_NONE);
+
+   out[0] = (aoiDir == AOI_DEMAND) ? ENTRY_LONG : ENTRY_SHORT;
+   return(out[0]);
+  }
+
 //=== CORE-END =======================================================
 
 
@@ -399,6 +447,17 @@ input color  ColorDemand      = C'35,150,110';        // bullish AOI (from a swi
 input color  ColorSupply      = C'190,70,85';         // bearish AOI (from a swing high)
 input color  ColorAOISpent    = C'95,100,115';
 
+input string Sep7               = "=====  ENTRIES (M15 / M30 / H1)  =====";
+input bool   ScanEntries        = true;               // grade entries while price sits in a live W1/D1 AOI
+input ENUM_TIMEFRAMES TF_Entry1 = PERIOD_M15;         // entry timeframe 1
+input ENUM_TIMEFRAMES TF_Entry2 = PERIOD_M30;         // entry timeframe 2
+input ENUM_TIMEFRAMES TF_Entry3 = PERIOD_H1;          // entry timeframe 3
+input int    EntryMinConfirm    = 1;                  // how many entry timeframes must agree (1-3)
+input bool   EntryAllowTested   = false;              // also signal on zones price has touched and left
+input bool   EntryAlert         = true;               // alert when a new entry signal appears
+input color  ColorEntryLong     = C'60,190,140';      // long entry
+input color  ColorEntryShort    = C'230,110,120';     // short entry
+
 
 //============================= GLOBALS ==============================
 #define PREFIX "MSS_"
@@ -430,6 +489,12 @@ struct SymRec
    double   aoiTop[MAX_TF];
    double   aoiBot[MAX_TF];
    datetime aoiTime[MAX_TF];
+   // entry timeframes, only graded while price is inside a live AOI
+   int      eSt[MAX_ENTRY];      // ST_* per entry timeframe
+   int      eData[MAX_ENTRY];    // DATA_* per entry timeframe
+   int      entrySig;            // ENTRY_NONE / ENTRY_LONG / ENTRY_SHORT
+   int      entryConfirm;        // how many entry timeframes agreed
+   int      entryTF;             // index of the AOI that triggered it (0=W1, 1=D1)
   };
 
 SymRec   g_syms[];
@@ -442,6 +507,8 @@ bool     g_listDirty   = true;
 int      g_prevSync[];     // sync state at the end of the previous pass
 datetime g_alertTime[];    // last alert time per symbol
 int      g_alertDir[];     // last alerted direction per symbol
+int      g_prevEntry[];    // entry signal at the end of the previous pass
+datetime g_entryTime[];    // last entry alert time per symbol
 int      g_order[];        // render order (indices into g_syms)
 
 // runtime copies of the inputs (input variables are read-only)
@@ -451,7 +518,12 @@ bool     g_scanAOI;
 int      g_aoiExtend;
 int      g_aoiAlerted = 0;   // bitmask of the W1/D1 zones we already alerted on
 
+bool     g_scanEntries;
+int      g_entryMinConfirm;
+bool     g_entryAllowTested;
+
 ENUM_TIMEFRAMES g_tfs[MAX_TF];
+ENUM_TIMEFRAMES g_efs[MAX_ENTRY];   // entry timeframes
 
 // panel metrics
 int      g_charW        = 6;
@@ -477,8 +549,17 @@ bool     g_lowerCorner  = false;
 #define COL_AOI1_W   10
 #define COL_AOI2_OFF 61
 #define COL_AOI2_W   10
-#define TOTAL_CHARS  72
-#define HEADER_ROWS   9
+// entry timeframes: StateText() is 5 chars wide, so 5 is enough per cell
+#define COL_E1_OFF   72
+#define COL_E1_W      5
+#define COL_E2_OFF   78
+#define COL_E2_W      5
+#define COL_E3_OFF   84
+#define COL_E3_W      5
+#define COL_ENTRY_OFF 90
+#define COL_ENTRY_W   9        // "SHORT 3/3" is the widest value
+#define TOTAL_CHARS  99
+#define HEADER_ROWS  11
 
 
 //=========================== HELPERS ================================
@@ -686,6 +767,96 @@ int AnalyzeTF(string sym, ENUM_TIMEFRAMES tf, bool withAOI,
 //+------------------------------------------------------------------+
 //| Analyse one symbol across all three timeframes.                  |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Index of the higher-timeframe zone price is trading in right now. |
+//| INSIDE always wins over TESTED, and Weekly wins over Daily.       |
+//| Returns 0 (W1), 1 (D1) or -1 when price is in neither.            |
+//+------------------------------------------------------------------+
+int ZoneAtPrice(int idx)
+  {
+   for(int t = 0; t < 2; t++)
+     {
+      if(g_syms[idx].data[t] == DATA_READY &&
+         g_syms[idx].aoiType[t] != AOI_NONE &&
+         g_syms[idx].aoiState[t] == AOI_INSIDE) return(t);
+     }
+
+   if(!g_entryAllowTested) return(-1);
+
+   for(int t = 0; t < 2; t++)
+     {
+      if(g_syms[idx].data[t] == DATA_READY &&
+         g_syms[idx].aoiType[t] != AOI_NONE &&
+         g_syms[idx].aoiState[t] == AOI_TESTED) return(t);
+     }
+   return(-1);
+  }
+
+//+------------------------------------------------------------------+
+//| Grade the entry timeframes, but only while price is standing in   |
+//| one of the higher-timeframe zones - an M15 signal with no zone    |
+//| behind it is noise, and scanning it for every symbol is waste.    |
+//+------------------------------------------------------------------+
+void ScanEntries(int idx)
+  {
+   g_syms[idx].entrySig     = ENTRY_NONE;
+   g_syms[idx].entryConfirm = 0;
+   g_syms[idx].entryTF      = -1;
+
+   int est[MAX_ENTRY];
+   for(int e = 0; e < MAX_ENTRY; e++)
+     {
+      est[e]                 = ST_NONE;
+      g_syms[idx].eSt[e]     = ST_NONE;
+      g_syms[idx].eData[e]   = DATA_UNKNOWN;
+     }
+
+   if(!g_scanEntries || !g_scanAOI) return;
+
+   int zone = ZoneAtPrice(idx);
+   if(zone < 0) return;
+
+   for(int e = 0; e < MAX_ENTRY; e++)
+     {
+      int      age = 0;
+      double   hp = 0.0, lp = 0.0;
+      bool     stale = false;
+      int      aType = AOI_NONE, aState = AOI_FRESH;
+      double   aTop = 0.0, aBot = 0.0;
+      datetime aTime = 0;
+
+      // entries never carry their own AOI - the zone is the higher timeframe's
+      int r = AnalyzeTF(g_syms[idx].symbol, g_efs[e], false,
+                        age, hp, lp, stale, aType, aState, aTop, aBot, aTime);
+
+      if(r == RES_NODATA)
+        {
+         g_syms[idx].loadAttempts++;
+         g_syms[idx].eData[e] = (g_syms[idx].loadAttempts > 10) ? DATA_MISSING : DATA_LOADING;
+        }
+      else if(r == RES_INSUFFICIENT)
+        {
+         g_syms[idx].eData[e] = DATA_READY;   // history exists, not enough swings yet
+         est[e]               = ST_FEW;
+        }
+      else
+        {
+         g_syms[idx].eData[e] = DATA_READY;
+         est[e]               = r;
+        }
+     }
+
+   for(int e = 0; e < MAX_ENTRY; e++) g_syms[idx].eSt[e] = est[e];
+
+   int eo[2];
+   EntrySignal(g_syms[idx].aoiType[zone], est[0], est[1], est[2],
+               g_entryMinConfirm, eo);
+
+   g_syms[idx].entrySig     = eo[0];
+   g_syms[idx].entryConfirm = eo[1];
+   g_syms[idx].entryTF      = zone;
+  }
+
 void ScanSymbol(int idx)
   {
    if(idx < 0 || idx >= g_symCount) return;
@@ -750,6 +921,8 @@ void ScanSymbol(int idx)
          sync = SyncOf(g_syms[idx].st[0], g_syms[idx].st[1], g_syms[idx].st[2]);
      }
    g_syms[idx].sync = sync;
+
+   ScanEntries(idx);
   }
 
 
@@ -799,14 +972,17 @@ void BuildSymbolList()
    string   oldSym[];
    datetime oldAt[];
    int      oldDir[];
-   ArrayResize(oldSym, oldN);
-   ArrayResize(oldAt,  oldN);
-   ArrayResize(oldDir, oldN);
+   datetime oldEntAt[];
+   ArrayResize(oldSym,   oldN);
+   ArrayResize(oldAt,    oldN);
+   ArrayResize(oldDir,   oldN);
+   ArrayResize(oldEntAt, oldN);
    for(int i = 0; i < oldN; i++)
      {
-      oldSym[i] = g_syms[i].symbol;
-      oldAt[i]  = (i < ArraySize(g_alertTime)) ? g_alertTime[i] : 0;
-      oldDir[i] = (i < ArraySize(g_alertDir))  ? g_alertDir[i]  : SYNC_NONE;
+      oldSym[i]   = g_syms[i].symbol;
+      oldAt[i]    = (i < ArraySize(g_alertTime)) ? g_alertTime[i] : 0;
+      oldDir[i]   = (i < ArraySize(g_alertDir))  ? g_alertDir[i]  : SYNC_NONE;
+      oldEntAt[i] = (i < ArraySize(g_entryTime)) ? g_entryTime[i] : 0;
      }
 
    ArrayResize(g_syms, 0);
@@ -836,18 +1012,23 @@ void BuildSymbolList()
    ArrayResize(g_prevSync,  g_symCount);
    ArrayResize(g_alertTime, g_symCount);
    ArrayResize(g_alertDir,  g_symCount);
+   ArrayResize(g_prevEntry, g_symCount);
+   ArrayResize(g_entryTime, g_symCount);
 
    for(int i = 0; i < g_symCount; i++)
      {
       g_prevSync[i]  = SYNC_NONE;
       g_alertTime[i] = 0;
       g_alertDir[i]  = SYNC_NONE;
+      g_prevEntry[i] = ENTRY_NONE;
+      g_entryTime[i] = 0;
       for(int j = 0; j < oldN; j++)
         {
          if(oldSym[j] == g_syms[i].symbol)
            {
             g_alertTime[i] = oldAt[j];
             g_alertDir[i]  = oldDir[j];
+            g_entryTime[i] = oldEntAt[j];
             break;
            }
         }
@@ -862,6 +1043,7 @@ void OnPassComplete()
   {
    CheckAlerts();
    CheckAOIAlert();
+   CheckEntryAlert();
    if(ShowPivotsOnChart) DrawChartPivots();
    DrawAOIZones();
 
@@ -963,6 +1145,49 @@ void CheckAlerts()
       g_alertTime[i] = TimeCurrent();
       g_alertDir[i]  = now;
       g_prevSync[i]  = now;
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| Entry alerts.  Fires when a symbol ACQUIRES an entry signal, and  |
+//| re-arms when the signal goes away, so a signal that holds across   |
+//| passes shouts once rather than every 30 seconds.                  |
+//+------------------------------------------------------------------+
+void CheckEntryAlert()
+  {
+   if(!g_scanEntries || !EntryAlert) return;
+
+   // same baseline rule as the sync alerts: do not shout about entries
+   // that were already there when the indicator was attached
+   if(g_generation <= 1 && !AlertOnStartup)
+     {
+      for(int i = 0; i < g_symCount; i++) g_prevEntry[i] = g_syms[i].entrySig;
+      return;
+     }
+
+   for(int i = 0; i < g_symCount; i++)
+     {
+      int now  = g_syms[i].entrySig;
+      int prev = g_prevEntry[i];
+      if(now == ENTRY_NONE || now == prev) { g_prevEntry[i] = now; continue; }
+
+      if(g_entryTime[i] > 0 && TimeCurrent() - g_entryTime[i] < g_cooldownSec) continue;
+
+      int    zone = g_syms[i].entryTF;
+      string side = (now == ENTRY_LONG) ? "LONG" : "SHORT";
+      string msg  = "ENTRY " + side + " | " + g_syms[i].symbol +
+                    " | in " + TFLabel(g_tfs[zone]) +
+                    ((g_syms[i].aoiType[zone] == AOI_DEMAND) ? " DEMAND" : " SUPPLY") + " zone " +
+                    IntegerToString(g_syms[i].entryConfirm) + "/" + IntegerToString(MAX_ENTRY) +
+                    " entry TFs agree | " + DescribeSymbol(i);
+
+      if(AlertPopup) Alert(msg);
+      if(AlertPush)  SendNotification(msg);
+      if(AlertEmail) SendMail("Entry signal - " + g_syms[i].symbol, msg);
+      if(AlertSound) PlaySound(AlertSoundFile);
+
+      g_entryTime[i] = TimeCurrent();
+      g_prevEntry[i] = now;
      }
   }
 
@@ -1083,8 +1308,11 @@ void SortOrder()
 
 int RankOf(int idx)
   {
-   // price actually sitting in a live Weekly/Daily zone outranks everything -
-   // that is the pair you can act on right now
+   // A confirmed entry outranks everything: price is in a higher-timeframe
+   // zone AND the entry timeframes have turned the same way. Below that,
+   // sitting in a live zone, then a plain three-timeframe sync.
+   if(g_syms[idx].entrySig != ENTRY_NONE) return(500);
+
    int at = -1;
    if(AtLiveAOI(idx, at)) return(400);
 
@@ -1170,6 +1398,46 @@ bool AtLiveAOI(int idx, int &whichTF)
    return(false);
   }
 
+//+------------------------------------------------------------------+
+//| Entry column rendering.  When price is in no zone the entry        |
+//| timeframes are not scanned at all, so they read "-" rather than    |
+//| pretending to a verdict nobody asked for.                          |
+//+------------------------------------------------------------------+
+string EntryCellText(int idx, int e)
+  {
+   if(g_syms[idx].entryTF < 0)              return("-");
+   if(g_syms[idx].eData[e] == DATA_LOADING) return("~load");
+   if(g_syms[idx].eData[e] == DATA_MISSING) return("nodat");
+   if(g_syms[idx].eData[e] != DATA_READY)   return("-");
+   return(StateText(g_syms[idx].eSt[e]));
+  }
+
+color EntryCellColor(int idx, int e)
+  {
+   if(g_syms[idx].entryTF < 0 || g_syms[idx].eData[e] != DATA_READY)
+      return(C'95,100,115');
+   if(g_syms[idx].eSt[e] == ST_BULL) return(ColorBull);
+   if(g_syms[idx].eSt[e] == ST_BEAR) return(ColorBear);
+   return(ColorNeutral);
+  }
+
+string EntryText(int idx)
+  {
+   string tally = IntegerToString(g_syms[idx].entryConfirm) + "/" + IntegerToString(MAX_ENTRY);
+   if(g_syms[idx].entrySig == ENTRY_LONG)  return("LONG "  + tally);
+   if(g_syms[idx].entrySig == ENTRY_SHORT) return("SHORT " + tally);
+   if(g_syms[idx].entryTF >= 0)            return("wait "  + tally);
+   return("-");
+  }
+
+color EntryColor(int idx)
+  {
+   if(g_syms[idx].entrySig == ENTRY_LONG)  return(ColorEntryLong);
+   if(g_syms[idx].entrySig == ENTRY_SHORT) return(ColorEntryShort);
+   if(g_syms[idx].entryTF >= 0)            return(ColorNeutral);
+   return(C'95,100,115');
+  }
+
 string RowLog(int idx)
   {
    string s = PadRight(g_syms[idx].symbol, COL_SYM_W) + " ";
@@ -1178,6 +1446,12 @@ string RowLog(int idx)
    s = s + PadRight(AgeText(idx), COL_AGE_W);
    if(g_scanAOI)
       s = s + " " + PadRight(AOIText(idx, 0), COL_AOI1_W) + " " + AOIText(idx, 1);
+   if(g_scanEntries)
+     {
+      for(int e = 0; e < MAX_ENTRY; e++)
+         s = s + " " + PadRight(EntryCellText(idx, e), COL_E1_W);
+      s = s + " " + EntryText(idx);
+     }
    return(s);
   }
 
@@ -1210,9 +1484,11 @@ void RenderPanel()
 
    // ---- stats --------------------------------------------------
    int nBull = 0, nBear = 0, nReady = 0, nPending = 0, nAtAOI = 0;
+   int nEntryLong = 0, nEntryShort = 0;
    SortOrder();
 
    string bullList = "", bearList = "", aoiList = "";
+   string entryLongList = "", entryShortList = "";
    for(int i = 0; i < g_symCount; i++)
      {
       int idx = g_order[i];
@@ -1225,6 +1501,19 @@ void RenderPanel()
          nAtAOI++;
          aoiList = aoiList + (nAtAOI > 1 ? "  " : "") +
                    g_syms[idx].symbol + "(" + TFLabel(g_tfs[at]) + ")";
+        }
+
+      if(g_syms[idx].entrySig == ENTRY_LONG)
+        {
+         nEntryLong++;
+         entryLongList = entryLongList + (nEntryLong > 1 ? "  " : "") +
+                         g_syms[idx].symbol + "(" + TFLabel(g_tfs[g_syms[idx].entryTF]) + ")";
+        }
+      if(g_syms[idx].entrySig == ENTRY_SHORT)
+        {
+         nEntryShort++;
+         entryShortList = entryShortList + (nEntryShort > 1 ? "  " : "") +
+                          g_syms[idx].symbol + "(" + TFLabel(g_tfs[g_syms[idx].entryTF]) + ")";
         }
 
       int ready = 0;
@@ -1261,18 +1550,34 @@ void RenderPanel()
          IntegerToString(nAtAOI) + "): " + (nAtAOI > 0 ? aoiList : "none"),
          nAtAOI > 0 ? ColorTitle : ColorNeutral, false);
 
-   Place(id++, COL_SYM_OFF, TOTAL_CHARS, 7, Repeat("-", TOTAL_CHARS), ColorBorder, false);
+   Place(id++, COL_SYM_OFF, TOTAL_CHARS, 7,
+         "ENTRY LONG (" + IntegerToString(nEntryLong) + "): " +
+         (g_scanEntries ? (nEntryLong > 0 ? entryLongList : "none") : "scanning off"),
+         nEntryLong > 0 ? ColorEntryLong : ColorNeutral, false);
+   Place(id++, COL_SYM_OFF, TOTAL_CHARS, 8,
+         "ENTRY SHORT (" + IntegerToString(nEntryShort) + "): " +
+         (g_scanEntries ? (nEntryShort > 0 ? entryShortList : "none") : "scanning off"),
+         nEntryShort > 0 ? ColorEntryShort : ColorNeutral, false);
 
-   Place(id++, COL_SYM_OFF,  COL_SYM_W,  8, "SYMBOL", ColorHeader, false);
-   Place(id++, COL_T1_OFF,   COL_T1_W,   8, TFLabel(g_tfs[0]), ColorHeader, false);
-   Place(id++, COL_T2_OFF,   COL_T2_W,   8, TFLabel(g_tfs[1]), ColorHeader, false);
-   Place(id++, COL_T3_OFF,   COL_T3_W,   8, TFLabel(g_tfs[2]), ColorHeader, false);
-   Place(id++, COL_SYNC_OFF, COL_SYNC_W, 8, "SYNC",   ColorHeader, false);
-   Place(id++, COL_AGE_OFF,  COL_AGE_W,  8, "AGE",    ColorHeader, false);
+   Place(id++, COL_SYM_OFF, TOTAL_CHARS, 9, Repeat("-", TOTAL_CHARS), ColorBorder, false);
+
+   Place(id++, COL_SYM_OFF,  COL_SYM_W,  10, "SYMBOL", ColorHeader, false);
+   Place(id++, COL_T1_OFF,   COL_T1_W,   10, TFLabel(g_tfs[0]), ColorHeader, false);
+   Place(id++, COL_T2_OFF,   COL_T2_W,   10, TFLabel(g_tfs[1]), ColorHeader, false);
+   Place(id++, COL_T3_OFF,   COL_T3_W,   10, TFLabel(g_tfs[2]), ColorHeader, false);
+   Place(id++, COL_SYNC_OFF, COL_SYNC_W, 10, "SYNC",   ColorHeader, false);
+   Place(id++, COL_AGE_OFF,  COL_AGE_W,  10, "AGE",    ColorHeader, false);
    if(g_scanAOI)
      {
-      Place(id++, COL_AOI1_OFF, COL_AOI1_W, 8, TFLabel(g_tfs[0]) + " AOI", ColorHeader, false);
-      Place(id++, COL_AOI2_OFF, COL_AOI2_W, 8, TFLabel(g_tfs[1]) + " AOI", ColorHeader, false);
+      Place(id++, COL_AOI1_OFF, COL_AOI1_W, 10, TFLabel(g_tfs[0]) + " AOI", ColorHeader, false);
+      Place(id++, COL_AOI2_OFF, COL_AOI2_W, 10, TFLabel(g_tfs[1]) + " AOI", ColorHeader, false);
+     }
+   if(g_scanEntries)
+     {
+      Place(id++, COL_E1_OFF,    COL_E1_W,    10, TFLabel(g_efs[0]), ColorHeader, false);
+      Place(id++, COL_E2_OFF,    COL_E2_W,    10, TFLabel(g_efs[1]), ColorHeader, false);
+      Place(id++, COL_E3_OFF,    COL_E3_W,    10, TFLabel(g_efs[2]), ColorHeader, false);
+      Place(id++, COL_ENTRY_OFF, COL_ENTRY_W, 10, "ENTRY",           ColorHeader, false);
      }
 
    // ---- rows ---------------------------------------------------
@@ -1301,6 +1606,17 @@ void RenderPanel()
          Place(id++, COL_AOI2_OFF, COL_AOI2_W, row, AOIText(idx, 1), AOIColor(idx, 1), false);
         }
 
+      if(g_scanEntries)
+        {
+         for(int e = 0; e < MAX_ENTRY; e++)
+           {
+            int eoff = (e == 0 ? COL_E1_OFF : (e == 1 ? COL_E2_OFF : COL_E3_OFF));
+            Place(id++, eoff, COL_E1_W, row,
+                  EntryCellText(idx, e), EntryCellColor(idx, e), false);
+           }
+         Place(id++, COL_ENTRY_OFF, COL_ENTRY_W, row, EntryText(idx), EntryColor(idx), false);
+        }
+
       row++;
       shown++;
      }
@@ -1321,10 +1637,11 @@ void RenderPanel()
      }
 
    // Upper bound on the label ids this pass can use, so HideFrom() covers every
-   // label a previous pass may have written.  Header: at most 16 cells (8 text
-   // rows + 8 column labels, 2 of which are AOI-only).  Body: 8 cells per row
-   // (symbol + 3 timeframes + sync + age + 2 AOI).  Plus 1 trailing message row.
-   int pool = 16 + g_maxRows * 8 + 2;
+   // label a previous pass may have written.  Header: at most 22 cells (10 text
+   // rows + 6 always-on column labels + 2 AOI + 4 entry labels).  Body: at most
+   // 12 cells per row (symbol + 3 timeframes + sync + age + 2 AOI + 3 entry
+   // timeframes + entry verdict).  Plus 1 trailing message row.
+   int pool = 22 + g_maxRows * 12 + 2;
    HideFrom(id, pool);
    SizeBackground(row + 1);
   }
@@ -1524,9 +1841,17 @@ int OnInit()
    g_scanAOI       = ScanAOI;
    g_aoiExtend     = MathMax(5, MathMin(500, AOIExtendBars));
 
+   g_scanEntries     = ScanEntries;
+   g_entryMinConfirm = MathMax(1, MathMin(MAX_ENTRY, EntryMinConfirm));
+   g_entryAllowTested = EntryAllowTested;
+
    g_tfs[0] = TF_High;
    g_tfs[1] = TF_Mid;
    g_tfs[2] = TF_Fast;
+
+   g_efs[0] = TF_Entry1;
+   g_efs[1] = TF_Entry2;
+   g_efs[2] = TF_Entry3;
 
    IndicatorShortName("MSS " + TFLabel(g_tfs[0]) + "/" + TFLabel(g_tfs[1]) + "/" + TFLabel(g_tfs[2]));
 

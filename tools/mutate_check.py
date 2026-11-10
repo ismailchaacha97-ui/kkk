@@ -55,6 +55,35 @@ MUTATIONS = [
     ("pivot time output dropped",
      "tOut[0] = tArr[p];",
      "tOut[0] = 0;"),
+
+    # --- EntrySignal ------------------------------------------------------
+    ("demand zone asks for bearish structure instead",
+     "int want = (aoiDir == AOI_DEMAND) ? ST_BULL : ST_BEAR;",
+     "int want = (aoiDir == AOI_DEMAND) ? ST_BEAR : ST_BULL;"),
+
+    ("minConfirm threshold ignored, one vote always enough",
+     "if(n < need) return(ENTRY_NONE);",
+     "if(n < 1)    return(ENTRY_NONE);"),
+
+    ("upper clamp on minConfirm dropped",
+     "if(need > MAX_ENTRY) need = MAX_ENTRY;",
+     "if(0)                  need = MAX_ENTRY;"),
+
+    ("lower clamp on minConfirm dropped",
+     "if(need < 1) need = 1;",
+     "if(0)        need = 1;"),
+
+    ("undirected zone still produces a signal",
+     "if(aoiDir != AOI_DEMAND && aoiDir != AOI_SUPPLY) return(ENTRY_NONE);",
+     "if(0)                                                return(ENTRY_NONE);"),
+
+    ("short entries reported as long",
+     "out[0] = (aoiDir == AOI_DEMAND) ? ENTRY_LONG : ENTRY_SHORT;",
+     "out[0] = ENTRY_LONG;"),
+
+    ("confirm count always reported as three",
+     "out[1] = n;",
+     "out[1] = MAX_ENTRY;"),
 ]
 
 
@@ -105,7 +134,7 @@ def main():
     if missed or rc != 0:
         print("\nFAIL: %d mutation(s) went undetected: %s" % (len(missed), missed))
         return 1
-    print("\nok: all %d mutations were caught by the AOI fixtures" % len(MUTATIONS))
+    print("\nok: all %d mutations were caught by the core fixtures" % len(MUTATIONS))
     return 0
 
 
