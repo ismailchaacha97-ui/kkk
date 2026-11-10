@@ -457,6 +457,10 @@ input bool   EntryAllowTested   = false;              // also signal on zones pr
 input bool   EntryAlert         = true;               // alert when a new entry signal appears
 input color  ColorEntryLong     = C'60,190,140';      // long entry
 input color  ColorEntryShort    = C'230,110,120';     // short entry
+input bool   DrawEntryArrows    = true;               // draw an arrow on this chart for each entry
+input bool   EntryArrowEveryBar = false;              // false = only the bar the signal appeared on
+input int    EntryArrowPoints   = 100;                // arrow offset from the bar, in points
+input int    EntryArrowMax      = 50;                 // how many entry arrows to keep on the chart
 
 
 //============================= GLOBALS ==============================
@@ -521,6 +525,13 @@ int      g_aoiAlerted = 0;   // bitmask of the W1/D1 zones we already alerted on
 bool     g_scanEntries;
 int      g_entryMinConfirm;
 bool     g_entryAllowTested;
+int      g_arrowPoints;
+int      g_arrowMax;
+string   g_arrowNames[];        // ring buffer of arrow object names, oldest first
+int      g_arrowHead    = 0;    // next slot to write in the ring
+int      g_arrowUsed    = 0;    // how many slots hold a live arrow
+int      g_arrowLastSig = ENTRY_NONE; // signal we last drew for (re-arms on NONE)
+datetime g_arrowLastBar = 0;    // bar we last stamped an arrow on
 
 ENUM_TIMEFRAMES g_tfs[MAX_TF];
 ENUM_TIMEFRAMES g_efs[MAX_ENTRY];   // entry timeframes
@@ -1046,6 +1057,7 @@ void OnPassComplete()
    CheckEntryAlert();
    if(ShowPivotsOnChart) DrawChartPivots();
    DrawAOIZones();
+   DrawEntryArrows();
 
    if(PrintResults)
      {
@@ -1712,6 +1724,112 @@ void DrawAOIZones()
   }
 
 //+------------------------------------------------------------------+
+//| Entry arrows for the chart symbol.                               |
+//|                                                                  |
+//| An arrow is only ever drawn for a signal that is live RIGHT NOW. |
+//| It is not a backtest: the scanner has no memory of what the      |
+//| entry timeframes looked like on past bars, so it cannot claim a  |
+//| signal existed back there. What you get is a marker saying "an   |
+//| entry was valid here", stamped on the bar it was detected on.    |
+//+------------------------------------------------------------------+
+void ClearEntryArrows()
+  {
+   ObjectsDeleteAll(0, PREFIX + "ENT");
+   for(int i = 0; i < ArraySize(g_arrowNames); i++) g_arrowNames[i] = "";
+   g_arrowHead    = 0;
+   g_arrowUsed    = 0;
+   g_arrowLastSig = ENTRY_NONE;
+   g_arrowLastBar = 0;
+  }
+
+// Ring buffer of arrow names, so the oldest can be retired once the
+// chart is carrying EntryArrowMax of them.
+void RetireOldestArrow()
+  {
+   if(g_arrowUsed < g_arrowMax) return;
+   string old = g_arrowNames[g_arrowHead];
+   if(StringLen(old) > 0 && ObjectFind(0, old) >= 0) ObjectDelete(0, old);
+  }
+
+void RememberArrow(string name)
+  {
+   RetireOldestArrow();
+   g_arrowNames[g_arrowHead] = name;
+   g_arrowHead = (g_arrowHead + 1) % g_arrowMax;
+   if(g_arrowUsed < g_arrowMax) g_arrowUsed++;
+  }
+
+void DrawEntryArrow(int idx, datetime barTime)
+  {
+   int sig = g_syms[idx].entrySig;
+   if(sig == ENTRY_NONE) return;
+
+   bool up   = (sig == ENTRY_LONG);
+   string nm = PREFIX + "ENT" + (up ? "L" : "S") + IntegerToString((int)barTime);
+   if(ObjectFind(0, nm) >= 0) return;         // already stamped on this bar
+
+   double off   = g_arrowPoints * _Point;
+   double price = up ? iLow(Symbol(), 0, 0) - off : iHigh(Symbol(), 0, 0) + off;
+   if(price <= 0.0) return;
+
+   if(!ObjectCreate(0, nm, OBJ_ARROW, 0, barTime, price)) return;
+
+   // 233 = up arrow, 234 = down arrow. ANCHOR_TOP hangs the icon BELOW its
+   // price point, ANCHOR_BOTTOM sits it ABOVE - same rule as the swing dots.
+   ObjectSetInteger(0, nm, OBJPROP_ARROWCODE,  up ? 233 : 234);
+   ObjectSetInteger(0, nm, OBJPROP_ANCHOR,     up ? ANCHOR_TOP : ANCHOR_BOTTOM);
+   ObjectSetInteger(0, nm, OBJPROP_COLOR,      up ? ColorEntryLong : ColorEntryShort);
+   ObjectSetInteger(0, nm, OBJPROP_WIDTH,      2);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, nm, OBJPROP_SELECTED,   false);
+   ObjectSetInteger(0, nm, OBJPROP_HIDDEN,     true);
+   ObjectSetInteger(0, nm, OBJPROP_BACK,       false);
+   ObjectSetString (0, nm, OBJPROP_TOOLTIP,
+                    (up ? "LONG" : "SHORT") + " entry | " + g_syms[idx].symbol +
+                    " | in " + TFLabel(g_tfs[g_syms[idx].entryTF]) +
+                    ((g_syms[idx].aoiType[g_syms[idx].entryTF] == AOI_DEMAND) ? " DEMAND" : " SUPPLY") +
+                    " zone | " + IntegerToString(g_syms[idx].entryConfirm) + "/" +
+                    IntegerToString(MAX_ENTRY) + " entry TFs agree");
+
+   RememberArrow(nm);
+  }
+
+void DrawEntryArrows()
+  {
+   if(!g_scanEntries || !DrawEntryArrows)
+     {
+      if(g_arrowUsed > 0) ClearEntryArrows();
+      return;
+     }
+
+   int ci = FindIdx(Symbol());
+   if(ci < 0) return;                        // chart symbol is not in the scan list
+
+   datetime barTime = iTime(Symbol(), 0, 0);
+   if(barTime <= 0) return;
+
+   int sig = g_syms[ci].entrySig;
+
+   if(EntryArrowEveryBar)
+     {
+      // one arrow per bar the signal is alive on
+      if(barTime != g_arrowLastBar && sig != ENTRY_NONE)
+        {
+         DrawEntryArrow(ci, barTime);
+         g_arrowLastBar = barTime;
+        }
+     }
+   else
+     {
+      // only the bar the signal first appeared on, so a signal that holds
+      // for six bars leaves one marker rather than a stripe of them
+      if(sig != ENTRY_NONE && sig != g_arrowLastSig) DrawEntryArrow(ci, barTime);
+     }
+
+   g_arrowLastSig = sig;                     // falling back to NONE re-arms
+  }
+
+//+------------------------------------------------------------------+
 //| One-shot alert when price on this chart enters a live W1/D1 AOI.  |
 //+------------------------------------------------------------------+
 void CheckAOIAlert()
@@ -1844,6 +1962,14 @@ int OnInit()
    g_scanEntries     = ScanEntries;
    g_entryMinConfirm = MathMax(1, MathMin(MAX_ENTRY, EntryMinConfirm));
    g_entryAllowTested = EntryAllowTested;
+   g_arrowPoints     = MathMax(1, MathMin(5000, EntryArrowPoints));
+   g_arrowMax        = MathMax(1, MathMin(500, EntryArrowMax));
+   g_arrowLastBar    = 0;
+   g_arrowLastSig    = ENTRY_NONE;
+   g_arrowHead       = 0;
+   g_arrowUsed       = 0;
+   ArrayResize(g_arrowNames, g_arrowMax);
+   for(int i = 0; i < g_arrowMax; i++) g_arrowNames[i] = "";
 
    g_tfs[0] = TF_High;
    g_tfs[1] = TF_Mid;

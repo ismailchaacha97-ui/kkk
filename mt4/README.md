@@ -176,6 +176,29 @@ the sync alerts.
 **`EntryMinConfirm` is clamped to 1–3**, so `0` cannot disable the check and
 `99` cannot make it unreachable.
 
+### Entry arrows on the chart
+
+With `DrawEntryArrows = true`, the chart symbol gets an arrow whenever an entry
+signal is live: a green **up arrow (233)** below the bar for a long, a red
+**down arrow (234)** above it for a short. Hover one for a tooltip naming the
+zone, its direction, and how many entry timeframes agreed.
+
+By default an arrow is stamped only on **the bar the signal first appeared
+on**, so a signal that holds for six bars leaves one marker rather than a
+stripe of them. Set `EntryArrowEveryBar = true` to mark every bar the signal is
+alive on instead.
+
+`EntryArrowMax` (clamped 1–500) caps how many arrows stay on the chart; the
+oldest is retired first. `EntryArrowPoints` (clamped 1–5000) is the offset from
+the bar, in points.
+
+**These arrows are not a backtest.** The scanner keeps no history of what the
+entry timeframes looked like on past bars, so it cannot claim a signal existed
+back there. An arrow means "an entry was valid here, detected on this bar" —
+not "this is where you should have entered". Arrows only ever appear at the
+right-hand edge and accumulate forward from the moment you attach the
+indicator.
+
 ---
 
 ## The settings that matter most
@@ -206,6 +229,10 @@ the sync alerts.
 | `EntryAllowTested` | `false` | Also signal on zones price has touched and left, not only ones it is inside |
 | `EntryAlert` | `true` | Alert when a symbol acquires an entry signal |
 | `ColorEntryLong` / `ColorEntryShort` | green / red | Entry verdict colours |
+| `DrawEntryArrows` | `true` | Stamp an arrow on this chart for each entry signal |
+| `EntryArrowEveryBar` | `false` | `false` = only the bar the signal appeared on; `true` = every bar it is alive on |
+| `EntryArrowPoints` | `100` | Arrow offset from the bar, in points (clamped 1–5000) |
+| `EntryArrowMax` | `50` | How many arrows to keep on the chart before retiring the oldest (clamped 1–500) |
 
 **Note on broker suffixes.** If your broker uses `EURUSD.m` / `EURUSDm`,
 `IncludeFilter` matching is a plain substring test, so `EUR` still matches.
@@ -241,7 +268,7 @@ $ python3 tools/test_core.py
 extracted CORE verbatim (13914 chars); stripped '&' from 26 array parameter
 declarations for C, nothing else changed
 ...
-272 passed, 0 failed
+287 passed, 0 failed
 ```
 
 Covered: clean up/down trends, expanding and contracting ranges, 2-pivot and
@@ -258,17 +285,17 @@ never producing a signal in *either* polarity, and the `minConfirm` clamps.
 
 **1b. Those tests are checked against deliberately broken code.** A green suite
 only means something if it goes red when the code is wrong, so
-`tools/mutate_check.py` applies 16 small defects to `FindAOI` and
+`tools/mutate_check.py` applies 17 small defects to `FindAOI` and
 `EntrySignal`, re-runs the suite after each one, requires every one to be
 caught *by a failing assertion* (a compile error does not count as a catch),
 and restores the file afterwards.
 
 ```
 $ python3 tools/mutate_check.py
-baseline (unmutated)     : 272 passed, 0 failed  [pass]
+baseline (unmutated)     : 287 passed, 0 failed  [pass]
   INSIDE ignores the zone ceiling                      CAUGHT  [257 passed, 6 failed]
   ...
-ok: all 16 mutations were caught by the core fixtures
+ok: all 17 mutations were caught by the core fixtures
 ```
 
 This is not decoration, and it has caught real gaps twice. The first draft of
@@ -286,8 +313,8 @@ so those are checked statically:
 
 ```
 $ python3 tools/lint_mq4.py
-lint ok: brackets balanced, 47 external calls and 48 constants all
-recognised, all 62 settings referenced
+lint ok: brackets balanced, 47 external calls and 49 constants all
+recognised, all 66 settings referenced
 ```
 
 ```
