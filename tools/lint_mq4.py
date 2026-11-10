@@ -286,8 +286,9 @@ def main():
         for f in fails:
             print("  - %s" % f)
         return 1
-    print("\nlint ok: brackets balanced, %d external calls and %d constants all "
-          "recognised, all %d settings referenced"
+    print("\nlint ok: brackets balanced; %d external calls and %d constants "
+          "recognised; no input/function/global name collisions; anchor enums "
+          "match their object type; all %d settings referenced"
           % (len(set(called) & BUILTINS), len(used_caps - own_defines), len(real_inputs)))
     return 0
 

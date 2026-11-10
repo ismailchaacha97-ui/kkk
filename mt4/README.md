@@ -313,8 +313,9 @@ so those are checked statically:
 
 ```
 $ python3 tools/lint_mq4.py
-lint ok: brackets balanced, 47 external calls and 49 constants all
-recognised, all 66 settings referenced
+lint ok: brackets balanced; 47 external calls and 49 constants recognised;
+no input/function/global name collisions; anchor enums match their object
+type; all 66 settings referenced
 ```
 
 ```
@@ -324,6 +325,29 @@ $ python3 tools/check_mql4_api.py     # ~10 min, uses the GitHub code-search API
 
 The second script cross-checks every MQL4 built-in and constant the file uses
 against real `.mq4` sources, which catches misspelled or MQL5-only names.
+
+**Each lint rule exists because a real defect got past everything else.** They
+are not speculative hygiene:
+
+- *Name collisions.* MQL4 keeps inputs, globals and functions in **one**
+  namespace. `ScanEntries` and `DrawEntryArrows` each named both an `input`
+  and a function. Every other check passed — the call still resolved to
+  *something*, and the API cross-check only ever looks names up in other
+  people's files. The lint now fails on any input/function, input/global or
+  function/global collision.
+- *Anchor enum membership.* `ANCHOR_TOP` / `ANCHOR_BOTTOM` belong to
+  `ENUM_ARROW_ANCHOR` (for `OBJ_ARROW`); `ANCHOR_*_UPPER` / `ANCHOR_*_LOWER`
+  belong to `ENUM_ANCHOR_POINT` (for `OBJ_LABEL` / `OBJ_RECTANGLE_LABEL`).
+  `ANCHOR_LEFT` and `ANCHOR_RIGHT` are valid in **both**, so a wrong pick can
+  compile silently and just render oddly. The lint resolves the constant
+  whether it is written inline or reaches `OBJPROP_ANCHOR` through a variable
+  assigned in another function (`g_anchor` is set in `RenderPanel` and read in
+  `Place`).
+
+Both were verified by reintroducing the defect and requiring exit code 1. The
+first draft of the anchor check handled only the inline case and let the
+`g_anchor` bug through — the very bug it was written for — which is why the
+variable path is resolved too.
 
 **What these offline checks are worth — measured, not assumed.** The first
 version of this indicator passed both of them cleanly and MetaEditor still
