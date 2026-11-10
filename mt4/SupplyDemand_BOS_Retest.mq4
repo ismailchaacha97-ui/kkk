@@ -1071,10 +1071,12 @@ void DrawZones()
       lbl = lbl + "  " + StateText(Zones[i].state);
       if(Zones[i].touches > 0) lbl = lbl + "  (" + IntegerToString(Zones[i].touches) + " test)";
       if(alive && Zones[i].touching) lbl = lbl + "  - wait " + TFText(gLtfTF) + " confirm";
-      ObjText(base + "_t", t2, Zones[i].top, lbl, c, 8);
+      //--- keep the label inside the zone so it stays on screen
+      datetime lt = t1 + (t2 - t1) / 3;
+      ObjText(base + "_t", lt, Zones[i].top, lbl, c, 8);
 
       if(Zones[i].signaled)
-         DrawTradeLevels(i, right);
+         DrawTradeLevels(i, right - 8 * ps);
      }
   }
 
