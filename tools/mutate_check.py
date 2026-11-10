@@ -84,6 +84,13 @@ MUTATIONS = [
     ("confirm count always reported as three",
      "out[1] = n;",
      "out[1] = MAX_ENTRY;"),
+
+    # ST_FEW means "history exists but not enough swings to read" - it is
+    # unknown, not a vote. Treating anything that is not the opposite
+    # direction as a confirmation is the easy way to get this wrong.
+    ("unknown structure counts as confirming",
+     "if(st1 == want) n++;",
+     "if(st1 != ST_BEAR) n++;"),
 ]
 
 

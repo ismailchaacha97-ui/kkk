@@ -347,6 +347,15 @@ ENTRY_CASES = [
     ("any_is_not_a_direction",     AOI_ANY,    (ST_BULL, ST_BULL, ST_BULL), 1, (ENTRY_NONE, 0)),
     ("any_bearish_not_short",      AOI_ANY,    (ST_BEAR, ST_BEAR, ST_BEAR), 1, (ENTRY_NONE, 0)),
     ("bogus_direction",            7,          (ST_BEAR, ST_BEAR, ST_BEAR), 1, (ENTRY_NONE, 0)),
+    # ST_FEW is what ScanEntries feeds in when a symbol has history but not
+    # enough swings yet. It is display-only and means "unknown", so it must
+    # never count toward the tally - a symbol with no readable entry
+    # structure has not confirmed anything.
+    ("few_counts_as_nothing",      AOI_DEMAND, (ST_FEW, ST_FEW, ST_FEW),   1, (ENTRY_NONE, 0)),
+    ("few_supply_counts_nothing",  AOI_SUPPLY, (ST_FEW, ST_FEW, ST_FEW),   1, (ENTRY_NONE, 0)),
+    ("one_real_among_few",         AOI_DEMAND, (ST_FEW, ST_BULL, ST_FEW),  1, (ENTRY_LONG, 1)),
+    ("few_cannot_reach_min2",      AOI_DEMAND, (ST_FEW, ST_BULL, ST_FEW),  2, (ENTRY_NONE, 1)),
+    ("few_mixed_with_opposite",    AOI_SUPPLY, (ST_FEW, ST_BULL, ST_FEW),  1, (ENTRY_NONE, 0)),
     # minConfirm is clamped, so nonsense settings cannot disable or force it
     ("min0_clamps_to_1",           AOI_DEMAND, (ST_NONE, ST_NONE, ST_NONE), 0, (ENTRY_NONE, 0)),
     ("min0_still_fires_on_one",    AOI_DEMAND, (ST_NONE, ST_NONE, ST_BULL), 0, (ENTRY_LONG, 1)),
