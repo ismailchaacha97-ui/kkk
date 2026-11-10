@@ -1765,7 +1765,9 @@ void DrawEntryArrow(int idx, datetime barTime)
    if(sig == ENTRY_NONE) return;
 
    bool up   = (sig == ENTRY_LONG);
-   string nm = PREFIX + "ENT" + (up ? "L" : "S") + IntegerToString((int)barTime);
+   // datetime is already a long and IntegerToString takes a long, so no cast:
+   // narrowing it to int would truncate in 2038 and buys nothing here.
+   string nm = PREFIX + "ENT" + (up ? "L" : "S") + IntegerToString((long)barTime);
    if(ObjectFind(0, nm) >= 0) return;         // already stamped on this bar
 
    double off   = g_arrowPoints * _Point;
