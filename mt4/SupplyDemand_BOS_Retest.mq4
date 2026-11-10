@@ -923,7 +923,8 @@ void ProcessZonesOnBar(int s, bool liveBar)
            {
             Zones[i].touching   = true;
             Zones[i].visitStart = bt;
-            Zones[i].touches    = Zones[i].touches + 1;
+            //--- one test per bar, even with many ticks inside the same bar
+            if(Zones[i].lastTouch != bt) Zones[i].touches = Zones[i].touches + 1;
            }
          Zones[i].lastTouch = bt;
          if(Zones[i].state == ST_FRESH) Zones[i].state = ST_INPLAY;
