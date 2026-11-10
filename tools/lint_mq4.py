@@ -188,6 +188,77 @@ def main():
         fails.append("function '%s' (line %d) collides with a global of the same "
                      "name (line %d)" % (name, func_names[name], global_names[name]))
 
+    # ---- 2d. anchor enum membership --------------------------------------
+    # ANCHOR_TOP / ANCHOR_BOTTOM belong to ENUM_ARROW_ANCHOR (OBJ_ARROW);
+    # ANCHOR_*_UPPER / ANCHOR_*_LOWER belong to ENUM_ANCHOR_POINT (OBJ_LABEL,
+    # OBJ_RECTANGLE_LABEL). Two names - ANCHOR_LEFT and ANCHOR_RIGHT - are
+    # valid in both, which is why a wrong pick can slip through the compiler.
+    # Getting this wrong is what produced 4 of the original 22 MetaEditor
+    # errors, and no other check here can see it.
+    #
+    # A constant can reach OBJPROP_ANCHOR two ways: written inline, or via a
+    # variable assigned somewhere else entirely (g_anchor is set in
+    # RenderPanel and read in Place). Both paths are resolved here, because
+    # the variable path is the one that actually caused the original bug.
+    ANCHOR_ARROW = {"ANCHOR_TOP", "ANCHOR_BOTTOM", "ANCHOR_UPPER_LEFT",
+                    "ANCHOR_UPPER_RIGHT", "ANCHOR_LOWER_LEFT", "ANCHOR_LOWER_RIGHT"}
+    ANCHOR_POINT = {"ANCHOR_LEFT_UPPER", "ANCHOR_LEFT_LOWER",
+                    "ANCHOR_RIGHT_UPPER", "ANCHOR_RIGHT_LOWER",
+                    "ANCHOR_UPPER", "ANCHOR_LOWER", "ANCHOR_CENTER"}
+
+    # Every ANCHOR_* constant ever assigned to each variable. The (?!=) guards
+    # stop this matching the first '=' of a '==' comparison, which would
+    # otherwise attribute `if(x == 1) { g_anchor = ANCHOR_..; }` to `x`.
+    anchor_vars = {}
+    for m in re.finditer(r"(?<![=!<>+\-*/&|^])\b(\w+)\s*=(?!=)\s*([^;]+);", clean):
+        vals = re.findall(r"\b(ANCHOR_[A-Z_]+)\b", m.group(2))
+        if vals:
+            anchor_vars.setdefault(m.group(1), set()).update(vals)
+
+    for m in re.finditer(r"^\s*[A-Za-z_][\w]*\s+([A-Za-z_]\w*)\s*\(", clean, re.M):
+        open_brace = clean.find("{", m.end())
+        if open_brace < 0:
+            continue
+        depth, i = 0, open_brace
+        while i < len(clean):
+            if clean[i] == "{":
+                depth += 1
+            elif clean[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        body = clean[open_brace:i + 1]
+        objs = set(re.findall(r"ObjectCreate\s*\([^;]*?,\s*(OBJ_\w+)", body))
+        wants_arrow = "OBJ_ARROW" in objs
+        wants_point = bool(objs & {"OBJ_LABEL", "OBJ_RECTANGLE_LABEL"})
+        if wants_arrow == wants_point:
+            continue                      # ambiguous or no text/arrow object here
+        for am in re.finditer(r"OBJPROP_ANCHOR\s*,\s*([^;]+?)\)\s*;", body):
+            expr = am.group(1)
+            consts = set(re.findall(r"\b(ANCHOR_[A-Z_]+)\b", expr))
+            # expand any variable in the expression to the constants assigned
+            # to it elsewhere in the file
+            via = set()
+            for ident in re.findall(r"\b([A-Za-z_]\w*)\b", expr):
+                if ident in anchor_vars and ident not in consts:
+                    consts |= anchor_vars[ident]
+                    via.add(ident)
+            for const in sorted(consts):
+                in_arrow, in_point = const in ANCHOR_ARROW, const in ANCHOR_POINT
+                if in_arrow == in_point:
+                    continue              # ANCHOR_LEFT / ANCHOR_RIGHT: valid in both
+                wrong = in_arrow if wants_point else in_point
+                if wrong:
+                    src = (" via '%s'" % sorted(via)[0]) if via else ""
+                    fails.append(
+                        "line %d: '%s' is %s but is set on %s, which needs %s%s"
+                        % (clean[:open_brace].count("\n") + 1, const,
+                           "ENUM_ARROW_ANCHOR" if in_arrow else "ENUM_ANCHOR_POINT",
+                           "/".join(sorted(objs)),
+                           "ENUM_ANCHOR_POINT" if wants_point else "ENUM_ARROW_ANCHOR",
+                           src))
+
     # ---- 3. inputs referenced --------------------------------------------
     inputs = re.findall(r"^\s*input\s+[\w<>]+\s+(\w+)\s*=", clean, re.M)
     for name in inputs:
