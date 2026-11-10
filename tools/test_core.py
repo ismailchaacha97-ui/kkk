@@ -29,6 +29,8 @@ END = "=== CORE-END"
 ST_NONE, ST_BULL, ST_BEAR, ST_WIDE, ST_INSIDE = 1, 2, 3, 4, 5
 RES_INSUFFICIENT, RES_NODATA = -1, -2
 SYNC_NONE, SYNC_BULL, SYNC_BEAR = 0, 1, 2
+AOI_NONE, AOI_DEMAND, AOI_SUPPLY, AOI_ANY = 0, 1, 2, 3
+AOI_FRESH, AOI_TESTED, AOI_INSIDE, AOI_SPENT = 0, 1, 2, 3
 
 STATE_NAMES = {
     ST_NONE: "ST_NONE", ST_BULL: "ST_BULL", ST_BEAR: "ST_BEAR",
@@ -90,9 +92,12 @@ def extract_core(path):
         raise SystemExit("CORE markers not found in %s" % path)
     body = src[b:e]
     body = body[body.find("\n") + 1:]           # drop the marker line itself
+    # Word-boundary match, not a bare substring: "MovedOut_FindAOI" contains
+    # "FindAOI" and would otherwise slip through this guard.
     for fn in ("IsPivotHigh", "IsPivotLow", "CollectPivots",
-               "ClassifyStructure", "SyncOf", "MinBarsNeeded", "AnalyzeSeries"):
-        if fn not in body:
+               "ClassifyStructure", "SyncOf", "MinBarsNeeded", "AnalyzeSeries",
+               "FindAOI"):
+        if not re.search(r"(?<![A-Za-z0-9_])" + re.escape(fn) + r"\s*\(", body):
             raise SystemExit("expected function %s inside the CORE block" % fn)
 
     c_body = core_to_c(body)
@@ -200,6 +205,152 @@ SYNC_MATRIX = [
     (ST_NONE,  ST_NONE,  ST_NONE,  SYNC_NONE),
 ]
 
+# --------------------------------------------------------------------------
+# FindAOI fixtures.  Index 0 is the NEWEST bar, exactly like the .mq4 sees it.
+# Hand-built so every level is known: the pivot index, the zone it implies
+# (zone = the full candle range of that bar), and what price then did to it.
+#
+#   wantDir  : AOI_DEMAND / AOI_SUPPLY / AOI_ANY
+#   expect   : (direction, state, pivot shift, zone top, zone bottom) or None
+#              when the call must return AOI_NONE
+# --------------------------------------------------------------------------
+UPTREND = {
+    "high":  [154, 150, 146, 140, 132, 124, 108, 114, 120, 128, 136, 144, 152, 160],
+    "low":   [150, 146, 142, 136, 128, 120, 100, 108, 116, 124, 132, 140, 148, 156],
+    "close": [152, 148, 144, 138, 130, 122, 104, 111, 118, 126, 134, 142, 150, 158],
+}
+DOWNTREND = {
+    "high":  [100, 104, 110, 118, 126, 134, 150, 142, 134, 126, 118, 110, 102, 94],
+    "low":   [96, 100, 106, 114, 122, 130, 142, 136, 128, 120, 112, 104, 96, 88],
+    "close": [98, 102, 108, 116, 124, 132, 146, 139, 131, 123, 115, 107, 99, 91],
+}
+
+AOI_CASES = [
+    # name, series, wantDir, maxLookback, (dir, state, shift, top, bot)
+    ("demand_fresh",  UPTREND, AOI_DEMAND, 250, (AOI_DEMAND, AOI_FRESH,  6, 108.0, 100.0)),
+    ("demand_tested", {
+        "high":  [146, 112, 136, 132, 128, 124, 120, 116, 108, 114, 122, 130, 138, 146],
+        "low":   [140, 104, 130, 126, 122, 118, 114, 110, 100, 108, 116, 124, 132, 140],
+        "close": [143, 107, 133, 129, 125, 121, 117, 113, 104, 111, 119, 127, 135, 143],
+    }, AOI_DEMAND, 250, (AOI_DEMAND, AOI_TESTED, 8, 108.0, 100.0)),
+    ("demand_inside", {
+        "high":  [108, 112, 136, 132, 128, 124, 120, 116, 108, 114, 122, 130, 138, 146],
+        "low":   [104, 104, 130, 126, 122, 118, 114, 110, 100, 108, 116, 124, 132, 140],
+        "close": [105, 107, 133, 129, 125, 121, 117, 113, 104, 111, 119, 127, 135, 143],
+    }, AOI_DEMAND, 250, (AOI_DEMAND, AOI_INSIDE, 8, 108.0, 100.0)),
+    ("demand_spent", {
+        "high":  [98, 104, 136, 132, 128, 124, 120, 116, 108, 114, 122, 130, 138, 146],
+        "low":   [92, 96, 130, 126, 122, 118, 114, 110, 100, 108, 116, 124, 132, 140],
+        "close": [90, 94, 133, 129, 125, 121, 117, 113, 104, 111, 119, 127, 135, 143],
+    }, AOI_DEMAND, 250, (AOI_DEMAND, AOI_SPENT, 8, 108.0, 100.0)),
+
+    ("supply_fresh",  DOWNTREND, AOI_SUPPLY, 250, (AOI_SUPPLY, AOI_FRESH, 6, 150.0, 142.0)),    ("supply_tested", {
+        "high":  [146, 148, 120, 124, 128, 132, 136, 138, 150, 142, 134, 126, 118, 110],
+        "low":   [140, 141, 114, 118, 122, 126, 130, 131, 142, 134, 126, 118, 110, 102],
+        "close": [141, 144, 117, 121, 125, 129, 133, 134, 146, 138, 130, 122, 114, 106],
+    }, AOI_SUPPLY, 250, (AOI_SUPPLY, AOI_TESTED, 8, 150.0, 142.0)),
+    ("supply_spent", {
+        "high":  [154, 156, 120, 124, 128, 132, 136, 138, 150, 142, 134, 126, 118, 110],
+        "low":   [148, 150, 114, 118, 122, 126, 130, 131, 142, 134, 126, 118, 110, 102],
+        "close": [152, 153, 117, 121, 125, 129, 133, 134, 146, 138, 130, 122, 114, 106],
+    }, AOI_SUPPLY, 250, (AOI_SUPPLY, AOI_SPENT, 8, 150.0, 142.0)),
+
+    # The bar straight after the pivot almost always overlaps the zone, since
+    # the zone IS that bar's full range.  These two fixtures put such a bar in
+    # place and then let price leave for good: the correct verdict is FRESH,
+    # because a touch only counts once price has left the zone at least once.
+    ("demand_fresh_despite_adjacent_overlap", {
+        "high":  [154, 150, 146, 140, 132, 110, 108, 114, 120, 128, 136, 144, 152, 160],
+        "low":   [150, 146, 142, 136, 128, 105, 100, 108, 116, 124, 132, 140, 148, 156],
+        "close": [152, 148, 144, 138, 130, 107, 104, 111, 118, 126, 134, 142, 150, 158],
+    }, AOI_DEMAND, 250, (AOI_DEMAND, AOI_FRESH, 6, 108.0, 100.0)),
+    ("supply_fresh_despite_adjacent_overlap", {
+        "high":  [100, 104, 110, 118, 126, 146, 150, 142, 134, 126, 118, 110, 102, 94],
+        "low":   [96, 100, 106, 114, 122, 141, 142, 136, 128, 120, 112, 104, 96, 88],
+        "close": [98, 102, 108, 116, 124, 144, 146, 139, 131, 123, 115, 107, 99, 91],
+    }, AOI_SUPPLY, 250, (AOI_SUPPLY, AOI_FRESH, 6, 150.0, 142.0)),
+
+    # AOI_ANY has no view: it takes whichever pivot is MORE RECENT.
+    # The uptrend has no confirmed swing high inside the window, so the only
+    # candidate is the swing low -> demand.  The downtrend mirrors it.
+    ("any_picks_demand_when_no_swing_high", UPTREND,   AOI_ANY, 250,
+     (AOI_DEMAND, AOI_FRESH, 6, 108.0, 100.0)),
+    ("any_picks_supply_when_no_swing_low",  DOWNTREND, AOI_ANY, 250,
+     (AOI_SUPPLY, AOI_FRESH, 6, 150.0, 142.0)),
+
+    # Both a swing high and a swing low are present here, so AOI_ANY has a
+    # genuine choice to make and must take the more recent of the two.
+    # 16 bars, no wick games: mid +/- 4.
+    ("any_prefers_recent_low_over_older_high", {
+        "high":  [170, 162, 154, 148, 138, 146, 154, 162, 170, 162, 154, 144, 134, 124, 114, 104],
+        "low":   [162, 154, 146, 140, 130, 138, 146, 154, 162, 154, 146, 136, 126, 116, 106, 96],
+        "close": [166, 158, 150, 144, 134, 142, 150, 158, 166, 158, 150, 140, 130, 120, 110, 100],
+    }, AOI_ANY, 250, (AOI_DEMAND, AOI_FRESH, 4, 138.0, 130.0)),
+    ("any_prefers_recent_high_over_older_low", {
+        "high":  [138, 146, 154, 160, 170, 162, 154, 146, 138, 146, 154, 164, 174, 184, 194, 204],
+        "low":   [130, 138, 146, 152, 162, 154, 146, 138, 130, 138, 146, 156, 166, 176, 186, 196],
+        "close": [134, 142, 150, 156, 166, 158, 150, 142, 134, 142, 150, 160, 170, 180, 190, 200],
+    }, AOI_ANY, 250, (AOI_SUPPLY, AOI_FRESH, 4, 170.0, 162.0)),
+
+    # A requested direction is never silently substituted: the uptrend holds
+    # no confirmed swing high in range, so a supply request must yield NONE.
+    ("supply_requested_but_absent", UPTREND, AOI_SUPPLY, 250, None),
+    ("demand_requested_but_absent", DOWNTREND, AOI_DEMAND, 250, None),
+
+    # maxLookback clamps the pivot scan.  The swing low sits at shift 6, so a
+    # lookback of 6 bars cannot reach it but 7 can.
+    ("lookback_6_cannot_reach_pivot", UPTREND, AOI_DEMAND, 6, None),
+    ("lookback_7_reaches_pivot",      UPTREND, AOI_DEMAND, 7,
+     (AOI_DEMAND, AOI_FRESH, 6, 108.0, 100.0)),
+]
+
+# (name, series, wantDir, leftBars, rightBars, maxLookback) - every one of these
+# must come back AOI_NONE with zone[0]/zone[1] left at 0 and info[1] at -1.
+AOI_GUARDS = [
+    ("bad_wantdir",     UPTREND, 7,          2, 2, 250),
+    ("zero_leftbars",   UPTREND, AOI_DEMAND, 0, 2, 250),
+    ("zero_rightbars",  UPTREND, AOI_DEMAND, 2, 0, 250),
+    ("series_too_short", UPTREND, AOI_DEMAND, 6, 6, 250),   # 14 bars < 6+6+3
+    ("lookback_zero",   UPTREND, AOI_DEMAND, 2, 2, 0),
+]
+
+
+def aoi_case_c(name, series, wantdir, lb, rb, lookback, expected):
+    """Emit one FindAOI fixture as a C block. `expected` is None when the call
+    must return AOI_NONE."""
+    h, l, c = series["high"], series["low"], series["close"]
+    assert len(h) == len(l) == len(c), name
+    n = len(h)
+    for i in range(n):
+        assert h[i] >= l[i], "%s: high[%d] below low[%d]" % (name, i, i)
+    tm = [1700000000 + (n - 1 - i) * 3600 for i in range(n)]   # index 0 = newest
+
+    out = []
+    out.append("  {")
+    out.append("    double hi[] = %s;" % c_double_array(h))
+    out.append("    double lo[] = %s;" % c_double_array(l))
+    out.append("    double cl[] = %s;" % c_double_array(c))
+    out.append("    long   tm[] = %s;" % c_long_array(tm))
+    out.append("    double zone[2]; long tOut[1]; int info[3];")
+    out.append("    int r = FindAOI(hi, lo, cl, tm, %d, %d, %d, %d, %d, zone, tOut, info);"
+               % (n, lb, rb, wantdir, lookback))
+    if expected is None:
+        out.append('    expect_aoi("%s", r, AOI_NONE);' % name)
+        out.append('    expect_near("%s zone cleared", zone[0], 0.0);' % name)
+        out.append('    expect_near("%s zone cleared", zone[1], 0.0);' % name)
+        out.append('    expect_int("%s shift", info[1], -1);' % name)
+    else:
+        d, st, shift, top, bot = expected
+        out.append('    expect_aoi("%s dir", r, %d);' % (name, d))
+        out.append('    expect_aoi("%s info[0]", info[0], %d);' % (name, d))
+        out.append('    expect_aoistate("%s state", info[2], %d);' % (name, st))
+        out.append('    expect_int("%s pivot shift", info[1], %d);' % (name, shift))
+        out.append('    expect_near("%s zone top", zone[0], %.6f);' % (name, top))
+        out.append('    expect_near("%s zone bot", zone[1], %.6f);' % (name, bot))
+        out.append('    expect_int("%s zone time", (int)tOut[0], %d);' % (name, tm[shift]))
+    out.append("  }")
+    return out
+
 
 def build_c(core):
     out = []
@@ -240,6 +391,28 @@ static const char *syncname(int v)
   return "?";
 }
 
+static const char *aoiname(int v)
+{
+  switch(v){
+    case AOI_NONE:   return "AOI_NONE";
+    case AOI_DEMAND: return "AOI_DEMAND";
+    case AOI_SUPPLY: return "AOI_SUPPLY";
+    case AOI_ANY:    return "AOI_ANY";
+  }
+  return "?";
+}
+
+static const char *aostatename(int v)
+{
+  switch(v){
+    case AOI_FRESH:  return "FRESH";
+    case AOI_TESTED: return "TESTED";
+    case AOI_INSIDE: return "INSIDE";
+    case AOI_SPENT:  return "SPENT";
+  }
+  return "?";
+}
+
 static void expect_sync(const char *label, int got, int want)
 {
   if(got == want){ g_pass++; printf("  ok   %-34s -> %s\\n", label, syncname(got)); }
@@ -250,6 +423,18 @@ static void expect_state(const char *label, int got, int want)
 {
   if(got == want){ g_pass++; printf("  ok   %-34s -> %s\\n", label, stname(got)); }
   else { g_fail++; printf("  FAIL %-34s -> %s (expected %s)\\n", label, stname(got), stname(want)); }
+}
+
+static void expect_aoi(const char *label, int got, int want)
+{
+  if(got == want){ g_pass++; printf("  ok   %-34s -> %s\\n", label, aoiname(got)); }
+  else { g_fail++; printf("  FAIL %-34s -> %s (expected %s)\\n", label, aoiname(got), aoiname(want)); }
+}
+
+static void expect_aoistate(const char *label, int got, int want)
+{
+  if(got == want){ g_pass++; printf("  ok   %-34s -> %s\\n", label, aostatename(got)); }
+  else { g_fail++; printf("  FAIL %-34s -> %s (expected %s)\\n", label, aostatename(got), aostatename(want)); }
 }
 
 static void expect_int(const char *label, int got, int want)
@@ -438,6 +623,17 @@ static void expect_near(const char *label, double got, double want)
     out.append("}")
     out.append("")
 
+    # --- FindAOI ------------------------------------------------------------
+    out.append("static void run_aoi(void)")
+    out.append("{")
+    out.append('  printf("\\n[FindAOI] Weekly/Daily areas of interest\\n");')
+    for name, series, wantdir, lookback, expected in AOI_CASES:
+        out.extend(aoi_case_c(name, series, wantdir, 2, 2, lookback, expected))
+    for name, series, wantdir, lb, rb, lookback in AOI_GUARDS:
+        out.extend(aoi_case_c(name, series, wantdir, lb, rb, lookback, None))
+    out.append("}")
+    out.append("")
+
     out.append("""
 int main(void)
 {
@@ -449,6 +645,7 @@ int main(void)
   run_wide_fractal();
   run_direct();
   run_sync();
+  run_aoi();
   printf("\\n%d passed, %d failed\\n", g_pass, g_fail);
   return g_fail == 0 ? 0 : 1;
 }

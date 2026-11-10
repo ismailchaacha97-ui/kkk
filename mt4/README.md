@@ -7,6 +7,9 @@ timeframes:
 - all three **HH + HL** → `SYNC BULLISH` (green)
 - all three **LH + LL** → `SYNC BEARISH` (red)
 
+On top of that it marks the **Area Of Interest** on **Weekly and Daily** — the
+zone the current structure was built from — and draws it on the chart.
+
 File: `mt4/MQL4/Indicators/MarketStructureSyncScanner.mq4`
 
 ---
@@ -69,13 +72,14 @@ symbols 28    ready 26    pending 2    pass 14    11:32:05
 --------------------------------------------------
 SYNC BULLISH (3): EURUSD  GBPJPY  XAUUSD
 SYNC BEARISH (1): USDJPY
+AT W1/D1 AOI (2): EURUSD(W1)  USDJPY(D1)
 --------------------------------------------------
-SYMBOL        W1     D1     H4    SYNC     AGE
-EURUSD     HH HL HH HL HH HL    BULL     3/1/2
-GBPJPY     HH HL HH HL HH HL    BULL     5/2/4
-USDJPY     LH LL LH LL LH LL    BEAR     2/1/1
-AUDUSD     HH HL LH LL HH HL    -        4/6/2
-NZDUSD     ~load ~load HH HL    -        -/-/3
+SYMBOL        W1     D1     H4    SYNC     AGE        W1 AOI     D1 AOI
+EURUSD     HH HL HH HL HH HL    BULL     3/1/2    D 1.08432  D 1.08120
+GBPJPY     HH HL HH HL HH HL    BULL     5/2/4    S 193.450t D 191.020
+USDJPY     LH LL LH LL LH LL    BEAR     2/1/1    D 148.900  S 149.620>
+AUDUSD     HH HL LH LL HH HL    -        4/6/2    D 0.65210  -
+NZDUSD     ~load ~load HH HL    -        -/-/3    -          -
 ```
 
 - **AGE** = bars since the newest confirmed swing, per timeframe (`W1/D1/H4`).
@@ -83,7 +87,48 @@ NZDUSD     ~load ~load HH HL    -        -/-/3
 - **`~load`** history still downloading, **`nodat`** the broker has no usable
   history for that timeframe, **`~few`** history exists but not enough swings
   yet, **`mixed`** pivots do not form a clean sequence.
-- Rows are sorted synced-first, then alphabetical.
+- Rows are sorted **at-AOI first**, then synced, then alphabetical.
+
+---
+
+## What an AOI is, and how it is graded
+
+The **Area Of Interest** is the zone the current structure was built from — the
+swing point that *defines* the trend you are reading:
+
+| Structure on that timeframe | Zone taken | Colour |
+|---|---|---|
+| bullish (HH + HL) | the **last swing low** — a demand zone you want price to dip back into | green |
+| bearish (LH + LL) | the **last swing high** — a supply zone you want price to rally back into | red |
+| anything else | whichever of the two is **more recent** | follows the type |
+
+The zone is the **full candle range** of that swing bar (`high`..`low`), not just
+the close, because that is the area where orders were actually absorbed.
+
+Only **W1 and D1** get an AOI. H4 is left alone on purpose: the whole point is to
+line a fast timeframe up against the zones the higher timeframes drew, so grading
+H4 against its own zone answers a different question.
+
+**State suffix** on the panel price — what price has done to the zone since:
+
+| Suffix | Meaning |
+|---|---|
+| *(none)* | **FRESH** — price has not come back to the zone yet |
+| `t` | **TESTED** — price returned into the zone and held |
+| `>` | **INSIDE** — price is in the zone right now |
+| `x` | **SPENT** — price closed through the zone; it is invalidated |
+
+A touch only counts **after price has left the zone at least once**. Without that
+rule the bar immediately following the swing would always register a touch,
+because the zone *is* that bar's range.
+
+`SPENT` zones are hidden by default (`AOIShowSpent = false`) — a broken zone is
+no longer a zone.
+
+**On the chart**, the W1 and D1 zones of the chart symbol are drawn as filled
+rectangles running from the swing bar out to the right (`AOIExtendBars` wide),
+behind the candles. If price on the current chart enters a live zone, you get one
+alert — it re-arms only after price leaves again.
 
 ---
 
@@ -103,6 +148,12 @@ NZDUSD     ~load ~load HH HL    -        -/-/3
 | `AlertPopup` / `AlertPush` / `AlertEmail` / `AlertSound` | on/off/off/on | Fired the moment a symbol *becomes* synced |
 | `AlertCooldownMin` | `120` | Suppresses repeat alerts for the same symbol + direction |
 | `ShowPivotsOnChart` | `true` | Draws the swing points it actually used on the current chart, so you can eyeball the calls |
+| `ScanAOI` | `true` | Master switch for the Weekly/Daily Area Of Interest columns |
+| `DrawAOIOnChart` | `true` | Draws the chart symbol's W1/D1 zones as rectangles |
+| `AOIExtendBars` | `40` | How far right each drawn zone extends, in current-chart bars (clamped 5–500) |
+| `AOIShowSpent` | `false` | Also draw/report zones price has already closed through |
+| `AOIAlertOnTouch` | `true` | One alert when the chart symbol's price enters a live zone |
+| `ColorDemand` / `ColorSupply` / `ColorAOISpent` | green / red / grey | Zone colours |
 
 **Note on broker suffixes.** If your broker uses `EURUSD.m` / `EURUSDm`,
 `IncludeFilter` matching is a plain substring test, so `EUR` still matches.
@@ -120,9 +171,10 @@ There is no MetaEditor in CI, so the verification is split in two.
 **1. The structure engine is compiled and run for real.**
 Everything between the `//=== CORE-BEGIN` and `//=== CORE-END` markers in the
 `.mq4` — `IsPivotHigh`, `IsPivotLow`, `CollectPivots`, `ClassifyStructure`,
-`SyncOf`, `MinBarsNeeded`, `AnalyzeSeries` — is extracted **verbatim** (not
-re-implemented) and compiled with `gcc -std=c99 -Wall -Wextra`, then fed
-synthetic OHLC series with a known structure.
+`SyncOf`, `MinBarsNeeded`, `AnalyzeSeries`, `FindAOI` — is extracted
+**verbatim** (not re-implemented) and compiled with
+`gcc -std=c99 -Wall -Wextra`, then fed synthetic OHLC series with a known
+structure.
 
 The one edit made on the way in is stripping `&` from array parameter
 declarations, because MQL4 requires `double &high[]` and C has no such syntax.
@@ -134,17 +186,38 @@ different program.
 
 ```
 $ python3 tools/test_core.py
-extracted CORE verbatim (7678 chars); stripped '&' from 18 array parameter
+extracted CORE verbatim (12075 chars); stripped '&' from 25 array parameter
 declarations for C, nothing else changed
 ...
-73 passed, 0 failed
+203 passed, 0 failed
 ```
 
 Covered: clean up/down trends, expanding and contracting ranges, 2-pivot and
 3-pivot modes, fractal `2/2` and `3/3`, newest-first pivot ordering and prices,
 flat-top/flat-bottom plateau handling, short series, flat series, a lookback
-too small to reach the pivots, the stale-structure flag, and the full sync
-matrix (including the near-misses that must *not* sync).
+too small to reach the pivots, the stale-structure flag, the full sync
+matrix (including the near-misses that must *not* sync), and the AOI engine —
+demand/supply selection, all four zone states, the adjacent-overlap case that
+must *not* count as a touch, `AOI_ANY` recency in both directions, the
+lookback clamp, zone levels and pivot time, and the guards.
+
+**1b. Those tests are checked against deliberately broken code.** A green suite
+only means something if it goes red when the code is wrong, so
+`tools/mutate_check.py` applies 9 small defects to `FindAOI`, re-runs the suite
+after each one, requires every one to be caught *by a failing assertion* (a
+compile error does not count as a catch), and restores the file afterwards.
+
+```
+$ python3 tools/mutate_check.py
+baseline (unmutated)     : 203 passed, 0 failed  [pass]
+  INSIDE ignores the zone ceiling                      CAUGHT  [197 passed, 6 failed]
+  ...
+ok: all 9 mutations were caught by the AOI fixtures
+```
+
+This is not theoretical: the first draft of the AOI fixtures passed cleanly
+while two of the nine mutations went undetected. Those gaps are why the
+adjacent-overlap and `AOI_ANY`-recency cases exist.
 
 **2. The MT4 shell is linted, not executed.**
 Panel drawing, symbol iteration and history loading can only run inside MT4,
@@ -152,8 +225,8 @@ so those are checked statically:
 
 ```
 $ python3 tools/lint_mq4.py
-lint ok: brackets balanced, 44 external calls and 40 constants all
-recognised, all 45 settings referenced
+lint ok: brackets balanced, 47 external calls and 45 constants all
+recognised, all 53 settings referenced
 ```
 
 ```

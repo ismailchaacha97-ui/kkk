@@ -220,6 +220,114 @@ int AnalyzeSeries(double &high[], double &low[], long &tArr[], int total,
    return(out[0]);
   }
 
+// ---- Area Of Interest ---------------------------------------------
+// An AOI is the candle range of the swing point that matters for the
+// current structure: the last swing low when structure is bullish (a
+// demand zone you want price to come back down into) and the last swing
+// high when it is bearish (a supply zone you want price to come back up
+// into). The zone is then classified by what price has done to it since.
+
+#define AOI_NONE    0
+#define AOI_DEMAND  1   // built from a swing low  -> zone below price
+#define AOI_SUPPLY  2   // built from a swing high -> zone above price
+#define AOI_ANY     3   // caller has no view: take the most recent pivot
+
+#define AOI_FRESH   0   // price has not come back to the zone yet
+#define AOI_TESTED  1   // price returned into the zone and held
+#define AOI_INSIDE  2   // price is inside the zone right now
+#define AOI_SPENT   3   // price closed through the zone -> invalidated
+
+//+------------------------------------------------------------------+
+//| Locate the Area Of Interest zone of one series.                  |
+//|   wantDir : AOI_DEMAND, AOI_SUPPLY or AOI_ANY                    |
+//|   zone[0] = zone top,  zone[1] = zone bottom                     |
+//|   tOut[0] = time of the pivot bar the zone is built from         |
+//|   info[0] = AOI_DEMAND / AOI_SUPPLY actually used                |
+//|   info[1] = bar shift of that pivot                              |
+//|   info[2] = AOI_FRESH / AOI_TESTED / AOI_INSIDE / AOI_SPENT      |
+//| Returns the zone type used, or AOI_NONE.                         |
+//+------------------------------------------------------------------+
+int FindAOI(double &high[], double &low[], double &close[], long &tArr[], int total,
+            int leftBars, int rightBars, int wantDir, int maxLookback,
+            double &zone[], long &tOut[], int &info[])
+  {
+   zone[0] = 0.0;
+   zone[1] = 0.0;
+   tOut[0] = 0;
+   info[0] = AOI_NONE;
+   info[1] = -1;
+   info[2] = AOI_FRESH;
+
+   if(wantDir != AOI_DEMAND && wantDir != AOI_SUPPLY && wantDir != AOI_ANY)
+      return(AOI_NONE);
+   if(leftBars < 1 || rightBars < 1)       return(AOI_NONE);
+   if(total < leftBars + rightBars + 3)    return(AOI_NONE);
+
+   int start = leftBars;
+   int stop  = total - rightBars - 1;
+   if(stop > maxLookback - 1) stop = maxLookback - 1;
+   if(stop < start) return(AOI_NONE);
+
+   // most recent confirmed swing high and swing low
+   int pH = -1, pL = -1;
+   for(int i = start; i <= stop; i++)
+     {
+      if(pH < 0 && IsPivotHigh(high, total, i, leftBars, rightBars)) pH = i;
+      if(pL < 0 && IsPivotLow (low,  total, i, leftBars, rightBars)) pL = i;
+      if(wantDir == AOI_DEMAND && pL >= 0) break;
+      if(wantDir == AOI_SUPPLY && pH >= 0) break;
+      if(pH >= 0 && pL >= 0) break;
+     }
+
+   int p = -1, dir = AOI_NONE;
+   if(wantDir == AOI_DEMAND)      { p = pL; dir = AOI_DEMAND; }
+   else if(wantDir == AOI_SUPPLY) { p = pH; dir = AOI_SUPPLY; }
+   else
+     {
+      // smaller shift = more recent
+      if(pL >= 0 && (pH < 0 || pL < pH)) { p = pL; dir = AOI_DEMAND; }
+      else if(pH >= 0)                   { p = pH; dir = AOI_SUPPLY; }
+     }
+   if(p < 0) return(AOI_NONE);
+
+   double zTop = high[p];
+   double zBot = low[p];
+
+   // Walk forward in time from the pivot. Price must first LEAVE the zone
+   // before a later dip back into it counts as a test, otherwise the bar
+   // immediately after the pivot would always look like a touch.
+   int left = 0, touched = 0, broken = 0;
+   for(int i = p - 1; i >= 0; i--)
+     {
+      if(dir == AOI_DEMAND)
+        {
+         if(close[i] < zBot)                  broken  = 1;
+         else if(left == 1 && low[i] <= zTop) touched = 1;
+         else if(low[i] > zTop)               left    = 1;
+        }
+      else
+        {
+         if(close[i] > zTop)                    broken  = 1;
+         else if(left == 1 && high[i] >= zBot) touched = 1;
+         else if(high[i] < zBot)                left    = 1;
+        }
+     }
+
+   int state;
+   if(broken == 1)                                state = AOI_SPENT;
+   else if(close[0] >= zBot && close[0] <= zTop)  state = AOI_INSIDE;
+   else if(touched == 1)                          state = AOI_TESTED;
+   else                                           state = AOI_FRESH;
+
+   zone[0] = zTop;
+   zone[1] = zBot;
+   tOut[0] = tArr[p];
+   info[0] = dir;
+   info[1] = p;
+   info[2] = state;
+   return(dir);
+  }
+
 //=== CORE-END =======================================================
 
 
@@ -281,6 +389,16 @@ input int    ChartPivotCount  = 14;                   // swings per side to draw
 input color  ColorSwingHigh   = C'255,120,130';
 input color  ColorSwingLow    = C'80,190,255';
 
+input string Sep6             = "=====  AOI (AREA OF INTEREST)  ===========";
+input bool   ScanAOI          = true;                 // scan Weekly + Daily areas of interest
+input bool   DrawAOIOnChart   = true;                 // draw the W1/D1 AOI zones on this chart
+input bool   AOIShowSpent     = false;                // also draw zones price has already closed through
+input int    AOIExtendBars    = 40;                   // how many bars forward to extend each zone
+input bool   AOIAlertOnTouch  = true;                 // alert when price enters a fresh/tested W1 or D1 zone
+input color  ColorDemand      = C'35,150,110';        // bullish AOI (from a swing low)
+input color  ColorSupply      = C'190,70,85';         // bearish AOI (from a swing high)
+input color  ColorAOISpent    = C'95,100,115';
+
 
 //============================= GLOBALS ==============================
 #define PREFIX "MSS_"
@@ -306,6 +424,12 @@ struct SymRec
    bool     stale[MAX_TF];
    int      sync;            // SYNC_*
    int      loadAttempts;
+   // area of interest, tracked for the two higher timeframes (W1, D1)
+   int      aoiType[MAX_TF];  // AOI_* zone direction
+   int      aoiState[MAX_TF]; // AOI_FRESH / TESTED / INSIDE / SPENT
+   double   aoiTop[MAX_TF];
+   double   aoiBot[MAX_TF];
+   datetime aoiTime[MAX_TF];
   };
 
 SymRec   g_syms[];
@@ -323,6 +447,9 @@ int      g_order[];        // render order (indices into g_syms)
 // runtime copies of the inputs (input variables are read-only)
 int      g_pivotLeft, g_pivotRight, g_pivotsPerSide, g_lookback, g_maxAge;
 int      g_scanSeconds, g_perPass, g_cooldownSec, g_maxRows, g_chartPivots, g_scope;
+bool     g_scanAOI;
+int      g_aoiExtend;
+int      g_aoiAlerted = 0;   // bitmask of the W1/D1 zones we already alerted on
 
 ENUM_TIMEFRAMES g_tfs[MAX_TF];
 
@@ -346,8 +473,12 @@ bool     g_lowerCorner  = false;
 #define COL_SYNC_W    6
 #define COL_AGE_OFF  40
 #define COL_AGE_W     9
-#define TOTAL_CHARS  50
-#define HEADER_ROWS   8
+#define COL_AOI1_OFF 50
+#define COL_AOI1_W   10
+#define COL_AOI2_OFF 61
+#define COL_AOI2_W   10
+#define TOTAL_CHARS  72
+#define HEADER_ROWS   9
 
 
 //=========================== HELPERS ================================
@@ -466,13 +597,20 @@ color SyncColor(int s)
 //| Pull the series for one symbol/timeframe and analyse it.         |
 //| Returns an ST_* state, or RES_INSUFFICIENT / RES_NODATA.         |
 //+------------------------------------------------------------------+
-int AnalyzeTF(string sym, ENUM_TIMEFRAMES tf,
-              int &ageOut, double &hiOut, double &loOut, bool &staleOut)
+int AnalyzeTF(string sym, ENUM_TIMEFRAMES tf, bool withAOI,
+              int &ageOut, double &hiOut, double &loOut, bool &staleOut,
+              int &aoiTypeOut, int &aoiStateOut,
+              double &aoiTopOut, double &aoiBotOut, datetime &aoiTimeOut)
   {
-   ageOut   = 0;
-   hiOut    = 0.0;
-   loOut    = 0.0;
-   staleOut = false;
+   ageOut      = 0;
+   hiOut       = 0.0;
+   loOut       = 0.0;
+   staleOut    = false;
+   aoiTypeOut  = AOI_NONE;
+   aoiStateOut = AOI_FRESH;
+   aoiTopOut   = 0.0;
+   aoiBotOut   = 0.0;
+   aoiTimeOut  = 0;
 
    int need = g_pivotsPerSide;
    if(need < 2) need = 2;
@@ -482,10 +620,11 @@ int AnalyzeTF(string sym, ENUM_TIMEFRAMES tf,
 
    int want = MathMin(g_lookback, total);
 
-   double hi[], lo[];
+   double hi[], lo[], cl[];
    long   tm[];
    if(ArrayResize(hi, want) != want) return(RES_NODATA);
    ArrayResize(lo, want);
+   ArrayResize(cl, want);
    ArrayResize(tm, want);
 
    int valid = want;
@@ -493,14 +632,16 @@ int AnalyzeTF(string sym, ENUM_TIMEFRAMES tf,
      {
       double   h = iHigh(sym, tf, i);
       double   l = iLow(sym, tf, i);
+      double   c = iClose(sym, tf, i);
       datetime t = iTime(sym, tf, i);
-      if(h <= 0.0 || l <= 0.0 || t <= 0)
+      if(h <= 0.0 || l <= 0.0 || c <= 0.0 || t <= 0)
         {
          valid = i;                 // broker history ends here
          break;
         }
       hi[i] = h;
       lo[i] = l;
+      cl[i] = c;
       tm[i] = (long)t;
      }
 
@@ -514,6 +655,30 @@ int AnalyzeTF(string sym, ENUM_TIMEFRAMES tf,
    hiOut    = outP[0];
    loOut    = outP[1];
    staleOut = (out[2] == 1);
+
+   // The zone follows the structure: bullish structure -> buy the dip into
+   // the last higher low; bearish -> sell the rally into the last lower high.
+   // With no clean structure we fall back to whichever pivot is most recent.
+   if(withAOI && r >= 0)
+     {
+      int wantDir = AOI_ANY;
+      if(r == ST_BULL)      wantDir = AOI_DEMAND;
+      else if(r == ST_BEAR) wantDir = AOI_SUPPLY;
+
+      double zone[2];
+      long   zt[1];
+      int    info[3];
+      if(FindAOI(hi, lo, cl, tm, valid,
+                 g_pivotLeft, g_pivotRight, wantDir, g_lookback,
+                 zone, zt, info) != AOI_NONE)
+        {
+         aoiTypeOut  = info[0];
+         aoiStateOut = info[2];
+         aoiTopOut   = zone[0];
+         aoiBotOut   = zone[1];
+         aoiTimeOut  = (datetime)zt[0];
+        }
+     }
 
    return(r);
   }
@@ -530,16 +695,28 @@ void ScanSymbol(int idx)
 
    for(int t = 0; t < MAX_TF; t++)
      {
-      int    age = 0;
-      double hp  = 0.0, lp = 0.0;
-      bool   stale = false;
-      int    r   = AnalyzeTF(g_syms[idx].symbol, g_tfs[t], age, hp, lp, stale);
+      int      age = 0;
+      double   hp  = 0.0, lp = 0.0;
+      bool     stale = false;
+      int      aType = AOI_NONE, aState = AOI_FRESH;
+      double   aTop = 0.0, aBot = 0.0;
+      datetime aTime = 0;
 
-      stLocal[t]             = ST_NONE;
-      g_syms[idx].age[t]     = age;
-      g_syms[idx].hiPrice[t] = hp;
-      g_syms[idx].loPrice[t] = lp;
-      g_syms[idx].stale[t]   = false;
+      // AOI is only tracked on the two higher timeframes (Weekly, Daily)
+      bool withAOI = (g_scanAOI && t < 2);
+      int  r = AnalyzeTF(g_syms[idx].symbol, g_tfs[t], withAOI,
+                         age, hp, lp, stale, aType, aState, aTop, aBot, aTime);
+
+      stLocal[t]              = ST_NONE;
+      g_syms[idx].age[t]      = age;
+      g_syms[idx].hiPrice[t]  = hp;
+      g_syms[idx].loPrice[t]  = lp;
+      g_syms[idx].stale[t]    = false;
+      g_syms[idx].aoiType[t]  = aType;
+      g_syms[idx].aoiState[t] = aState;
+      g_syms[idx].aoiTop[t]   = aTop;
+      g_syms[idx].aoiBot[t]   = aBot;
+      g_syms[idx].aoiTime[t]  = aTime;
 
       if(r == RES_NODATA)
         {
@@ -684,7 +861,9 @@ void BuildSymbolList()
 void OnPassComplete()
   {
    CheckAlerts();
+   CheckAOIAlert();
    if(ShowPivotsOnChart) DrawChartPivots();
+   DrawAOIZones();
 
    if(PrintResults)
      {
@@ -904,6 +1083,11 @@ void SortOrder()
 
 int RankOf(int idx)
   {
+   // price actually sitting in a live Weekly/Daily zone outranks everything -
+   // that is the pair you can act on right now
+   int at = -1;
+   if(AtLiveAOI(idx, at)) return(400);
+
    if(g_syms[idx].sync == SYNC_BULL) return(300);
    if(g_syms[idx].sync == SYNC_BEAR) return(290);
 
@@ -940,12 +1124,60 @@ string AgeText(int idx)
    return(s);
   }
 
+//+------------------------------------------------------------------+
+//| AOI cell, e.g. "D 1.08432" / "S 1.09110".                        |
+//| Suffix marks the state: nothing = fresh, t = tested,              |
+//| > = price is inside it now, x = closed through (dead).            |
+//+------------------------------------------------------------------+
+string AOIText(int idx, int t)
+  {
+   if(g_syms[idx].data[t] != DATA_READY)   return("-");
+   if(g_syms[idx].aoiType[t] == AOI_NONE)  return("-");
+
+   string s = (g_syms[idx].aoiType[t] == AOI_DEMAND) ? "D " : "S ";
+   // SymbolInfoInteger returns long; DoubleToString wants int
+   s = s + DoubleToString(g_syms[idx].aoiTop[t],
+                          (int)SymbolInfoInteger(g_syms[idx].symbol, SYMBOL_DIGITS));
+
+   int st = g_syms[idx].aoiState[t];
+   if(st == AOI_TESTED)      s = s + "t";
+   else if(st == AOI_INSIDE) s = s + ">";
+   else if(st == AOI_SPENT)  s = s + "x";
+   return(s);
+  }
+
+color AOIColor(int idx, int t)
+  {
+   if(g_syms[idx].data[t] != DATA_READY || g_syms[idx].aoiType[t] == AOI_NONE)
+      return(C'95,100,115');
+   if(g_syms[idx].aoiState[t] == AOI_SPENT) return(ColorAOISpent);
+   return(g_syms[idx].aoiType[t] == AOI_DEMAND ? ColorDemand : ColorSupply);
+  }
+
+//+------------------------------------------------------------------+
+//| Is this symbol sitting in (or right at) a live Weekly/Daily AOI?  |
+//+------------------------------------------------------------------+
+bool AtLiveAOI(int idx, int &whichTF)
+  {
+   whichTF = -1;
+   for(int t = 0; t < 2; t++)
+     {
+      if(g_syms[idx].data[t] != DATA_READY)      continue;
+      if(g_syms[idx].aoiType[t] == AOI_NONE)     continue;
+      if(g_syms[idx].aoiState[t] == AOI_SPENT)   continue;
+      if(g_syms[idx].aoiState[t] == AOI_INSIDE)  { whichTF = t; return(true); }
+     }
+   return(false);
+  }
+
 string RowLog(int idx)
   {
    string s = PadRight(g_syms[idx].symbol, COL_SYM_W) + " ";
    for(int t = 0; t < MAX_TF; t++) s = s + PadRight(CellText(idx, t), COL_T1_W) + " ";
    s = s + PadRight(SyncText(g_syms[idx].sync), COL_SYNC_W) + " ";
-   s = s + AgeText(idx);
+   s = s + PadRight(AgeText(idx), COL_AGE_W);
+   if(g_scanAOI)
+      s = s + " " + PadRight(AOIText(idx, 0), COL_AOI1_W) + " " + AOIText(idx, 1);
    return(s);
   }
 
@@ -977,15 +1209,23 @@ void RenderPanel()
    int id = 0;
 
    // ---- stats --------------------------------------------------
-   int nBull = 0, nBear = 0, nReady = 0, nPending = 0;
+   int nBull = 0, nBear = 0, nReady = 0, nPending = 0, nAtAOI = 0;
    SortOrder();
 
-   string bullList = "", bearList = "";
+   string bullList = "", bearList = "", aoiList = "";
    for(int i = 0; i < g_symCount; i++)
      {
       int idx = g_order[i];
       if(g_syms[idx].sync == SYNC_BULL) { nBull++; bullList = bullList + (nBull > 1 ? "  " : "") + g_syms[idx].symbol; }
       if(g_syms[idx].sync == SYNC_BEAR) { nBear++; bearList = bearList + (nBear > 1 ? "  " : "") + g_syms[idx].symbol; }
+
+      int at = -1;
+      if(AtLiveAOI(idx, at))
+        {
+         nAtAOI++;
+         aoiList = aoiList + (nAtAOI > 1 ? "  " : "") +
+                   g_syms[idx].symbol + "(" + TFLabel(g_tfs[at]) + ")";
+        }
 
       int ready = 0;
       for(int t = 0; t < MAX_TF; t++) if(g_syms[idx].data[t] == DATA_READY) ready++;
@@ -1016,14 +1256,24 @@ void RenderPanel()
          "SYNC BEARISH (" + IntegerToString(nBear) + "): " + (nBear > 0 ? bearList : "none"),
          nBear > 0 ? ColorBear : ColorNeutral, false);
 
-   Place(id++, COL_SYM_OFF, TOTAL_CHARS, 6, Repeat("-", TOTAL_CHARS), ColorBorder, false);
+   Place(id++, COL_SYM_OFF, TOTAL_CHARS, 6,
+         "AT " + TFLabel(g_tfs[0]) + "/" + TFLabel(g_tfs[1]) + " AOI (" +
+         IntegerToString(nAtAOI) + "): " + (nAtAOI > 0 ? aoiList : "none"),
+         nAtAOI > 0 ? ColorTitle : ColorNeutral, false);
 
-   Place(id++, COL_SYM_OFF,  COL_SYM_W,  7, "SYMBOL", ColorHeader, false);
-   Place(id++, COL_T1_OFF,   COL_T1_W,   7, TFLabel(g_tfs[0]), ColorHeader, false);
-   Place(id++, COL_T2_OFF,   COL_T2_W,   7, TFLabel(g_tfs[1]), ColorHeader, false);
-   Place(id++, COL_T3_OFF,   COL_T3_W,   7, TFLabel(g_tfs[2]), ColorHeader, false);
-   Place(id++, COL_SYNC_OFF, COL_SYNC_W, 7, "SYNC",   ColorHeader, false);
-   Place(id++, COL_AGE_OFF,  COL_AGE_W,  7, "AGE",    ColorHeader, false);
+   Place(id++, COL_SYM_OFF, TOTAL_CHARS, 7, Repeat("-", TOTAL_CHARS), ColorBorder, false);
+
+   Place(id++, COL_SYM_OFF,  COL_SYM_W,  8, "SYMBOL", ColorHeader, false);
+   Place(id++, COL_T1_OFF,   COL_T1_W,   8, TFLabel(g_tfs[0]), ColorHeader, false);
+   Place(id++, COL_T2_OFF,   COL_T2_W,   8, TFLabel(g_tfs[1]), ColorHeader, false);
+   Place(id++, COL_T3_OFF,   COL_T3_W,   8, TFLabel(g_tfs[2]), ColorHeader, false);
+   Place(id++, COL_SYNC_OFF, COL_SYNC_W, 8, "SYNC",   ColorHeader, false);
+   Place(id++, COL_AGE_OFF,  COL_AGE_W,  8, "AGE",    ColorHeader, false);
+   if(g_scanAOI)
+     {
+      Place(id++, COL_AOI1_OFF, COL_AOI1_W, 8, TFLabel(g_tfs[0]) + " AOI", ColorHeader, false);
+      Place(id++, COL_AOI2_OFF, COL_AOI2_W, 8, TFLabel(g_tfs[1]) + " AOI", ColorHeader, false);
+     }
 
    // ---- rows ---------------------------------------------------
    int row   = HEADER_ROWS;
@@ -1045,6 +1295,12 @@ void RenderPanel()
       Place(id++, COL_SYNC_OFF, COL_SYNC_W, row, SyncText(g_syms[idx].sync), SyncColor(g_syms[idx].sync), false);
       Place(id++, COL_AGE_OFF,  COL_AGE_W,  row, AgeText(idx), ColorNeutral, false);
 
+      if(g_scanAOI)
+        {
+         Place(id++, COL_AOI1_OFF, COL_AOI1_W, row, AOIText(idx, 0), AOIColor(idx, 0), false);
+         Place(id++, COL_AOI2_OFF, COL_AOI2_W, row, AOIText(idx, 1), AOIColor(idx, 1), false);
+        }
+
       row++;
       shown++;
      }
@@ -1064,7 +1320,11 @@ void RenderPanel()
       row++;
      }
 
-   int pool = HEADER_ROWS + g_maxRows * MAX_TF * 2 + 8;
+   // Upper bound on the label ids this pass can use, so HideFrom() covers every
+   // label a previous pass may have written.  Header: at most 16 cells (8 text
+   // rows + 8 column labels, 2 of which are AOI-only).  Body: 8 cells per row
+   // (symbol + 3 timeframes + sync + age + 2 AOI).  Plus 1 trailing message row.
+   int pool = 16 + g_maxRows * 8 + 2;
    HideFrom(id, pool);
    SizeBackground(row + 1);
   }
@@ -1075,6 +1335,100 @@ void ClearChartPivots()
   {
    ObjectsDeleteAll(0, PREFIX + "PH");
    ObjectsDeleteAll(0, PREFIX + "PL");
+  }
+
+//+------------------------------------------------------------------+
+//| Weekly / Daily areas of interest for the chart symbol, drawn as  |
+//| filled rectangles from the pivot bar out to the right.           |
+//+------------------------------------------------------------------+
+void ClearAOIZones()
+  {
+   ObjectsDeleteAll(0, PREFIX + "AOI");
+  }
+
+void DrawZone(string name, datetime t1, double top, double bot, color clr)
+  {
+   // Period() returns int in MQL4, so the cast is required before it reaches
+   // an ENUM_TIMEFRAMES parameter - same reason OnInit casts it.
+   long   ext = (long)PeriodSeconds((ENUM_TIMEFRAMES)Period()) * (long)g_aoiExtend;
+   datetime t2 = (datetime)((long)t1 + ext);
+
+   if(ObjectFind(0, name) < 0)
+     {
+      if(!ObjectCreate(0, name, OBJ_RECTANGLE, 0, t1, top, t2, bot)) return;
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_SELECTED,   false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN,     true);
+      ObjectSetInteger(0, name, OBJPROP_BACK,       true);   // sit behind the candles
+      ObjectSetInteger(0, name, OBJPROP_FILL,       true);
+      ObjectSetInteger(0, name, OBJPROP_WIDTH,      1);
+      ObjectSetInteger(0, name, OBJPROP_STYLE,      STYLE_SOLID);
+     }
+   ObjectSetInteger(0, name, OBJPROP_TIME,  0, (long)t1);
+   ObjectSetInteger(0, name, OBJPROP_TIME,  1, (long)t2);
+   ObjectSetDouble (0, name, OBJPROP_PRICE, 0, top);
+   ObjectSetDouble (0, name, OBJPROP_PRICE, 1, bot);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+  }
+
+void DrawAOIZones()
+  {
+   ClearAOIZones();
+   if(!g_scanAOI || !DrawAOIOnChart) return;
+
+   string sym = Symbol();
+   int    ci  = FindIdx(sym);
+   if(ci < 0) return;                       // chart symbol is not in the scan list
+
+   for(int t = 0; t < 2; t++)
+     {
+      if(g_syms[ci].data[t] != DATA_READY)  continue;
+      if(g_syms[ci].aoiType[t] == AOI_NONE) continue;
+      if(g_syms[ci].aoiState[t] == AOI_SPENT && !AOIShowSpent) continue;
+
+      color clr = (g_syms[ci].aoiState[t] == AOI_SPENT) ? ColorAOISpent
+                : (g_syms[ci].aoiType[t] == AOI_DEMAND  ? ColorDemand : ColorSupply);
+
+      DrawZone(PREFIX + "AOI" + IntegerToString(t),
+               g_syms[ci].aoiTime[t], g_syms[ci].aoiTop[t], g_syms[ci].aoiBot[t], clr);
+     }
+  }
+
+//+------------------------------------------------------------------+
+//| One-shot alert when price on this chart enters a live W1/D1 AOI.  |
+//+------------------------------------------------------------------+
+void CheckAOIAlert()
+  {
+   if(!g_scanAOI || !AOIAlertOnTouch) return;
+
+   string sym = Symbol();
+   int    ci  = FindIdx(sym);
+   if(ci < 0) return;
+
+   for(int t = 0; t < 2; t++)
+     {
+      int bit = (t == 0) ? 1 : 2;
+      bool inside = (g_syms[ci].data[t] == DATA_READY &&
+                     g_syms[ci].aoiType[t] != AOI_NONE &&
+                     g_syms[ci].aoiState[t] == AOI_INSIDE);
+
+      if(inside && (g_aoiAlerted & bit) == 0)
+        {
+         string kind = (g_syms[ci].aoiType[t] == AOI_DEMAND) ? "DEMAND" : "SUPPLY";
+         int dg = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+         string msg = "AOI TOUCH | " + sym + " | " + TFLabel(g_tfs[t]) + " " + kind + " zone " +
+                      DoubleToString(g_syms[ci].aoiBot[t], dg) + " - " +
+                      DoubleToString(g_syms[ci].aoiTop[t], dg);
+         if(AlertPopup) Alert(msg);
+         if(AlertPush)  SendNotification(msg);
+         if(AlertSound) PlaySound(AlertSoundFile);
+         g_aoiAlerted = g_aoiAlerted | bit;
+        }
+      else if(!inside)
+        {
+         g_aoiAlerted = g_aoiAlerted & ~bit;   // re-arm once price leaves the zone
+        }
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -1167,6 +1521,8 @@ int OnInit()
    g_maxRows       = MathMax(1, PanelMaxRows);
    g_chartPivots   = MathMax(2, MathMin(60, ChartPivotCount));
    g_scope         = MathMax(0, MathMin(2, ScanScope));
+   g_scanAOI       = ScanAOI;
+   g_aoiExtend     = MathMax(5, MathMin(500, AOIExtendBars));
 
    g_tfs[0] = TF_High;
    g_tfs[1] = TF_Mid;

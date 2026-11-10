@@ -29,12 +29,12 @@ BUILTINS = {
     "MathMin", "MathMax", "MathRound",
     "StringLen", "StringSubstr", "StringFind", "StringSplit", "StringGetCharacter",
     "StringTrimLeft", "StringTrimRight", "StringToUpper", "StringReplace",
-    "IntegerToString",
+    "IntegerToString", "DoubleToString",
     "EnumToString",
     # time
-    "TimeCurrent", "TimeToString",
+    "TimeCurrent", "TimeToString", "PeriodSeconds",
     # series access
-    "iBars", "iHigh", "iLow", "iTime",
+    "iBars", "iHigh", "iLow", "iClose", "iTime",
     # symbols
     "Symbol", "Period", "SymbolsTotal", "SymbolName", "SymbolSelect",
     "SymbolInfoInteger",
@@ -60,13 +60,15 @@ CONSTANTS = {
     "ENUM_ANCHOR_POINT", "ENUM_ARROW_ANCHOR", "ENUM_TIMEFRAMES",
     "INIT_SUCCEEDED", "NULL",
     "OBJPROP_ANCHOR", "OBJPROP_ARROWCODE", "OBJPROP_BACK", "OBJPROP_BGCOLOR",
-    "OBJPROP_BORDER_TYPE", "OBJPROP_COLOR", "OBJPROP_CORNER", "OBJPROP_FONT",
-    "OBJPROP_FONTSIZE", "OBJPROP_HIDDEN", "OBJPROP_PRICE", "OBJPROP_SELECTABLE",
-    "OBJPROP_SELECTED", "OBJPROP_TEXT", "OBJPROP_TIME", "OBJPROP_WIDTH",
+    "OBJPROP_BORDER_TYPE", "OBJPROP_COLOR", "OBJPROP_CORNER", "OBJPROP_FILL",
+    "OBJPROP_FONT", "OBJPROP_FONTSIZE", "OBJPROP_HIDDEN", "OBJPROP_PRICE",
+    "OBJPROP_SELECTABLE", "OBJPROP_SELECTED", "OBJPROP_STYLE", "OBJPROP_TEXT",
+    "OBJPROP_TIME", "OBJPROP_WIDTH",
     "OBJPROP_XDISTANCE", "OBJPROP_XSIZE", "OBJPROP_YDISTANCE", "OBJPROP_YSIZE",
-    "OBJ_ARROW", "OBJ_LABEL", "OBJ_RECTANGLE_LABEL",
+    "OBJ_ARROW", "OBJ_LABEL", "OBJ_RECTANGLE", "OBJ_RECTANGLE_LABEL",
     "PERIOD_D1", "PERIOD_H4", "PERIOD_W1",
-    "SYMBOL_SELECT",
+    "STYLE_SOLID",
+    "SYMBOL_DIGITS", "SYMBOL_SELECT",
     "TIME_MINUTES", "TIME_SECONDS",
 }
 
