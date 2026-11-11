@@ -21,7 +21,7 @@
 //+------------------------------------------------------------------+
 #property copyright   "Arena.ai agent for ismailchaacha97-ui"
 #property link        "https://github.com/ismailchaacha97-ui/kkk"
-#property version     "1.00"
+#property version     "1.10"
 #property description "Supply/Demand + BOS + fresh retest + lower timeframe confirmation."
 #property description "No entry on the first touch: the trade needs an LTF confirmation."
 #property description "Tested or broken zones are never traded again."
@@ -88,6 +88,7 @@ input int     InpLiquidityBars   = 80;       // Bars scanned for the structure t
 input double  InpMinRR           = 1.50;     // Minimum reward/risk to accept a signal
 input double  InpMaxRiskATR      = 4.00;     // Max stop distance (x ATR), 0=off
 input double  InpRRFallback      = 2.00;     // R:R used when no structure target found
+input bool    InpShowTP2         = true;     // Second target = next liquidity level
 
 input string  InpS7              = "=== Visuals & alerts ===";           // ---
 input color   InpDemandColor     = clrDodgerBlue;  // Demand zone colour
@@ -101,6 +102,7 @@ input int     InpExtendBars      = 20;       // Bars to project live zones to th
 input bool    InpShowPanel       = true;     // Show the checklist panel
 input int     InpPanelX          = 10;       // Panel X distance
 input int     InpPanelY          = 20;       // Panel Y distance
+input int     InpPanelSignalBars = 40;       // Keep a signal in the panel for N bars
 input int     InpFontSize        = 9;        // Panel font size
 input bool    InpAlertPopup      = true;     // Popup alert
 input bool    InpAlertSound      = true;     // Sound alert
@@ -144,7 +146,9 @@ struct ZoneInfo
    double   entry;
    double   sl;
    double   tp;
+   double   tp2;            // second target (next liquidity)
    double   rr;
+   datetime evalLtf;         // last lower-TF candle already evaluated (tick cache)
    double   atr;             // ATR at zone creation
    int      id;              // sequence id for object names
   };
@@ -166,6 +170,16 @@ int      gLtfSwing  = 5;
 int      gConfWin   = 2;
 int      gLtfTF     = PERIOD_CURRENT;
 int      gSeq       = 0;
+
+//--- sanitised copies of the inputs (never trust the user)
+int      gImpulseBars  = 12;
+int      gBaseLookback = 6;
+double   gPenPct       = 10.0;
+int      gLiqBars      = 80;
+int      gExtendBars   = 20;
+int      gFontSize     = 9;
+double   gMinRR        = 1.50;
+int      gPanelSigBars = 40;
 
 datetime gLastBarTime = 0;
 datetime gLastAlert   = 0;
@@ -412,7 +426,9 @@ void AddZone(int type, double top, double bottom, int baseShift, int bosShift, d
    Zones[i].entry       = 0.0;
    Zones[i].sl          = 0.0;
    Zones[i].tp          = 0.0;
+   Zones[i].tp2         = 0.0;
    Zones[i].rr          = 0.0;
+   Zones[i].evalLtf     = 0;
    Zones[i].atr         = atr;
    Zones[i].id          = gSeq;
 
@@ -426,7 +442,7 @@ void AddZone(int type, double top, double bottom, int baseShift, int bosShift, d
 int FindBaseShift(int originShift, int type)
   {
    int total = Bars(_Symbol, PERIOD_CURRENT);
-   for(int k = 1; k <= InpBaseLookback; k++)
+   for(int k = 1; k <= gBaseLookback; k++)
      {
       int sh = originShift + k;
       if(sh >= total) return -1;
@@ -450,14 +466,14 @@ int FindBaseShift(int originShift, int type)
 bool TryCreateZone(int type, int bosShift, double atr, double brokenSwing)
   {
    int total = Bars(_Symbol, PERIOD_CURRENT);
-   if(bosShift + InpMaxImpulseBars > total - 1) return false;
+   if(bosShift + gImpulseBars > total - 1) return false;
 
    //--- origin of the impulse (lowest low / highest high of the leg)
    int originShift;
    if(type == ZONE_DEMAND)
-      originShift = iLowest(_Symbol, PERIOD_CURRENT, MODE_LOW, InpMaxImpulseBars + 1, bosShift);
+      originShift = iLowest(_Symbol, PERIOD_CURRENT, MODE_LOW, gImpulseBars + 1, bosShift);
    else
-      originShift = iHighest(_Symbol, PERIOD_CURRENT, MODE_HIGH, InpMaxImpulseBars + 1, bosShift);
+      originShift = iHighest(_Symbol, PERIOD_CURRENT, MODE_HIGH, gImpulseBars + 1, bosShift);
    if(originShift < bosShift) originShift = bosShift;
 
    //--- rule 1: the move must be STRONG (displacement)
@@ -708,16 +724,50 @@ int FindConfirmation(int zi, int s)
   }
 
 //+------------------------------------------------------------------+
+//| Rule 6 (bonus): next liquidity level beyond a reference price    |
+//| used for the optional second target (TP2)                        |
+//+------------------------------------------------------------------+
+double FindNextLiquidity(int zi, int s, double refPrice)
+  {
+   int total = Bars(_Symbol, PERIOD_CURRENT);
+   int maxSh = s + gLiqBars;
+   if(maxSh > total - gDepth - 2) maxSh = total - gDepth - 2;
+   double best = 0.0;
+
+   if(Zones[zi].type == ZONE_DEMAND)
+     {
+      for(int sh = s + 1; sh <= maxSh; sh++)
+        {
+         if(!IsFractalHigh(sh)) continue;
+         double h = iHigh(_Symbol, PERIOD_CURRENT, sh);
+         if(h < refPrice) continue;
+         if(best == 0.0 || h < best) best = h;
+        }
+     }
+   else
+     {
+      for(int sh2 = s + 1; sh2 <= maxSh; sh2++)
+        {
+         if(!IsFractalLow(sh2)) continue;
+         double l = iLow(_Symbol, PERIOD_CURRENT, sh2);
+         if(l > refPrice) continue;
+         if(best == 0.0 || l > best) best = l;
+        }
+     }
+   return best;
+  }
+
+//+------------------------------------------------------------------+
 //| Rule 6: target from liquidity / market structure                 |
 //+------------------------------------------------------------------+
 double FindTarget(int zi, int s, double entry, double risk)
   {
    int total = Bars(_Symbol, PERIOD_CURRENT);
-   int look  = InpLiquidityBars;
+   int look  = gLiqBars;
    if(look < 10) look = 10;
    int maxSh = s + look;
    if(maxSh > total - gDepth - 2) maxSh = total - gDepth - 2;
-   double minDist = InpMinRR * risk;
+   double minDist = gMinRR * risk;
 
    if(Zones[zi].type == ZONE_DEMAND)
      {
@@ -744,7 +794,7 @@ double FindTarget(int zi, int s, double entry, double risk)
         }
       if(best == 0.0)
         {
-         double rr = MathMax(InpRRFallback, InpMinRR);
+         double rr = MathMax(InpRRFallback, gMinRR);
          best = entry + rr * risk;
         }
       return best;
@@ -774,7 +824,7 @@ double FindTarget(int zi, int s, double entry, double risk)
      }
    if(bestS == 0.0)
      {
-      double rr2 = MathMax(InpRRFallback, InpMinRR);
+      double rr2 = MathMax(InpRRFallback, gMinRR);
       bestS = entry - rr2 * risk;
      }
    return bestS;
@@ -810,6 +860,18 @@ void SendSignalAlert(int zi, string how)
 void TrySignal(int zi, int s)
   {
    if(Zones[zi].signaled) return;
+
+   //--- performance: on the live bar evaluate a zone at most once per closed
+   //    lower timeframe candle (the answer cannot change before it closes)
+   if(s == 0)
+     {
+      int cacheShift = LtfLastClosedShift(0);
+      if(cacheShift < 1) return;
+      datetime stamp = iTime(_Symbol, gLtfTF, cacheShift);
+      if(stamp <= 0) return;
+      if(Zones[zi].evalLtf == stamp) return;
+      Zones[zi].evalLtf = stamp;
+     }
 
    int confirmShift = FindConfirmation(zi, s);
    if(confirmShift < 0) return;
@@ -849,7 +911,15 @@ void TrySignal(int zi, int s)
       if(tp >= entry) return;
       rr = (entry - tp) / risk;
      }
-   if(rr < InpMinRR) return;
+   if(rr < gMinRR) return;
+
+   //--- optional second target: next liquidity level beyond TP1
+   Zones[zi].tp2 = 0.0;
+   if(InpShowTP2)
+     {
+      double ref = (Zones[zi].type == ZONE_DEMAND) ? tp + 0.5 * risk : tp - 0.5 * risk;
+      Zones[zi].tp2 = FindNextLiquidity(zi, s, ref);
+     }
 
    Zones[zi].signaled   = true;
    Zones[zi].state      = ST_SIGNAL;
@@ -888,7 +958,7 @@ void ProcessZonesOnBar(int s, bool liveBar)
       if(!IsAlive(Zones[i].state)) continue;
       double h = Zones[i].top - Zones[i].bottom;
       if(h <= 0) continue;
-      double pen = h * InpPenetrationPct / 100.0;
+      double pen = h * gPenPct / 100.0;
 
       bool entered = false;
       bool broken  = false;
@@ -923,6 +993,7 @@ void ProcessZonesOnBar(int s, bool liveBar)
            {
             Zones[i].touching   = true;
             Zones[i].visitStart = bt;
+            Zones[i].evalLtf    = 0;
             //--- one test per bar, even with many ticks inside the same bar
             if(Zones[i].lastTouch != bt) Zones[i].touches = Zones[i].touches + 1;
            }
@@ -1040,12 +1111,21 @@ void DrawTradeLevels(int i, datetime t2)
    ObjText(base + "_St", t2, Zones[i].sl, "SL " + Px(Zones[i].sl), clrRed, 8);
    ObjText(base + "_Tt", t2, Zones[i].tp, "TP " + Px(Zones[i].tp) +
            "  (R:R " + DoubleToString(Zones[i].rr, 2) + ")", clrLime, 8);
+
+   if(InpShowTP2 && Zones[i].tp2 > 0.0)
+     {
+      double risk = MathAbs(Zones[i].entry - Zones[i].sl);
+      double rr2  = (risk > 0) ? MathAbs(Zones[i].tp2 - Zones[i].entry) / risk : 0.0;
+      ObjHLine(base + "_T2", t1, Zones[i].tp2, clrMediumSeaGreen, STYLE_DOT, 1);
+      ObjText(base + "_T2t", t2, Zones[i].tp2, "TP2 " + Px(Zones[i].tp2) +
+              "  (R:R " + DoubleToString(rr2, 2) + ")", clrMediumSeaGreen, 8);
+     }
   }
 
 void DrawZones()
   {
    int ps = PeriodSeconds(PERIOD_CURRENT);
-   datetime right = iTime(_Symbol, PERIOD_CURRENT, 0) + InpExtendBars * ps;
+   datetime right = iTime(_Symbol, PERIOD_CURRENT, 0) + gExtendBars * ps;
 
    for(int i = 0; i < ZoneCount; i++)
      {
@@ -1092,7 +1172,14 @@ int NearestZone()
    double px = iClose(_Symbol, PERIOD_CURRENT, 0);
    for(int i = 0; i < ZoneCount; i++)
      {
-      if(!IsAlive(Zones[i].state)) continue;
+      bool usable = IsAlive(Zones[i].state);
+      if(!usable && Zones[i].state == ST_SIGNAL)
+        {
+         //--- keep the fresh signal (and its trade plan) in the panel for a while
+         int age = iBarShift(_Symbol, PERIOD_CURRENT, Zones[i].signalTime);
+         if(age >= 0 && age <= gPanelSigBars) usable = true;
+        }
+      if(!usable) continue;
       double d = 0.0;
       if(px > Zones[i].top)      d = px - Zones[i].top;
       else if(px < Zones[i].bottom) d = Zones[i].bottom - px;
@@ -1106,10 +1193,25 @@ int NearestZone()
    return best;
   }
 
+//+------------------------------------------------------------------+
+//| Same confirmation rules as the signal engine, for the panel      |
+//+------------------------------------------------------------------+
+int PanelConfirmCode(int zi)
+  {
+   int ls = LtfLastClosedShift(0);
+   if(ls < 1) return 0;
+   datetime t = iTime(_Symbol, gLtfTF, ls);
+   if(t <= 0) return 0;
+   if(t < Zones[zi].bosTime) return 0;
+   if(Zones[zi].visitStart > 0 && t < Zones[zi].visitStart) return 0;
+   if(iClose(_Symbol, gLtfTF, ls) <= 0) return 0;
+   return LtfConfirmCode(zi, ls);
+  }
+
 void PanelLine(int idx, string text, color clr)
   {
-   ObjLabel(InpPrefix + "P" + IntegerToString(idx), InpPanelX, InpPanelY + idx * (InpFontSize + 6),
-            text, clr, InpFontSize);
+   ObjLabel(InpPrefix + "P" + IntegerToString(idx), InpPanelX, InpPanelY + idx * (gFontSize + 6),
+            text, clr, gFontSize);
   }
 
 void DrawPanel()
@@ -1145,8 +1247,7 @@ void DrawPanel()
 
    bool liveConfirm = false;
    string confText = "-";
-   int lastLtf = LtfLastClosedShift(0);
-   int liveCode = LtfConfirmCode(zi, lastLtf);
+   int liveCode = PanelConfirmCode(zi);
    if(liveCode > 0 && Zones[zi].touching)
      {
       liveConfirm = true;
@@ -1242,7 +1343,10 @@ void DrawPanel()
                 " @ " + Px(Zones[zi].entry), okC);
       PanelLine(17, "SL " + Px(Zones[zi].sl) + "   TP " + Px(Zones[zi].tp) +
                 "   R:R " + DoubleToString(Zones[zi].rr, 2), okC);
-      PanelLine(18, "Signal time " + TimeToString(Zones[zi].signalTime, TIME_DATE | TIME_MINUTES), dimC);
+      if(InpShowTP2 && Zones[zi].tp2 > 0.0)
+         PanelLine(18, "TP2 " + Px(Zones[zi].tp2) + "  (next liquidity)", dimC);
+      else
+         PanelLine(18, "Signal time " + TimeToString(Zones[zi].signalTime, TIME_DATE | TIME_MINUTES), dimC);
      }
    else
      {
@@ -1283,6 +1387,38 @@ int OnInit()
    gConfWin = InpConfirmWindow;
    if(gConfWin < 0) gConfWin = 0;
    if(gConfWin > 20) gConfWin = 20;
+
+   gImpulseBars = InpMaxImpulseBars;
+   if(gImpulseBars < 2) gImpulseBars = 2;
+   if(gImpulseBars > 100) gImpulseBars = 100;
+
+   gBaseLookback = InpBaseLookback;
+   if(gBaseLookback < 1) gBaseLookback = 1;
+   if(gBaseLookback > 50) gBaseLookback = 50;
+
+   gPenPct = InpPenetrationPct;
+   if(gPenPct < 0.0) gPenPct = 0.0;
+   if(gPenPct > 90.0) gPenPct = 90.0;
+
+   gLiqBars = InpLiquidityBars;
+   if(gLiqBars < 10) gLiqBars = 10;
+   if(gLiqBars > 1000) gLiqBars = 1000;
+
+   gMinRR = InpMinRR;
+   if(gMinRR < 0.2) gMinRR = 0.2;
+   if(gMinRR > 20.0) gMinRR = 20.0;
+
+   gExtendBars = InpExtendBars;
+   if(gExtendBars < 1) gExtendBars = 1;
+   if(gExtendBars > 500) gExtendBars = 500;
+
+   gFontSize = InpFontSize;
+   if(gFontSize < 6) gFontSize = 6;
+   if(gFontSize > 14) gFontSize = 14;
+
+   gPanelSigBars = InpPanelSignalBars;
+   if(gPanelSigBars < 0) gPanelSigBars = 0;
+   if(gPanelSigBars > 5000) gPanelSigBars = 5000;
 
    gLtfTF = (InpLowerTF == PERIOD_CURRENT) ? StepDownTF(Period()) : InpLowerTF;
    if(PeriodSeconds(gLtfTF) > PeriodSeconds(PERIOD_CURRENT))

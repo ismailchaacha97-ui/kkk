@@ -16,7 +16,8 @@
 3. Waits for price to come back — the first touch is **never** a signal.
 4. Requires a **lower-timeframe confirmation** (mini structure break and/or engulfing/pin bar).
 5. Discards zones that were **already tested or broken** (freshness state machine).
-6. Places the stop **outside** the zone and takes the target from the nearest **liquidity/structure** level, enforcing a minimum R:R.
+6. Places the stop **outside** the zone and takes the target from the nearest **liquidity/structure** level,
+   enforcing a minimum R:R, with an optional second target (`TP2`) at the next liquidity level.
 
 A checklist panel on the chart shows the status of all six rules plus the trade plan, and it never
 says "SIGNAL" before the lower-timeframe confirmation exists.
