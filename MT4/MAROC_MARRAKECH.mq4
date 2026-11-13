@@ -248,7 +248,7 @@ void PushFront(double &arr[], const double v)
   }
 
 //--- unshift an order block in a dynamic array
-void OBInsertFirst(OBInfo &arr[], OBInfo rec, const int maxKeep)
+void OBInsertFirst(OBInfo &arr[], OBInfo &rec, const int maxKeep)
   {
    int n = ArraySize(arr);
    ArrayResize(arr, n + 1);
@@ -386,14 +386,14 @@ void CreateOB(const bool bull, const datetime locTime, const int sh)
       rec.top  = PosValue(shU, true);
       rec.btm  = minLow;
       rec.left = Time[sh + mMin];
-      rec.cV   = Volume[shU];
+      rec.cV   = (double)Volume[shU];
      }
    else
      {
       rec.top  = maxHigh;
       rec.btm  = PosValue(shD, false);
       rec.left = Time[sh + mMax];
-      rec.cV   = Volume[shD];
+      rec.cV   = (double)Volume[shD];
      }
    rec.avg  = (rec.top + rec.btm) / 2.0;
    rec.wM   = 1;
@@ -777,7 +777,7 @@ void ComputeSeries(const int total)
       if(m0 != curM) { curM = m0; sumPVm = 0.0; sumVm = 0.0; }
 
       double tp = (High[sh] + Low[sh] + c) / 3.0;   // hlc3
-      double v  = Volume[sh];
+      double v  = (double)Volume[sh];
       if(v <= 0.0) v = 1.0;
 
       sumPVd += tp * v; sumVd += v;
