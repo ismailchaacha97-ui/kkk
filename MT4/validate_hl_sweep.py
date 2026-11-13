@@ -196,6 +196,45 @@ def mql_level(chart_bars, tf_bars, n, lookback, is_high):
     return max(vals) if is_high else min(vals)
 
 
+# ---------------------------------------------------------------- signal filter
+def filter_check(n_bars=400, window=3, trials=40):
+    """gLastSweep* keeps the last sweep at or before the signal bar.
+    MQL4 works with shifts (0 = newest), the reference with bar indexes.
+    Both must accept exactly the same (sweep, signal) pairs."""
+    import random as rnd
+    for _ in range(trials):
+        N = n_bars
+        sweeps = sorted(rnd.sample(range(2, N - 2), rnd.randint(3, 25)))
+        sigs = sorted(rnd.sample(range(2, N - 2), rnd.randint(3, 25)))
+        for w in (0, 1, 3, 10):
+            # reference : last sweep at or before the signal, within w bars
+            ref = set()
+            for sg in sigs:
+                prev = [x for x in sweeps if x <= sg]
+                if not prev:
+                    continue
+                if sg - prev[-1] <= w:
+                    ref.add(sg)
+            # MQL4 : shift arithmetic
+            mql = set()
+            last_t = None
+            for i in range(N):                      # chronological replay
+                if i in sweeps:
+                    last_t = i
+                if i not in sigs:
+                    continue
+                if last_t is None:
+                    continue
+                sw3 = N - 1 - last_t
+                sh = N - 1 - i
+                dist = sw3 - sh
+                if 0 <= dist <= w:
+                    mql.add(i)
+            if ref != mql:
+                return False
+    return True
+
+
 # ---------------------------------------------------------------- run
 def main():
     ok = True
@@ -240,6 +279,11 @@ def main():
                             print("   DIFF", name, "bar", n, "look", look, "high", hi, p, m)
     print("  %d/%d levels identical" % (checks - bad, checks))
     ok = ok and bad == 0
+
+    print("== signal + sweep filter ==")
+    f = filter_check()
+    print("  shift arithmetic == bar arithmetic :", "MATCH" if f else "DIFF")
+    ok = ok and f
 
     print("\nRESULT:", "ALL MATCH" if ok else "DIFFERENCES FOUND")
     return ok

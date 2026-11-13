@@ -78,6 +78,8 @@ input bool         InpShowM15    = true;                        // Show 15 minut
 
 input string       InpHdrSignal  = "----- SIGNALS -----";       // SIGNALS
 input int          InpMinHits    = 2;                           // Minimum levels touched
+input bool         InpRequireSweep = false;                     // Signal ONLY with a same direction sweep
+input int          InpSweepWindow  = 3;                         // ... sweep must be within N bars
 input bool         InpDivergence = true;                        // Show "D" (1M divergence)
 input int          InpBackfill   = 300;                         // Backfill signals (bars, 0 = off)
 
@@ -120,6 +122,10 @@ bool      gSwpValid = false;
 bool      gSwpHigh  = true;
 datetime  gSwpX1 = 0, gSwpX2 = 0, gSwpX3 = 0;
 double    gSwpY1 = 0.0, gSwpY2 = 0.0, gSwpY3 = 0.0;
+
+//--- last sweep (for the "sweep + signal" filter)
+datetime  gLastSweepT    = 0;
+bool      gLastSweepHigh = true;    // true = a high was swept => bearish
 
 //--- last signal
 datetime  gLastSigTime = 0;
@@ -419,6 +425,8 @@ void Divergence(const datetime tClose, bool &outBear, bool &outBull)
 void NewSweep(const bool high, const datetime tBar, const double hi, const double lo)
   {
    gSweepId++;
+   gLastSweepT    = tBar;
+   gLastSweepHigh = high;
    gSwpValid = true;
    gSwpHigh  = high;
    gSwpX3    = tBar;
@@ -451,8 +459,6 @@ void NewSweep(const bool high, const datetime tBar, const double hi, const doubl
 
 void ProcessSweep(const int sh)
   {
-   if(!InpShowSweep) return;
-
    double ph = 0.0, pl = 0.0;
    bool hasPH = PivotHigh(sh, InpStrength, ph);
    bool hasPL = PivotLow(sh, InpStrength, pl);
@@ -646,6 +652,19 @@ int EvaluateSignal(const int sh)
    if(sHits < InpMinHits && dHits < InpMinHits) return(0);
 
    bool isSell = (sHits >= InpMinHits);
+
+   //--- "signal + sweep in the same direction" filter
+   if(InpRequireSweep)
+     {
+      if(gLastSweepT <= 0) return(0);
+      int sw3 = iBarShift(NULL, 0, gLastSweepT, false);
+      if(sw3 < 0) return(0);
+      int dist = sw3 - sh;                    // bars since the sweep (0 = same bar)
+      if(dist < 0 || dist > InpSweepWindow) return(0);
+      if(isSell && !gLastSweepHigh) return(0);   // SELL needs a swept high
+      if(!isSell && gLastSweepHigh) return(0);   // BUY  needs a swept low
+     }
+
    bool divBear = false, divBull = false;
    if(InpDivergence) Divergence(tClose, divBear, divBull);
 
@@ -705,6 +724,9 @@ void ResetState()
    gSwpValid = false;
    gSwpX1 = 0; gSwpX2 = 0; gSwpX3 = 0;
    gSwpY1 = 0.0; gSwpY2 = 0.0; gSwpY3 = 0.0;
+
+   gLastSweepT    = 0;
+   gLastSweepHigh = true;
 
    gLastSigTime = 0;
    gLastSigDir  = 0;
