@@ -8,6 +8,7 @@
 | 2 | **M3K HL Sweep** (© MM33KK) | `M3K_HL_Sweep.mq4` | `validate_hl_sweep.py` — ALL MATCH |
 
 > **دليل التداول العملي للمؤشرين:** `TRADING_GUIDE.md`
+> **دليل التداول المستقل لمؤشر M3K HL Sweep:** `TRADING_GUIDE_M3K.md`
 
 > انتقل إلى القسم **8) M3K HL Sweep** في الأسفل للتحويل الثاني.
 
