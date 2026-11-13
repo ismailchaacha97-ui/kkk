@@ -33,9 +33,9 @@
 //+------------------------------------------------------------------+
 #property copyright "DeepSeek Harness"
 #property link      ""
-#property version   "2.20"
+#property version   "2.30"
 #property strict
-#define SF_VERSION "3.10"   // engine build shown in panel + journal
+#define SF_VERSION "3.20"   // engine build shown in panel + journal
 
 #property description "Set & Forget signal suggester (no auto-trading). Draws trend / AOI / structure / entry status on the chart."
 
@@ -72,6 +72,19 @@ input ENUM_TIMEFRAMES InpEntryTF2 = PERIOD_H4;    // Entry Time Frame 2
 input bool            InpRequireEngulfing = true; // Require engulfing candle
 input int             InpEngulfLookback = 3;      // Closed bars back to check
 
+input string InpSepTrade = "=== 5. STOP LOSS / TAKE PROFIT ==="; // ---
+input double          InpRiskReward = 2.0;        // Take profit = RR x stop distance
+input double          InpSLBufferATR = 0.5;       // Extra stop buffer (x ATR H1)
+input double          InpMaxSLATR = 2.5;          // Max stop distance (x ATR H1, 0 = off)
+input double          InpMinRR = 0.0;             // Min reward:risk to show levels (0 = off)
+input bool            InpTPAtNextZone = false;    // Cap TP at next opposing HTF zone
+input bool            InpDrawTradeLevels = true;  // Draw entry / SL / TP lines
+
+input string InpSepSig = "=== 6. SIGNALS (NO REPAINT) ==="; // ---
+input bool            InpBarCloseSignals = true;  // One signal per closed bar only
+input bool            InpKeepSignals = true;      // Keep arrows on reload / TF change
+input int             InpMaxSignalArrows = 200;   // Max signals kept (arrow + SL/TP)
+
 input string InpSep5 = "=== ALERTS ==="; // ---
 input bool            InpAlertPopup = true;       // Show popup alert
 input bool            InpAlertSound = true;       // Play sound
@@ -106,10 +119,18 @@ int        gLastAlertDir   = 0;   // 1 = buy, -1 = sell, 0 = none
 string     gLastSuggestedSymbol = "";
 string     gLastSignal     = "";
 string     gLastNodata     = "";   // last reported no-data detail
+
+#define SF_MAXSYM 64
+string     gSigSym[SF_MAXSYM];     // per-symbol: bar already signalled
+datetime   gSigBar[SF_MAXSYM];
+int        gSigCount       = 0;
+
+#define SF_MAXSIG 512
+datetime   gSigTime[SF_MAXSIG];    // signal bar times, oldest first
+int        gSigTimeCount   = 0;
 double     gLastSuggestedPrice  = 0;
 int        gPanelLines     = 0;
 
-#define SF_MAX_ARROWS 60
 
 //+------------------------------------------------------------------+
 string TFName(ENUM_TIMEFRAMES tf)
@@ -129,6 +150,36 @@ string TFName(ENUM_TIMEFRAMES tf)
       case PERIOD_MN1: return("MN1");
    }
    return("TF" + IntegerToString((int)tf));
+}
+
+//+------------------------------------------------------------------+
+//| Pip size (3- and 5-digit quotes are priced in points)            |
+//+------------------------------------------------------------------+
+double PipSize()
+{
+   if(Digits == 3 || Digits == 5) return(Point * 10.0);
+   return(Point);
+}
+
+//+------------------------------------------------------------------+
+//| ATR in price units (0 = not enough history)                      |
+//+------------------------------------------------------------------+
+double GetATR(string symbol, ENUM_TIMEFRAMES tf, int period)
+{
+   if(period < 2) period = 14;
+   double o[], h[], l[], c[];
+   int n = Hist(symbol, tf, period + 3, o, h, l, c);
+   if(n < period + 2) return(0);
+
+   double sum = 0;
+   for(int i = 0; i < period; i++)
+   {
+      double hl = h[i] - l[i];
+      double hc = MathAbs(h[i] - c[i + 1]);
+      double lc = MathAbs(l[i] - c[i + 1]);
+      sum += MathMax(MathMax(hl, hc), lc);
+   }
+   return(sum / period);
 }
 
 //+------------------------------------------------------------------+
@@ -688,24 +739,51 @@ void DrawPanelBackground(int lines, int maxChars)
 //+------------------------------------------------------------------+
 //| Signal arrows are pruned so they cannot pile up forever          |
 //+------------------------------------------------------------------+
-void PruneSignalObjects()
+void DeleteSignalObjects(datetime t)
 {
+   string key = "SF_SIG_" + IntegerToString((int)t) + "_";
    int total = ObjectsTotal(0, -1, -1);
-   int keep = SF_MAX_ARROWS;
    for(int i = total - 1; i >= 0; i--)
    {
       string nm = ObjectName(0, i, -1, -1);
-      if(StringFind(nm, "SF_SIG_") != 0) continue;
-      keep--;
-      if(keep < 0) ObjectDelete(0, nm);
+      if(StringFind(nm, key) == 0) ObjectDelete(0, nm);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Keep at most InpMaxSignalArrows signals. Only the oldest record   |
+//| is ever removed - never a newer one, so nothing "repaints".       |
+//+------------------------------------------------------------------+
+void RegisterSignal(datetime t)
+{
+   int maxKeep = (InpMaxSignalArrows < 1 ? 1 : InpMaxSignalArrows);
+
+   if(gSigTimeCount < SF_MAXSIG)
+   {
+      gSigTime[gSigTimeCount] = t;
+      gSigTimeCount++;
+   }
+   else
+   {
+      for(int s = 1; s < SF_MAXSIG; s++) gSigTime[s - 1] = gSigTime[s];
+      gSigTime[SF_MAXSIG - 1] = t;
+   }
+
+   while(gSigTimeCount > maxKeep)
+   {
+      datetime oldest = gSigTime[0];
+      for(int k = 1; k < gSigTimeCount; k++) gSigTime[k - 1] = gSigTime[k];
+      gSigTimeCount--;
+      DeleteSignalObjects(oldest);
    }
 }
 
 //+------------------------------------------------------------------+
 //| Send a trade SUGGESTION (no OrderSend - manual entry only)       |
 //+------------------------------------------------------------------+
-void SendSuggestion(int dir, string symbol, double price,
-                    string reason, string structure, string aoiInfo)
+void SendSuggestion(int dir, string symbol, double entry,
+                    string reason, string structure, string aoiInfo,
+                    double sl, double tp, datetime stampTime)
 {
    if(dir == 0) return;
    datetime now = TimeCurrent();
@@ -716,8 +794,16 @@ void SendSuggestion(int dir, string symbol, double price,
       gLastAlertDir == dir && gLastSuggestedSymbol == symbol) return;
 
    string dirStr = (dir == 1 ? "BUY" : "SELL");
-   string msg = StringFormat("SET & FORGET %s SIGNAL | %s | Price=%.5f",
-                             dirStr, symbol, price);
+   double rr = 0;
+   if(sl > 0 && tp > 0 && MathAbs(entry - sl) > 0)
+      rr = MathAbs(tp - entry) / MathAbs(entry - sl);
+
+   string msg = StringFormat("SET & FORGET %s SIGNAL | %s | Entry=%.5f", dirStr, symbol, entry);
+   if(sl > 0 && tp > 0)
+      msg += StringFormat("\nSL=%.5f   TP=%.5f   (RR 1:%.1f, %d/%d pips)",
+                          sl, tp, rr,
+                          (int)MathRound(MathAbs(entry - sl) / PipSize()),
+                          (int)MathRound(MathAbs(tp - entry) / PipSize()));
    msg += "\n" + reason;
    if(structure != "") msg += "\nStructure: " + structure;
    if(aoiInfo != "")   msg += "\nAOI: " + aoiInfo;
@@ -731,26 +817,50 @@ void SendSuggestion(int dir, string symbol, double price,
    gLastAlertTime       = now;
    gLastAlertDir        = dir;
    gLastSuggestedSymbol = symbol;
-   gLastSuggestedPrice  = price;
-   gLastSignal = StringFormat("%s %s @ %.5f (%s)", dirStr, symbol, price,
-                              TimeToString(now, TIME_DATE | TIME_MINUTES));
+   gLastSuggestedPrice  = entry;
+   gLastSignal = StringFormat("%s %s @ %.5f", dirStr, symbol, entry);
+   if(sl > 0 && tp > 0)
+      gLastSignal += StringFormat("  SL %.5f  TP %.5f", sl, tp);
+   gLastSignal += "  (" + TimeToString(now, TIME_DATE | TIME_MINUTES) + ")";
 
-   // permanent arrow on the chart (not removed by the per-scan redraw)
+   // ---- NON-REPAINTING arrow --------------------------------------
+   // Stamped on the last CLOSED bar, with a name derived from that bar time,
+   // and only created once. It is never moved and never deleted afterwards,
+   // so it cannot repaint.
    if(InpDrawOnChart && symbol == Symbol())
    {
-      string an = "SF_SIG_" + IntegerToString((int)now);
-      datetime t = iTime(symbol, 0, 0);
-      color clr = (dir == 1 ? InpDemandClr : InpSupplyClr);
-      if(ObjectCreate(0, an, OBJ_ARROW, 0, t, price))
+      if(stampTime <= 0) stampTime = iTime(symbol, 0, 0);
+      if(stampTime > 0)
       {
-         ObjectSetInteger(0, an, OBJPROP_ARROWCODE, dir == 1 ? 233 : 234);
-         ObjectSetInteger(0, an, OBJPROP_COLOR, clr);
-         ObjectSetInteger(0, an, OBJPROP_WIDTH, 3);
-         ObjectSetInteger(0, an, OBJPROP_ANCHOR, dir == 1 ? ANCHOR_TOP : ANCHOR_BOTTOM);
-         ObjectSetInteger(0, an, OBJPROP_SELECTABLE, false);
+         string an = StringFormat("SF_SIG_%d_%s", (int)stampTime, dir == 1 ? "B" : "S");
+         color clr = (dir == 1 ? InpDemandClr : InpSupplyClr);
+         if(ObjectFind(0, an) < 0)
+         {
+            if(ObjectCreate(0, an, OBJ_ARROW, 0, stampTime, entry))
+            {
+               ObjectSetInteger(0, an, OBJPROP_ARROWCODE, dir == 1 ? 233 : 234);
+               ObjectSetInteger(0, an, OBJPROP_COLOR, clr);
+               ObjectSetInteger(0, an, OBJPROP_WIDTH, 3);
+               ObjectSetInteger(0, an, OBJPROP_ANCHOR, dir == 1 ? ANCHOR_TOP : ANCHOR_BOTTOM);
+               ObjectSetInteger(0, an, OBJPROP_SELECTABLE, false);
+            }
+            string txt = dirStr + " " + DoubleToString(entry, Digits);
+            if(sl > 0 && tp > 0)
+               txt += StringFormat("  SL %s  TP %s",
+                                   DoubleToString(sl, Digits), DoubleToString(tp, Digits));
+            DrawText(an + "_T", stampTime, entry, txt, clr, 8);
+
+            // SL/TP of THIS signal, anchored to the signal bar: they belong to
+            // the record and are never redrawn while later bars form.
+            if(sl > 0 && tp > 0)
+            {
+               datetime tEnd = stampTime + (datetime)(PeriodSeconds(InpEntryTF1) * 120);
+               DrawLine(an + "_SL", stampTime, sl, tEnd, sl, clrTomato, STYLE_SOLID, 1);
+               DrawLine(an + "_TP", stampTime, tp, tEnd, tp, clrLime, STYLE_SOLID, 1);
+            }
+            RegisterSignal(stampTime);
+         }
       }
-      DrawText(an + "_T", t, price, dirStr + " setup", clr, 9);
-      PruneSignalObjects();
    }
    Print(msg);
 }
@@ -774,6 +884,7 @@ struct SFResult
    double htfRes, htfSup, ltfRes, ltfSup;
    int    htfResT, htfSupT, ltfResT, ltfSupT;
    double tol;
+   double entry, sl, tp, rr;  // trade plan (rr in R multiples)
    int    brDir;
    double brLevel;
    int    brBar;
@@ -798,6 +909,7 @@ void DrawAnalysis(SFResult &r)
 {
    ObjectsDeleteAll(0, "SF_Z_");
    ObjectsDeleteAll(0, "SF_S_");
+   ObjectsDeleteAll(0, "SF_T_");
    if(!InpDrawOnChart || r.sym != Symbol() || r.price <= 0) return;
 
    datetime tL = ChartLeftTime();
@@ -854,6 +966,17 @@ void DrawAnalysis(SFResult &r)
          DrawText("SF_S_HS_T", tHd, r.hsHead, r.hsDir == -1 ? "H&S" : "Inv H&S", InpStructClr, 9);
       }
    }
+   if(InpDrawTradeLevels && r.sl > 0 && r.tp > 0)
+   {
+      datetime tNow = iTime(r.sym, 0, 0);
+      DrawLine("SF_T_ENTRY", tL, r.entry, tR, r.entry, clrSilver, STYLE_DOT, 1);
+      DrawText("SF_T_ENTRY_T", tNow, r.entry, StringFormat("entry %.5f", r.entry), clrSilver, 8);
+      DrawLine("SF_T_SL", tL, r.sl, tR, r.sl, clrTomato, STYLE_SOLID, 2);
+      DrawText("SF_T_SL_T", tNow, r.sl, StringFormat("SL %.5f", r.sl), clrTomato, 9);
+      DrawLine("SF_T_TP", tL, r.tp, tR, r.tp, clrLime, STYLE_SOLID, 2);
+      DrawText("SF_T_TP_T", tNow, r.tp, StringFormat("TP %.5f", r.tp), clrLime, 9);
+   }
+
    ChartRedraw(0);
 }
 
@@ -862,8 +985,8 @@ void DrawAnalysis(SFResult &r)
 //+------------------------------------------------------------------+
 void DrawStatus(SFResult &r)
 {
-   string lines[14];
-   color  clrs[14];
+   string lines[16];
+   color  clrs[16];
    int    cnt = 0;
 
    lines[cnt] = StringFormat("SET & FORGET v%s   %s  %s   %s", SF_VERSION, r.sym,
@@ -911,6 +1034,18 @@ void DrawStatus(SFResult &r)
                      ? StringFormat("no engulfing on %s/%s", TFName(InpEntryTF1), TFName(InpEntryTF2))
                      : StringFormat("%s engulfing on %s", r.engDir == 1 ? "bullish" : "bearish", r.engTF));
       clrs[cnt] = (r.engDir != 0 && r.engDir == r.tradeDir ? clrLime : clrSilver); cnt++;
+
+      if(r.sl > 0 && r.tp > 0)
+      {
+         lines[cnt] = StringFormat("Trade      %s @ %.5f   SL %.5f   TP %.5f   RR 1:%.1f",
+                                   r.tradeDir == 1 ? "BUY" : "SELL", r.entry, r.sl, r.tp, r.rr);
+         clrs[cnt] = (r.tradeDir == 1 ? clrLime : clrTomato); cnt++;
+
+         lines[cnt] = StringFormat("           %d pips risk  /  %d pips target",
+                                   (int)MathRound(MathAbs(r.entry - r.sl) / PipSize()),
+                                   (int)MathRound(MathAbs(r.tp - r.entry) / PipSize()));
+         clrs[cnt] = clrSilver; cnt++;
+      }
 
       lines[cnt] = r.reason;
       if(r.ready)                                     clrs[cnt] = clrLime;
@@ -965,6 +1100,114 @@ void DrawStatus(SFResult &r)
 }
 
 //+------------------------------------------------------------------+
+//| True if this symbol already handled this (forming) bar.          |
+//| One signal per bar -> an arrow can never be created twice or move |
+//+------------------------------------------------------------------+
+bool BarAlreadyHandled(string symbol, datetime barTime)
+{
+   for(int i = 0; i < gSigCount; i++)
+   {
+      if(gSigSym[i] != symbol) continue;
+      if(gSigBar[i] == barTime) return(true);
+      gSigBar[i] = barTime;
+      return(false);
+   }
+   if(gSigCount < SF_MAXSYM)
+   {
+      gSigSym[gSigCount] = symbol;
+      gSigBar[gSigCount] = barTime;
+      gSigCount++;
+   }
+   return(false);
+}
+
+//+------------------------------------------------------------------+
+//| Stop loss / take profit for the current setup.                   |
+//|                                                                  |
+//| SL  : beyond the level that invalidates the idea - the AOI zone,  |
+//|       the broken level (B&R) and the H&S head - plus an ATR       |
+//|       buffer. The widest of those levels is used (most           |
+//|       conservative), so a wick into the zone does not stop us.    |
+//| TP  : InpRiskReward x risk, optionally capped at the next        |
+//|       opposing HTF zone.                                          |
+//| Both are derived from r.entry, which is the close of the last     |
+//| CLOSED entry-TF bar, so they do not drift while the bar forms.    |
+//+------------------------------------------------------------------+
+void ComputeTradeLevels(string symbol, SFResult &r, double sto, double tol)
+{
+   r.sl = 0; r.tp = 0; r.rr = 0;
+   if(r.entry <= 0 || r.tradeDir == 0) return;
+
+   double atr = GetATR(symbol, PERIOD_H1, 14);
+   if(atr <= 0) atr = 10 * Point;
+
+   double buf = InpSLBufferATR * atr;          // extra room beyond the level
+   if(buf < 2 * Point) buf = 2 * Point;
+
+   bool   buy   = (r.tradeDir == 1);
+   double slAoi = 0;                            // invalidation given by the AOI
+   double slStr = 0;                            // invalidation given by structure
+
+   if(buy)
+   {
+      if(r.ltfSup > 0)                  slAoi = r.ltfSup - tol * 0.5;
+      if(r.brDir == 1 && r.brLevel > 0) slStr = r.brLevel - sto * 0.25;
+      if(r.hsDir == 1 && r.hsHead > 0)
+         slStr = (slStr > 0 ? MathMin(slStr, r.hsHead) : r.hsHead);
+   }
+   else
+   {
+      if(r.ltfRes > 0)                    slAoi = r.ltfRes + tol * 0.5;
+      if(r.brDir == -1 && r.brLevel > 0)  slStr = r.brLevel + sto * 0.25;
+      if(r.hsDir == -1 && r.hsHead > 0)
+         slStr = (slStr > 0 ? MathMax(slStr, r.hsHead) : r.hsHead);
+   }
+
+   // Use the wider of the AOI / structure invalidation, otherwise the one that
+   // exists, otherwise an ATR-based stop.
+   double sl = 0;
+   if(slAoi > 0 && slStr > 0)  sl = (buy ? MathMin(slAoi, slStr) : MathMax(slAoi, slStr));
+   else if(slAoi > 0)          sl = slAoi;
+   else if(slStr > 0)          sl = slStr;
+   else                        sl = (buy ? r.entry - 1.5 * atr : r.entry + 1.5 * atr);
+
+   // Sanity cap: never accept a stop further than InpMaxSLATR * ATR.
+   if(InpMaxSLATR > 0 && MathAbs(r.entry - sl) > InpMaxSLATR * atr)
+   {
+      if(slAoi > 0 && MathAbs(r.entry - slAoi) <= InpMaxSLATR * atr)
+         sl = slAoi;
+      else
+         sl = (buy ? r.entry - InpMaxSLATR * atr : r.entry + InpMaxSLATR * atr);
+   }
+
+   sl = (buy ? sl - buf : sl + buf);
+   if(buy  && sl >= r.entry - 2 * Point) return;
+   if(!buy && sl <= r.entry + 2 * Point) return;
+
+   double risk = MathAbs(r.entry - sl);
+   if(risk <= 0) return;
+
+   double tp = (buy ? r.entry + InpRiskReward * risk
+                    : r.entry - InpRiskReward * risk);
+
+   if(InpTPAtNextZone)
+   {
+      if(buy  && r.htfRes > r.entry && r.htfRes < tp) tp = r.htfRes;
+      if(!buy && r.htfSup > 0 && r.htfSup < r.entry && r.htfSup > tp) tp = r.htfSup;
+   }
+
+   double reward = MathAbs(tp - r.entry);
+   if(reward <= 0) return;
+
+   double rr = reward / risk;
+   if(InpMinRR > 0 && rr < InpMinRR) return;      // target too close: no plan
+
+   r.sl = NormalizeDouble(sl, Digits);
+   r.tp = NormalizeDouble(tp, Digits);
+   r.rr = rr;
+}
+
+//+------------------------------------------------------------------+
 //| Main analysis per symbol                                         |
 //+------------------------------------------------------------------+
 void AnalyzeSymbol(string symbol, SFResult &r)
@@ -983,6 +1226,7 @@ void AnalyzeSymbol(string symbol, SFResult &r)
    r.engDir = 0; r.engTF = "";
    r.ready = false; r.reason = "WAIT - no data"; r.structure = ""; r.structDir = 0;
    r.dataDiag = ""; r.histNote = "";
+   r.entry = 0; r.sl = 0; r.tp = 0; r.rr = 0;
    r.barsHTF1 = 0; r.barsHTF2 = 0; r.barsLTF = 0;
    r.tol = GetTolerance(symbol, InpAOITolPoints);
 
@@ -1161,8 +1405,32 @@ void AnalyzeSymbol(string symbol, SFResult &r)
                          r.engDir == 0 ? "none" : (r.engDir == 1 ? "bullish" : "bearish"),
                          r.reason));
 
+   //=== 6) Trade plan: entry / SL / TP ==============================
+   // Entry is the close of the last CLOSED entry-TF bar (not the live tick),
+   // so the plan - and the arrow that records it - never drift mid-bar.
+   r.entry = r.price;
+   if(InpBarCloseSignals)
+   {
+      double c1 = iClose(symbol, InpEntryTF1, 1);
+      if(c1 > 0) r.entry = c1;
+   }
+   if(r.tradeDir != 0)
+      ComputeTradeLevels(symbol, r, sto, tol);
+
+   //=== 7) Signal: max one per bar, arrow is final ==================
    if(r.ready && r.tradeDir != 0)
-      SendSuggestion(r.tradeDir, symbol, r.price, r.reason, r.structure, r.aoiInfo);
+   {
+      datetime barTime = iTime(symbol, InpEntryTF1, 0);       // forming bar
+      if(barTime <= 0) barTime = iTime(symbol, 0, 0);
+
+      if(!InpBarCloseSignals || !BarAlreadyHandled(symbol, barTime))
+      {
+         datetime stamp = (InpBarCloseSignals ? iTime(symbol, InpEntryTF1, 1)
+                                              : iTime(symbol, 0, 0));
+         SendSuggestion(r.tradeDir, symbol, r.entry, r.reason, r.structure, r.aoiInfo,
+                        r.sl, r.tp, stamp);
+      }
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -1216,12 +1484,19 @@ int OnInit()
                       TFName(InpEntryTF1), TFName(InpEntryTF2),
                       InpDrawOnChart ? "yes" : "no", InpShowPanel ? "yes" : "no"));
 
-   // remove leftovers from a previous run / previous settings
-   ObjectsDeleteAll(0, "SF_");
+   // Clear analysis leftovers, but NOT the signal arrows: they are the trade
+   // record and must never be repainted or removed by a reload.
+   ObjectsDeleteAll(0, "SF_Z_");
+   ObjectsDeleteAll(0, "SF_S_");
+   ObjectsDeleteAll(0, "SF_T_");
+   ObjectsDeleteAll(0, "SF_PNL_");
+   ObjectsDeleteAll(0, "SF_CMT_");
+   if(!InpKeepSignals) ObjectsDeleteAll(0, "SF_SIG_");
    Comment("");
 
    gLastScanTime = 0;
    gNextScanMs   = 0;
+   gSigCount     = 0;
    if(InpUseTimer)
    {
       int secs = (int)MathMax(5, InpScanEverySeconds);
@@ -1238,7 +1513,12 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    EventKillTimer();
-   ObjectsDeleteAll(0, "SF_");
+   ObjectsDeleteAll(0, "SF_Z_");
+   ObjectsDeleteAll(0, "SF_S_");
+   ObjectsDeleteAll(0, "SF_T_");
+   ObjectsDeleteAll(0, "SF_PNL_");
+   ObjectsDeleteAll(0, "SF_CMT_");
+   if(!InpKeepSignals) ObjectsDeleteAll(0, "SF_SIG_");
    Comment("");
    ChartRedraw(0);
 }

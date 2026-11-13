@@ -7,8 +7,8 @@ read the market, draw the 4 Fundamentals on the chart, and alert you.
 
 | File | Kind | Where it goes |
 |------|------|---------------|
-| `SetAndForget_Indicator.mq4` | **Custom indicator (v3.10)** — recommended | `MQL4/Indicators/` |
-| `SetAndForget_EA.mq4` | Expert Advisor (v2.20) | `MQL4/Experts/` |
+| `SetAndForget_Indicator.mq4` | **Custom indicator (v3.20)** — recommended | `MQL4/Indicators/` |
+| `SetAndForget_EA.mq4` | Expert Advisor (v2.30) | `MQL4/Experts/` |
 
 Both run the identical 4-Fundamentals engine and draw the same panel, zones, structure
 lines and arrows. Only the entry point differs.
@@ -33,6 +33,61 @@ lines and arrows. Only the entry point differs.
 
 Install: copy to `MQL4/Indicators/`, F7 in MetaEditor, then drag it from the Navigator
 onto the chart (double-click, or Insert ▸ Indicators ▸ Custom).
+
+## SL / TP (v3.20 / v2.30)
+
+Two new input groups do the trade plan and the anti-repaint behaviour.
+
+### 5. Stop loss / take profit
+
+| Input | Default | Meaning |
+|---|---|---|
+| `InpRiskReward` | 2.0 | TP distance = RR × SL distance |
+| `InpSLBufferATR` | 0.5 | stop is pushed this many ATR(H1) beyond the level |
+| `InpMaxSLATR` | 2.5 | sanity cap on stop distance (0 = off) |
+| `InpMinRR` | 0 | hide the plan if the achievable RR is below this (0 = off) |
+| `InpTPAtNextZone` | false | stop the target at the next opposing HTF zone if it is nearer |
+| `InpDrawTradeLevels` | true | draw entry (dotted) / SL (red) / TP (green) lines |
+
+Where the stop comes from:
+
+| Setup | Stop loss goes |
+|---|---|
+| long at a demand AOI | below the demand zone (`ltfSup − tol/2`) |
+| long Break & Retest | below the broken level (`brLevel − sto/4`) |
+| inverse head & shoulders | below the head |
+| nothing usable | 1.5 × ATR(H1) below entry |
+
+When both an AOI and a structure level exist, the **wider** one is used (a wick into the
+zone should not stop you out), then the ATR buffer is added, then the `InpMaxSLATR` cap is
+enforced. Shorts mirror everything. The panel, the alert/push text and the arrow label all
+show entry, SL, TP, RR and pip distances:
+
+```
+Entry      bullish engulfing on H1
+Trade      BUY @ 1.08234   SL 1.08010   TP 1.08690   RR 1:2.0
+           22 pips risk  /  44 pips target
+```
+
+### 6. Signals are not repainted
+
+| Input | Default | Meaning |
+|---|---|---|
+| `InpBarCloseSignals` | **true** | one signal per bar; arrow is stamped on the *closed* bar and the entry is that bar's close, never the live tick |
+| `InpKeepSignals` | **true** | arrows survive reload / recompile / timeframe change |
+| `InpMaxSignalArrows` | 200 | cap; when exceeded only the **oldest** record is removed |
+
+Why it cannot repaint any more:
+
+* The engulfing test already used closed bars only; now the whole signal gate does — at most
+  one arrow per bar, decided once, when the next bar opens.
+* The arrow is `SF_SIG_<bar time>_B|_S`, created **only if it does not exist**, and never
+  moved. A later scan cannot recreate or shift it, because the name is tied to the bar time.
+* Object cleanup on `OnInit`/`OnDeinit` no longer wipes `SF_SIG_*`, so a timeframe switch or
+  recompile keeps the record. Set `InpKeepSignals = false` for the old "clean slate" behaviour.
+* Each signal also draws its own SL/TP lines anchored on the signal bar, so the historical
+  record stays complete (the live preview lines `SF_T_*` are separate and may move).
+* `InpBarCloseSignals = false` restores intrabar signals (arrow on the forming bar).
 
 ## "NODATA" on HTF / LTF — what it actually means
 
