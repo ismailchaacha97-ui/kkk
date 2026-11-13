@@ -7,8 +7,8 @@ read the market, draw the 4 Fundamentals on the chart, and alert you.
 
 | File | Kind | Where it goes |
 |------|------|---------------|
-| `SetAndForget_Indicator.mq4` | **Custom indicator (v3.20)** — recommended | `MQL4/Indicators/` |
-| `SetAndForget_EA.mq4` | Expert Advisor (v2.30) | `MQL4/Experts/` |
+| `SetAndForget_Indicator.mq4` | **Custom indicator (v3.30)** — recommended | `MQL4/Indicators/` |
+| `SetAndForget_EA.mq4` | Expert Advisor (v2.40) | `MQL4/Experts/` |
 
 Both run the identical 4-Fundamentals engine and draw the same panel, zones, structure
 lines and arrows. Only the entry point differs.
@@ -33,6 +33,43 @@ lines and arrows. Only the entry point differs.
 
 Install: copy to `MQL4/Indicators/`, F7 in MetaEditor, then drag it from the Navigator
 onto the chart (double-click, or Insert ▸ Indicators ▸ Custom).
+
+## "Entry shows but no arrow" (v3.30 / v2.40)
+
+The `Entry` panel line was reporting the **engulfing test only** — it never meant "signal".
+In v3.30 it now says which one it is:
+
+```
+Entry      bullish engulfing on H1   < SIGNAL          <- complete setup, arrow drawn
+Entry      bullish engulfing on H1   (not a signal)    <- engulfing exists, setup incomplete
+```
+
+An arrow requires **all** of these (the verdict line names the one that is missing):
+
+1. HTF trend in sync (W1 + D1 agree),
+2. LTF sync >= 2 of H4/H1/M30,
+3. price at the LTF AOI,
+4. structure matching the trend direction (B&R or H&S),
+5. engulfing **in the trend direction** (`NO TRADE` if it opposes).
+
+Two real bugs were fixed as well:
+
+* **The alert cooldown used to suppress the arrow.** `InpAlertCooldownMin` (default 30) was
+  checked before the arrow was created, so a second valid setup within 30 minutes of a
+  previous same-direction signal produced no arrow at all. The chart record is now drawn
+  **before** the cooldown, which now only gates popup/sound/push/mail.
+* **The arrow is stamped on the engulfing candle itself**, not on "the previous bar". The
+  object name is `SF_SIG_<bar time>_B|_S`, so one engulfing pattern can only ever produce
+  one arrow - re-scans, later bars and repeated alerts cannot duplicate or move it.
+
+Every arrow now also logs one line in the Experts journal:
+
+```
+[Set&Forget] SIGNAL BUY EURUSD @ 1.08234  SL 1.08010  TP 1.08690  bar 2026.11.13 09:00
+```
+
+So if the panel says `< SIGNAL` and no arrow appears, that journal line tells you whether it
+was created (and where), or prints the exact `ObjectCreate` error.
 
 ## SL / TP (v3.20 / v2.30)
 

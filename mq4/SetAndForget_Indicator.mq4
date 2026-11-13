@@ -31,10 +31,10 @@
 //+------------------------------------------------------------------+
 #property copyright "DeepSeek Harness"
 #property link      ""
-#property version   "3.20"
+#property version   "3.30"
 #property strict
 #property indicator_chart_window
-#define SF_VERSION "3.20"   // engine build shown in panel + journal
+#define SF_VERSION "3.30"   // engine build shown in panel + journal
 
 #property description "Set & Forget (Holy Grail) analyst: trend, AOI, structure, entry. Draws on the chart and alerts only - it cannot trade."
 
@@ -604,8 +604,9 @@ int DetectHeadShoulders(string symbol, ENUM_TIMEFRAMES tf, int window, int swing
 //| (v2.00 indexed one bar past the end of the copied array here,    |
 //|  which raised "array out of range" and stopped the EA.)          |
 //+------------------------------------------------------------------+
-int DetectEngulfing(string symbol, ENUM_TIMEFRAMES tf, int look)
+int DetectEngulfing(string symbol, ENUM_TIMEFRAMES tf, int look, int &barShift)
 {
+   barShift = -1;
    if(look < 1) look = 1;
    double o[], h[], l[], c[];
    int n = Hist(symbol, tf, look + 2, o, h, l, c);
@@ -620,8 +621,8 @@ int DetectEngulfing(string symbol, ENUM_TIMEFRAMES tf, int look)
                   (o[cur] <= c[prv]) && (c[cur] >= o[prv]);
       bool bear = (c[cur] < o[cur]) && (c[prv] > o[prv]) &&
                   (o[cur] >= c[prv]) && (c[cur] <= o[prv]);
-      if(bull) return(1);
-      if(bear) return(-1);
+      if(bull) { barShift = cur; return(1); }
+      if(bear) { barShift = cur; return(-1); }
    }
    return(0);
 }
@@ -786,17 +787,79 @@ void SendSuggestion(int dir, string symbol, double entry,
                     double sl, double tp, datetime stampTime)
 {
    if(dir == 0) return;
-   datetime now = TimeCurrent();
-   if(now <= 0) now = TimeLocal();
-
-   // cooldown: don't repeat the same alert (symbol + direction) too often
-   if(gLastAlertTime != 0 && now - gLastAlertTime < InpAlertCooldownMin * 60 &&
-      gLastAlertDir == dir && gLastSuggestedSymbol == symbol) return;
 
    string dirStr = (dir == 1 ? "BUY" : "SELL");
    double rr = 0;
    if(sl > 0 && tp > 0 && MathAbs(entry - sl) > 0)
       rr = MathAbs(tp - entry) / MathAbs(entry - sl);
+
+   // ---- 1) CHART RECORD -------------------------------------------
+   // Drawn BEFORE any cooldown check: the alert cooldown must never be able
+   // to swallow an arrow. The name is derived from the signal bar, so this
+   // creates the arrow exactly once and never moves it afterwards.
+   bool created = false;
+   if(InpDrawOnChart && symbol == Symbol() && stampTime > 0)
+   {
+      string an = StringFormat("SF_SIG_%d_%s", (int)stampTime, dir == 1 ? "B" : "S");
+      if(ObjectFind(0, an) < 0)
+      {
+         color clr = (dir == 1 ? InpDemandClr : InpSupplyClr);
+         if(ObjectCreate(0, an, OBJ_ARROW, 0, stampTime, entry))
+         {
+            ObjectSetInteger(0, an, OBJPROP_ARROWCODE, dir == 1 ? 233 : 234);
+            ObjectSetInteger(0, an, OBJPROP_COLOR, clr);
+            ObjectSetInteger(0, an, OBJPROP_WIDTH, 3);
+            ObjectSetInteger(0, an, OBJPROP_ANCHOR, dir == 1 ? ANCHOR_TOP : ANCHOR_BOTTOM);
+            ObjectSetInteger(0, an, OBJPROP_SELECTABLE, false);
+
+            string txt = dirStr + " " + DoubleToString(entry, Digits);
+            if(sl > 0 && tp > 0)
+               txt += StringFormat("  SL %s  TP %s",
+                                   DoubleToString(sl, Digits), DoubleToString(tp, Digits));
+            DrawText(an + "_T", stampTime, entry, txt, clr, 8);
+
+            if(sl > 0 && tp > 0)
+            {
+               datetime tEnd = stampTime + (datetime)(PeriodSeconds(InpEntryTF1) * 120);
+               DrawLine(an + "_SL", stampTime, sl, tEnd, sl, clrTomato, STYLE_SOLID, 1);
+               DrawLine(an + "_TP", stampTime, tp, tEnd, tp, clrLime, STYLE_SOLID, 1);
+            }
+            RegisterSignal(stampTime);
+            created = true;
+            ChartRedraw(0);
+         }
+         else
+            Print("Set&Forget: signal arrow could not be created, error ", GetLastError());
+      }
+   }
+
+   if(created)
+   {
+      Print(StringFormat("[Set&Forget] SIGNAL %s %s @ %.5f  SL %.5f  TP %.5f  bar %s",
+                         dirStr, symbol, entry, sl, tp,
+                         TimeToString(stampTime, TIME_DATE | TIME_MINUTES)));
+      gLastSignal = StringFormat("%s %s @ %.5f", dirStr, symbol, entry);
+      if(sl > 0 && tp > 0)
+         gLastSignal += StringFormat("  SL %.5f  TP %.5f", sl, tp);
+      gLastSignal += "  (" + TimeToString((stampTime > 0 ? stampTime : TimeCurrent()),
+                                          TIME_DATE | TIME_MINUTES) + ")";
+   }
+
+   // ---- 2) NOTIFICATIONS (cooldown applies only here) --------------
+   datetime now = TimeCurrent();
+   if(now <= 0) now = TimeLocal();
+
+   bool cooled = (gLastAlertTime != 0 && now - gLastAlertTime < InpAlertCooldownMin * 60 &&
+                  gLastAlertDir == dir && gLastSuggestedSymbol == symbol);
+   bool canNotify = (created || !InpDrawOnChart || symbol != Symbol());
+
+   if(cooled || !canNotify)
+   {
+      if(created)
+         Print(StringFormat("[Set&Forget] %s %s @ %.5f - arrow drawn, alert suppressed (cooldown)",
+                            dirStr, symbol, entry));
+      return;
+   }
 
    string msg = StringFormat("SET & FORGET %s SIGNAL | %s | Entry=%.5f", dirStr, symbol, entry);
    if(sl > 0 && tp > 0)
@@ -818,50 +881,6 @@ void SendSuggestion(int dir, string symbol, double entry,
    gLastAlertDir        = dir;
    gLastSuggestedSymbol = symbol;
    gLastSuggestedPrice  = entry;
-   gLastSignal = StringFormat("%s %s @ %.5f", dirStr, symbol, entry);
-   if(sl > 0 && tp > 0)
-      gLastSignal += StringFormat("  SL %.5f  TP %.5f", sl, tp);
-   gLastSignal += "  (" + TimeToString(now, TIME_DATE | TIME_MINUTES) + ")";
-
-   // ---- NON-REPAINTING arrow --------------------------------------
-   // Stamped on the last CLOSED bar, with a name derived from that bar time,
-   // and only created once. It is never moved and never deleted afterwards,
-   // so it cannot repaint.
-   if(InpDrawOnChart && symbol == Symbol())
-   {
-      if(stampTime <= 0) stampTime = iTime(symbol, 0, 0);
-      if(stampTime > 0)
-      {
-         string an = StringFormat("SF_SIG_%d_%s", (int)stampTime, dir == 1 ? "B" : "S");
-         color clr = (dir == 1 ? InpDemandClr : InpSupplyClr);
-         if(ObjectFind(0, an) < 0)
-         {
-            if(ObjectCreate(0, an, OBJ_ARROW, 0, stampTime, entry))
-            {
-               ObjectSetInteger(0, an, OBJPROP_ARROWCODE, dir == 1 ? 233 : 234);
-               ObjectSetInteger(0, an, OBJPROP_COLOR, clr);
-               ObjectSetInteger(0, an, OBJPROP_WIDTH, 3);
-               ObjectSetInteger(0, an, OBJPROP_ANCHOR, dir == 1 ? ANCHOR_TOP : ANCHOR_BOTTOM);
-               ObjectSetInteger(0, an, OBJPROP_SELECTABLE, false);
-            }
-            string txt = dirStr + " " + DoubleToString(entry, Digits);
-            if(sl > 0 && tp > 0)
-               txt += StringFormat("  SL %s  TP %s",
-                                   DoubleToString(sl, Digits), DoubleToString(tp, Digits));
-            DrawText(an + "_T", stampTime, entry, txt, clr, 8);
-
-            // SL/TP of THIS signal, anchored to the signal bar: they belong to
-            // the record and are never redrawn while later bars form.
-            if(sl > 0 && tp > 0)
-            {
-               datetime tEnd = stampTime + (datetime)(PeriodSeconds(InpEntryTF1) * 120);
-               DrawLine(an + "_SL", stampTime, sl, tEnd, sl, clrTomato, STYLE_SOLID, 1);
-               DrawLine(an + "_TP", stampTime, tp, tEnd, tp, clrLime, STYLE_SOLID, 1);
-            }
-            RegisterSignal(stampTime);
-         }
-      }
-   }
    Print(msg);
 }
 
@@ -893,6 +912,8 @@ struct SFResult
    int    hsNew, hsHeadBar, hsOld;
    int    engDir;
    string engTF;
+   int    engBar;             // bar shift of the engulfing candle
+   int    engTFused;          // timeframe (as int) that produced it
    bool   ready;
    string reason;
    string structure;
@@ -1033,7 +1054,10 @@ void DrawStatus(SFResult &r)
       lines[cnt] = "Entry      " + (r.engDir == 0
                      ? StringFormat("no engulfing on %s/%s", TFName(InpEntryTF1), TFName(InpEntryTF2))
                      : StringFormat("%s engulfing on %s", r.engDir == 1 ? "bullish" : "bearish", r.engTF));
-      clrs[cnt] = (r.engDir != 0 && r.engDir == r.tradeDir ? clrLime : clrSilver); cnt++;
+      if(r.ready)                    { lines[cnt] += "   < SIGNAL"; clrs[cnt] = clrLime; }
+      else if(r.engDir != 0)         { lines[cnt] += "   (not a signal)"; clrs[cnt] = clrGray; }
+      else                           { clrs[cnt] = clrSilver; }
+      cnt++;
 
       if(r.sl > 0 && r.tp > 0)
       {
@@ -1223,7 +1247,7 @@ void AnalyzeSymbol(string symbol, SFResult &r)
    r.htfResT = 0; r.htfSupT = 0; r.ltfResT = 0; r.ltfSupT = 0;
    r.brDir = 0; r.brLevel = 0; r.brBar = 0;
    r.hsDir = 0; r.hsHead = 0; r.hsNeck = 0; r.hsNew = 0; r.hsHeadBar = 0; r.hsOld = 0;
-   r.engDir = 0; r.engTF = "";
+   r.engDir = 0; r.engTF = ""; r.engBar = -1; r.engTFused = 0;
    r.ready = false; r.reason = "WAIT - no data"; r.structure = ""; r.structDir = 0;
    r.dataDiag = ""; r.histNote = "";
    r.entry = 0; r.sl = 0; r.tp = 0; r.rr = 0;
@@ -1364,10 +1388,19 @@ void AnalyzeSymbol(string symbol, SFResult &r)
    //=== 5) Entry: engulfing candle on H1/H4 =========================
    if(InpRequireEngulfing)
    {
-      int e1 = DetectEngulfing(symbol, InpEntryTF1, InpEngulfLookback);
-      int e2 = DetectEngulfing(symbol, InpEntryTF2, InpEngulfLookback);
-      if(e1 != 0)      { r.engDir = e1; r.engTF = TFName(InpEntryTF1); }
-      else if(e2 != 0) { r.engDir = e2; r.engTF = TFName(InpEntryTF2); }
+      int e1Bar = -1, e2Bar = -1;
+      int e1 = DetectEngulfing(symbol, InpEntryTF1, InpEngulfLookback, e1Bar);
+      int e2 = DetectEngulfing(symbol, InpEntryTF2, InpEngulfLookback, e2Bar);
+      if(e1 != 0)
+      {
+         r.engDir = e1; r.engTF = TFName(InpEntryTF1);
+         r.engTFused = (int)InpEntryTF1; r.engBar = e1Bar;
+      }
+      else if(e2 != 0)
+      {
+         r.engDir = e2; r.engTF = TFName(InpEntryTF2);
+         r.engTFused = (int)InpEntryTF2; r.engBar = e2Bar;
+      }
    }
 
    //=== Verdict =====================================================
@@ -1425,8 +1458,14 @@ void AnalyzeSymbol(string symbol, SFResult &r)
 
       if(!InpBarCloseSignals || !BarAlreadyHandled(symbol, barTime))
       {
-         datetime stamp = (InpBarCloseSignals ? iTime(symbol, InpEntryTF1, 1)
-                                              : iTime(symbol, 0, 0));
+         // Stamp on the bar that actually formed the engulfing candle: the
+         // name is then unique per setup, so re-scans can never duplicate it.
+         datetime stamp = 0;
+         if(r.engBar > 0 && r.engTFused > 0)
+            stamp = iTime(symbol, (ENUM_TIMEFRAMES)r.engTFused, r.engBar);
+         if(stamp <= 0)
+            stamp = (InpBarCloseSignals ? iTime(symbol, InpEntryTF1, 1)
+                                        : iTime(symbol, 0, 0));
          SendSuggestion(r.tradeDir, symbol, r.entry, r.reason, r.structure, r.aoiInfo,
                         r.sl, r.tp, stamp);
       }
