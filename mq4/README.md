@@ -7,8 +7,8 @@ read the market, draw the 4 Fundamentals on the chart, and alert you.
 
 | File | Kind | Where it goes |
 |------|------|---------------|
-| `SetAndForget_Indicator.mq4` | **Custom indicator (v3.00)** — recommended | `MQL4/Indicators/` |
-| `SetAndForget_EA.mq4` | Expert Advisor (v2.11) | `MQL4/Experts/` |
+| `SetAndForget_Indicator.mq4` | **Custom indicator (v3.10)** — recommended | `MQL4/Indicators/` |
+| `SetAndForget_EA.mq4` | Expert Advisor (v2.20) | `MQL4/Experts/` |
 
 Both run the identical 4-Fundamentals engine and draw the same panel, zones, structure
 lines and arrows. Only the entry point differs.
@@ -33,6 +33,37 @@ lines and arrows. Only the entry point differs.
 
 Install: copy to `MQL4/Indicators/`, F7 in MetaEditor, then drag it from the Navigator
 onto the chart (double-click, or Insert ▸ Indicators ▸ Custom).
+
+## "NODATA" on HTF / LTF — what it actually means
+
+`TrendLabelEx()` returns `NODATA` in exactly three situations, and v3.10 / v2.20 print
+which one on the panel (line `History`) and once in the Experts journal:
+
+| Panel line | Meaning | Fix |
+|---|---|---|
+| `History  W1: EMA50 needs 50 bars, have 12` | Not enough history on that timeframe | Open the W1 (or D1) chart of the symbol once and let it download, or lower `Trend EMA slow` (e.g. 20), or use D1+H4 as the HTF pair |
+| `History  W1: no price yet (0 bars)` | The timeframe has no data at all (offline chart, wrong symbol, history not downloaded) | Re-attach on a normal chart; right-click ▸ Refresh on the W1 chart |
+| `History  EMA period is 0 - set Trend EMA fast/slow (e.g. 20 / 50)` | `InpHTFEMAFast` or `InpHTFEMASlow` is 0 — every timeframe reports NODATA | Set them back to 20 / 50 |
+
+The `Prices`/`Bars` line always shows the real bar count of each timeframe, so you can tell
+"no history" from "history is there but the EMA requirement is too big":
+
+```
+Bars       W1 812  D1 5210  H4 9999  H1 9999  M30 9999
+```
+
+### Why it could appear on *all five* timeframes at once
+
+That is almost always `CopyClose()` returning `-1`, which MT4 does **while it is still
+building/downloading the series of another timeframe** — typical right after attaching, on
+a fresh terminal, or after a symbol/timeframe switch. Fixed in v3.10 / v2.20:
+
+* `GetEMA()` falls back to reading closes straight from the timeseries via `iClose()` when
+  `CopyClose()` comes up short, so the trend is computed from data that is already there.
+* The scan re-runs after **3 seconds** (instead of a full `InpScanEverySeconds` interval)
+  while any timeframe is still `NODATA`.
+* Primary suspect if it persists: a zero `Trend EMA fast/slow`. `InpHTFEMATrend = 0` is the
+  only period where `0` means "off" — the fast/slow periods must be >= 1.
 
 ## v2.11 — compile fix (`'zc' - parameter conversion not allowed`)
 

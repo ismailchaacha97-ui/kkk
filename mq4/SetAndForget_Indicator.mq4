@@ -31,9 +31,11 @@
 //+------------------------------------------------------------------+
 #property copyright "DeepSeek Harness"
 #property link      ""
-#property version   "3.00"
+#property version   "3.10"
 #property strict
 #property indicator_chart_window
+#define SF_VERSION "3.10"   // engine build shown in panel + journal
+
 #property description "Set & Forget (Holy Grail) analyst: trend, AOI, structure, entry. Draws on the chart and alerts only - it cannot trade."
 
 //+------------------------------------------------------------------+
@@ -98,11 +100,12 @@ input bool            InpDebugLog = false;        // Verbose journal logging
 //| Globals                                                          |
 //+------------------------------------------------------------------+
 datetime   gLastScanTime   = 0;
-uint       gLastScanMs     = 0;   // GetTickCount() throttle (survives frozen server time)
+uint       gNextScanMs     = 0;   // GetTickCount() based next-scan time (wrap-safe)
 datetime   gLastAlertTime  = 0;
 int        gLastAlertDir   = 0;   // 1 = buy, -1 = sell, 0 = none
 string     gLastSuggestedSymbol = "";
 string     gLastSignal     = "";
+string     gLastNodata     = "";   // last reported no-data detail
 double     gLastSuggestedPrice  = 0;
 int        gPanelLines     = 0;
 
@@ -169,12 +172,31 @@ int Hist(string symbol, ENUM_TIMEFRAMES tf, int want,
 double GetEMA(string symbol, ENUM_TIMEFRAMES tf, int period, int shift)
 {
    if(period <= 0 || shift < 0) return(0);
+   int need = period + shift + 2;
+
    double buf[];
    ArraySetAsSeries(buf, true);
-   int copied = CopyClose(symbol, tf, 0, period + shift + 2, buf);
-   if(copied <= 0) return(0);
+   int copied = CopyClose(symbol, tf, 0, need, buf);
+
+   if(copied < shift + period)
+   {
+      // While the terminal builds/downloads the series of another timeframe,
+      // CopyClose() returns -1 (or fewer bars than exist). Reading the closes
+      // straight from the timeseries gets us the data that is already there,
+      // instead of leaving the panel on NODATA for minutes.
+      ArrayResize(buf, need);
+      int last = -1;
+      for(int j = 0; j < need; j++)
+      {
+         buf[j] = iClose(symbol, tf, j);
+         if(buf[j] > 0) last = j;
+      }
+      if(last + 1 < shift + period) return(0);
+      copied = last + 1;
+   }
+
    int n = (int)MathMin(copied, ArraySize(buf));
-   if(n < shift + period) return(0);           // not enough bars for this EMA
+   if(n < shift + period) return(0);           // genuinely not enough bars
 
    double k   = 2.0 / (period + 1.0);
    int    old = shift + period - 1;            // oldest bar used
@@ -187,12 +209,37 @@ double GetEMA(string symbol, ENUM_TIMEFRAMES tf, int period, int shift)
 //+------------------------------------------------------------------+
 //| Trend label: "UP" / "DOWN" / "RANGE" / "NODATA"                  |
 //+------------------------------------------------------------------+
-string TrendLabel(string symbol, ENUM_TIMEFRAMES tf)
+string TrendLabelEx(string symbol, ENUM_TIMEFRAMES tf, string &why)
 {
+   why = "";
+   if(InpHTFEMAFast <= 0 || InpHTFEMASlow <= 0)
+   {
+      why = "EMA period is 0 - set Trend EMA fast/slow (e.g. 20 / 50)";
+      return("NODATA");
+   }
+
    double price = iClose(symbol, tf, 0);
+   if(price <= 0)
+   {
+      why = StringFormat("%s: no price yet (%d bars)", TFName(tf), iBars(symbol, tf));
+      return("NODATA");
+   }
+
    double eFast = GetEMA(symbol, tf, InpHTFEMAFast, 0);
+   if(eFast == 0)
+   {
+      why = StringFormat("%s: EMA%d needs %d bars, have %d",
+                         TFName(tf), InpHTFEMAFast, InpHTFEMAFast, iBars(symbol, tf));
+      return("NODATA");
+   }
+
    double eSlow = GetEMA(symbol, tf, InpHTFEMASlow, 0);
-   if(price <= 0 || eFast == 0 || eSlow == 0) return("NODATA");
+   if(eSlow == 0)
+   {
+      why = StringFormat("%s: EMA%d needs %d bars, have %d",
+                         TFName(tf), InpHTFEMASlow, InpHTFEMASlow, iBars(symbol, tf));
+      return("NODATA");
+   }
 
    int score = 0;
    if(price > eFast) score++; else score--;
@@ -208,6 +255,12 @@ string TrendLabel(string symbol, ENUM_TIMEFRAMES tf)
    if(score >= 2)  return("UP");
    if(score <= -2) return("DOWN");
    return("RANGE");
+}
+
+string TrendLabel(string symbol, ENUM_TIMEFRAMES tf)
+{
+   string why = "";
+   return(TrendLabelEx(symbol, tf, why));
 }
 
 //+------------------------------------------------------------------+
@@ -734,6 +787,8 @@ struct SFResult
    string structure;
    int    structDir;
    int    barsHTF1, barsHTF2, barsLTF;
+   string dataDiag;           // per-TF bar counts, always shown
+   string histNote;           // why a timeframe has no data (NODATA)
 };
 
 //+------------------------------------------------------------------+
@@ -811,13 +866,23 @@ void DrawStatus(SFResult &r)
    color  clrs[14];
    int    cnt = 0;
 
-   lines[cnt] = StringFormat("SET & FORGET v3.00   %s  %s", r.sym, TFName((ENUM_TIMEFRAMES)Period()));
+   lines[cnt] = StringFormat("SET & FORGET v%s   %s  %s   %s", SF_VERSION, r.sym,
+                             TFName((ENUM_TIMEFRAMES)Period()),
+                             TimeToString(TimeCurrent(), TIME_MINUTES));
    clrs[cnt]  = clrWhite; cnt++;
 
    if(!r.ok)
    {
       lines[cnt] = "History not ready - waiting for bars / download"; clrs[cnt] = clrOrange; cnt++;
-      lines[cnt] = "Check: W1 + D1 charts open once, then re-attach"; clrs[cnt] = clrSilver; cnt++;
+      if(r.dataDiag != "")
+      {
+         lines[cnt] = "Bars       " + r.dataDiag; clrs[cnt] = clrGray; cnt++;
+      }
+      if(r.histNote != "")
+      {
+         lines[cnt] = "History    " + r.histNote; clrs[cnt] = clrOrange; cnt++;
+      }
+      lines[cnt] = "Check: open the W1 + D1 charts once, then re-attach"; clrs[cnt] = clrSilver; cnt++;
    }
    else
    {
@@ -859,11 +924,14 @@ void DrawStatus(SFResult &r)
          lines[cnt] = "Last       " + gLastSignal; clrs[cnt] = clrSilver; cnt++;
       }
 
-      lines[cnt] = StringFormat("Bars       %s:%d  %s:%d  %s:%d   (scan %s)",
-                                TFName(InpHTF1), r.barsHTF1, TFName(InpHTF2), r.barsHTF2,
-                                TFName(InpLTF2), r.barsLTF,
-                                TimeToString(TimeCurrent(), TIME_MINUTES));
+      lines[cnt] = "Bars       " + r.dataDiag;
       clrs[cnt] = clrGray; cnt++;
+
+      if(r.histNote != "")
+      {
+         lines[cnt] = "History    " + r.histNote;
+         clrs[cnt] = clrOrange; cnt++;
+      }
    }
 
    // --- Comment() fallback: always visible, even if objects fail ----
@@ -914,21 +982,23 @@ void AnalyzeSymbol(string symbol, SFResult &r)
    r.hsDir = 0; r.hsHead = 0; r.hsNeck = 0; r.hsNew = 0; r.hsHeadBar = 0; r.hsOld = 0;
    r.engDir = 0; r.engTF = "";
    r.ready = false; r.reason = "WAIT - no data"; r.structure = ""; r.structDir = 0;
+   r.dataDiag = ""; r.histNote = "";
    r.barsHTF1 = 0; r.barsHTF2 = 0; r.barsLTF = 0;
    r.tol = GetTolerance(symbol, InpAOITolPoints);
 
    //=== 1) HTF Trend: W1 + D1 must be in sync =======================
-   r.t1 = TrendLabel(symbol, InpHTF1);
-   r.t2 = TrendLabel(symbol, InpHTF2);
+   string whyHTF1 = "", whyHTF2 = "", whyL1 = "", whyL2 = "", whyL3 = "";
+   r.t1 = TrendLabelEx(symbol, InpHTF1, whyHTF1);
+   r.t2 = TrendLabelEx(symbol, InpHTF2, whyHTF2);
    r.htfSync = (r.t1 == r.t2 && (r.t1 == "UP" || r.t1 == "DOWN"));
    r.htfDir  = r.htfSync ? r.t1 : "MIXED";
    if(r.htfDir == "UP")   r.tradeDir = 1;
    if(r.htfDir == "DOWN") r.tradeDir = -1;
 
    //=== 2) LTF trend sync: min 2 of H4/H1/M30 in sync with HTF ======
-   r.l1 = TrendLabel(symbol, InpLTF1);
-   r.l2 = TrendLabel(symbol, InpLTF2);
-   r.l3 = TrendLabel(symbol, InpLTF3);
+   r.l1 = TrendLabelEx(symbol, InpLTF1, whyL1);
+   r.l2 = TrendLabelEx(symbol, InpLTF2, whyL2);
+   r.l3 = TrendLabelEx(symbol, InpLTF3, whyL3);
    if(r.htfSync)
    {
       if(r.l1 == r.htfDir) r.ltfSync++;
@@ -940,6 +1010,31 @@ void AnalyzeSymbol(string symbol, SFResult &r)
    r.barsHTF1 = iBars(symbol, InpHTF1);
    r.barsHTF2 = iBars(symbol, InpHTF2);
    r.barsLTF  = iBars(symbol, InpLTF2);
+   r.dataDiag = StringFormat("%s %d  %s %d  %s %d  %s %d  %s %d",
+                             TFName(InpHTF1), iBars(symbol, InpHTF1),
+                             TFName(InpHTF2), iBars(symbol, InpHTF2),
+                             TFName(InpLTF1), iBars(symbol, InpLTF1),
+                             TFName(InpLTF2), iBars(symbol, InpLTF2),
+                             TFName(InpLTF3), iBars(symbol, InpLTF3));
+   string whys[5];
+   whys[0] = whyHTF1; whys[1] = whyHTF2;
+   whys[2] = whyL1;   whys[3] = whyL2;   whys[4] = whyL3;
+   for(int wi = 0; wi < 5; wi++)
+   {
+      if(whys[wi] == "") continue;
+      if(StringFind(r.histNote, whys[wi]) >= 0) continue;   // no duplicates
+      if(r.histNote != "") r.histNote += "  |  ";
+      r.histNote += whys[wi];
+   }
+
+   // explain it once in the journal too (the panel can be off-screen)
+   if(r.histNote != "" && r.histNote != gLastNodata)
+   {
+      Print("[Set&Forget] ", symbol, " no-data detail: ", r.histNote,
+            "   |   bars: ", r.dataDiag);
+      gLastNodata = r.histNote;
+   }
+   if(r.histNote == "") gLastNodata = "";
    r.price    = iClose(symbol, PERIOD_H1, 0);
    if(r.price <= 0) r.price = iClose(symbol, (ENUM_TIMEFRAMES)Period(), 0);
 
@@ -1033,8 +1128,7 @@ void AnalyzeSymbol(string symbol, SFResult &r)
 
    //=== Verdict =====================================================
    if(!htfData)
-      r.reason = StringFormat("WAIT - not enough %s/%s history (need %d+ bars per TF)",
-                              TFName(InpHTF1), TFName(InpHTF2), InpHTFEMASlow);
+      r.reason = "WAIT - HTF trend unavailable: " + r.histNote;
    else if(!r.htfSync)
       r.reason = StringFormat("WAIT - HTF not in sync (%s=%s, %s=%s)",
                               TFName(InpHTF1), r.t1, TFName(InpHTF2), r.t2);
@@ -1078,10 +1172,9 @@ void ScanSymbols(bool force)
 {
    // Throttle on the terminal's millisecond clock. TimeCurrent() is the last
    // quote time and can stand still over a weekend, which used to block rescans.
-   uint nowMs   = (uint)GetTickCount();
-   uint elapsed = nowMs - gLastScanMs;          // unsigned -> wrap-safe
-   if(!force && gLastScanMs != 0 && elapsed < (uint)(InpScanEverySeconds * 1000)) return;
-   gLastScanMs = nowMs;
+   uint nowMs = (uint)GetTickCount();
+   if(!force && gNextScanMs != 0 && nowMs < gNextScanMs) return;
+   gNextScanMs = nowMs + (uint)(InpScanEverySeconds * 1000);
 
    datetime now = TimeCurrent();
    if(now <= 0) now = TimeLocal();
@@ -1105,14 +1198,20 @@ void ScanSymbols(bool force)
    AnalyzeSymbol(Symbol(), r);
    DrawAnalysis(r);
    DrawStatus(r);
+
+   // Higher timeframes may still be downloading (CopyClose returns -1 until the
+   // series is built). Do not sit on a NODATA panel for a whole scan interval.
+   if(!r.ok || r.t1 == "NODATA" || r.t2 == "NODATA" ||
+      r.l1 == "NODATA" || r.l2 == "NODATA" || r.l3 == "NODATA")
+      gNextScanMs = nowMs + 3000;
 }
 
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   IndicatorShortName("Set & Forget v3.00");
+   IndicatorShortName(StringFormat("Set & Forget v%s", SF_VERSION));
    IndicatorDigits(Digits);
-   Print("=== Set and Forget INDICATOR v3.00 (analysis only, cannot trade) ===");
+   Print(StringFormat("=== Set and Forget INDICATOR v%s (analysis only, cannot trade) ===", SF_VERSION));
    Print(StringFormat("HTF: %s + %s | LTF: %s/%s/%s | Entry: %s/%s | draw=%s panel=%s",
                       TFName(InpHTF1), TFName(InpHTF2),
                       TFName(InpLTF1), TFName(InpLTF2), TFName(InpLTF3),
@@ -1124,7 +1223,7 @@ int OnInit()
    Comment("");
 
    gLastScanTime = 0;
-   gLastScanMs   = 0;
+   gNextScanMs   = 0;
    if(InpUseTimer)
    {
       int secs = (int)MathMax(5, InpScanEverySeconds);
