@@ -7,6 +7,8 @@
 | 1 | **MAROC MARRAKECH** | `MAROC_MARRAKECH.mq4` | `validate_order_blocks.py` — 768/768 |
 | 2 | **M3K HL Sweep** (© MM33KK) | `M3K_HL_Sweep.mq4` | `validate_hl_sweep.py` — ALL MATCH |
 
+> **دليل التداول العملي للمؤشرين:** `TRADING_GUIDE.md`
+
 > انتقل إلى القسم **8) M3K HL Sweep** في الأسفل للتحويل الثاني.
 
 ---
