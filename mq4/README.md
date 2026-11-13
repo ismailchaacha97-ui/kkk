@@ -1,7 +1,38 @@
-# Set & Forget EA — v2.10 (MT4)
+# Set & Forget — MT4 indicator (v3.00) + EA (v2.11)
 
-`SetAndForget_EA.mq4` is the fixed build of the Holy Grail "Set and Forget" analyst.
-It still **never trades** — it only draws its analysis on the chart and can alert you.
+Fixed builds of the Holy Grail "Set and Forget" analyst. **Neither ever trades** — they
+read the market, draw the 4 Fundamentals on the chart, and alert you.
+
+## Two builds, same analysis
+
+| File | Kind | Where it goes |
+|------|------|---------------|
+| `SetAndForget_Indicator.mq4` | **Custom indicator (v3.00)** — recommended | `MQL4/Indicators/` |
+| `SetAndForget_EA.mq4` | Expert Advisor (v2.11) | `MQL4/Experts/` |
+
+Both run the identical 4-Fundamentals engine and draw the same panel, zones, structure
+lines and arrows. Only the entry point differs.
+
+### Indicator build (v3.00)
+
+* `#property indicator_chart_window`, **no indicator buffers** — everything is drawn with
+  chart objects, so it behaves like a normal overlay indicator.
+* `OnCalculate()` replaces `OnTick()`; `prev_calculated == 0` (first run, history refresh,
+  template reload) forces a scan, so the panel is on screen the moment you attach it.
+* `OnTimer()` still refreshes the panel when **no ticks** arrive (weekend, dead symbol,
+  disconnected terminal).
+* Throttling now uses `GetTickCount()` instead of server time: `TimeCurrent()` can stand
+  still for two days over a weekend, which used to block every rescan.
+* No AutoTrading, no "Allow live trading", no trade functions at all — it is an indicator,
+  it cannot place orders even by accident.
+* Switching symbol or timeframe re-runs `OnInit()` → `ObjectsDeleteAll(0,"SF_")` → fresh
+  redraw. Nothing stale is left on the chart.
+* `InpScanAllSymbols` in indicator mode only produces alerts for the other symbols (there
+  is no chart to draw on), and because indicators run on the GUI thread keep it **off**
+  unless you really need it.
+
+Install: copy to `MQL4/Indicators/`, F7 in MetaEditor, then drag it from the Navigator
+onto the chart (double-click, or Insert ▸ Indicators ▸ Custom).
 
 ## v2.11 — compile fix (`'zc' - parameter conversion not allowed`)
 
