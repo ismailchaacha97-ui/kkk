@@ -3,6 +3,33 @@
 `SetAndForget_EA.mq4` is the fixed build of the Holy Grail "Set and Forget" analyst.
 It still **never trades** — it only draws its analysis on the chart and can alert you.
 
+## v2.11 — compile fix (`'zc' - parameter conversion not allowed`)
+
+`zc` holds the AOI **touch counts**, so it must be `int[]`; `zl` holds zone **prices**, `double[]`.
+v2.10 declared both as `double`, and MQL4 refuses to pass a `double[]` to the `int &zc[]`
+parameter of `ClusterZones()` / `NearestZone()` (that is the 3 messages per call:
+*parameter conversion not allowed*, *variable of the same type expected*,
+*possible loss of data*).
+
+If you only want to patch the copy you already have in MetaEditor, replace the line
+
+```mq4
+double zl[], zc[];
+```
+
+with
+
+```mq4
+double zl[];   // zone price
+int    zc[];   // touch counts
+```
+
+and compile again. v2.11 also adds `(int)` casts on `MathMin()` so the
+"possible loss of data" warnings are gone.
+
+> The compiler output names the file `SetAndForget_HolyGrail_EA.mq4` — that is just your
+> renamed copy of the same source; the fix is identical.
+
 ## Why the chart was empty
 
 | # | Bug in v2.00 | What it did |

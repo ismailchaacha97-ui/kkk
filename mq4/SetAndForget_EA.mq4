@@ -11,6 +11,12 @@
 //|  3. STRUCTURE - Head & Shoulders or Break & Retest on LTF.        |
 //|  4. ENTRY     - Engulfing candle on H1/H4 + LTF trend agreement.  |
 //|                                                                  |
+//|  v2.11                                                           |
+//|    * Fixed "zc: parameter conversion not allowed": the zone touch |
+//|      counters are int[], not double[] (MQL4 refuses the implicit  |
+//|      conversion to the int&[] parameter of ClusterZones() /       |
+//|      NearestZone()).                                              |
+//|                                                                  |
 //|  v2.10 (fix release)                                             |
 //|    * Removed MQL5-only "input group" syntax (does not compile on  |
 //|      MT4 -> EA never loads -> blank chart).                       |
@@ -27,7 +33,7 @@
 //+------------------------------------------------------------------+
 #property copyright "DeepSeek Harness"
 #property link      ""
-#property version   "2.10"
+#property version   "2.11"
 #property strict
 #property description "Set & Forget signal suggester (no auto-trading). Draws trend / AOI / structure / entry status on the chart."
 
@@ -142,11 +148,11 @@ int Hist(string symbol, ENUM_TIMEFRAMES tf, int want,
 
    if(no <= 0 || nh <= 0 || nl <= 0 || nc <= 0) return(0);
 
-   int n = MathMin(MathMin(no, nh), MathMin(nl, nc));
-   n = MathMin(n, ArraySize(o));
-   n = MathMin(n, ArraySize(h));
-   n = MathMin(n, ArraySize(l));
-   n = MathMin(n, ArraySize(c));
+   int n = (int)MathMin(MathMin(no, nh), MathMin(nl, nc));
+   n = (int)MathMin(n, ArraySize(o));
+   n = (int)MathMin(n, ArraySize(h));
+   n = (int)MathMin(n, ArraySize(l));
+   n = (int)MathMin(n, ArraySize(c));
    if(n < 2) return(0);
 
    ArrayResize(o, n);
@@ -166,7 +172,7 @@ double GetEMA(string symbol, ENUM_TIMEFRAMES tf, int period, int shift)
    ArraySetAsSeries(buf, true);
    int copied = CopyClose(symbol, tf, 0, period + shift + 2, buf);
    if(copied <= 0) return(0);
-   int n = MathMin(copied, ArraySize(buf));
+   int n = (int)MathMin(copied, ArraySize(buf));
    if(n < shift + period) return(0);           // not enough bars for this EMA
 
    double k   = 2.0 / (period + 1.0);
@@ -500,7 +506,7 @@ int DetectEngulfing(string symbol, ENUM_TIMEFRAMES tf, int look)
    int n = Hist(symbol, tf, look + 2, o, h, l, c);
    if(n < 3) return(0);
 
-   int maxK = MathMin(look, n - 2);
+   int maxK = (int)MathMin(look, n - 2);
    for(int k = 1; k <= maxK; k++)   // k = 0 is the still-forming bar -> skipped
    {
       int cur = k;      // candidate (closed) candle
@@ -804,7 +810,7 @@ void DrawStatus(SFResult &r)
    color  clrs[14];
    int    cnt = 0;
 
-   lines[cnt] = StringFormat("SET & FORGET v2.10   %s  %s", r.sym, TFName((ENUM_TIMEFRAMES)Period()));
+   lines[cnt] = StringFormat("SET & FORGET v2.11   %s  %s", r.sym, TFName((ENUM_TIMEFRAMES)Period()));
    clrs[cnt]  = clrWhite; cnt++;
 
    if(!r.ok)
@@ -958,7 +964,8 @@ void AnalyzeSymbol(string symbol, SFResult &r)
    CollectSwings(symbol, InpLTF2, InpAOILookback, InpAOISwingLookback, ltfH, ltfL);
    CollectSwings(symbol, InpLTF3, InpAOILookback, InpAOISwingLookback, ltfH, ltfL);
 
-   double zl[], zc[];
+   double zl[];        // zone price   (ClusterZones/NearestZone expect double[])
+   int    zc[];        // touch counts (ClusterZones/NearestZone expect int[])
 
    if(ClusterZones(htfH, htfTol, zl, zc) > 0)
       r.htfRes = NearestZone(zl, zc, r.price, htfTol, InpAOIMinTouches, true,  r.htfResT);
@@ -1096,7 +1103,7 @@ void ScanSymbols(bool force)
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print("=== Set and Forget EA v2.10 (signal suggester only, no trading) ===");
+   Print("=== Set and Forget EA v2.11 (signal suggester only, no trading) ===");
    Print(StringFormat("HTF: %s + %s | LTF: %s/%s/%s | Entry: %s/%s | draw=%s panel=%s",
                       TFName(InpHTF1), TFName(InpHTF2),
                       TFName(InpLTF1), TFName(InpLTF2), TFName(InpLTF3),
