@@ -6,6 +6,7 @@ Two files, both self-contained.
 |---|---|
 | **`PLAYBOOK.md`** | The full field manual: setup, mechanics, level route 1→200, gear discipline, the money engine, the "standout" layer, 90-day calendar, rules/risk, checklists, glossary |
 | **`KAMA_LEDGER.md`** | The tracking sheets: daily log, HDV price sheet, gear decision log, milestones, bank rule, monthly review, content log |
+| **`PROFESSIONS.md`** | Which jobs actually earn: gathering vs crafting tier lists, the brisage money chain, what the SEO numbers are worth, the Craftsmen's Book trick, and your job progression |
 
 ## The short version
 
